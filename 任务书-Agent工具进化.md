@@ -1,7 +1,7 @@
 # 任务书：将 Multi-Agent Orchestrator 进化为实用 Agent 工具
 
-> 状态：方向规划阶段  
-> 后续输入：待学习 OpenCode 开源项目源码（已获作者许可）
+> 状态：Phase 1 CLI 版连接向导已实现，正在推进图形化配置界面  
+> 后续输入：仍可学习 OpenCode 开源项目源码（已获作者许可），但当前先从独立 UI 方案入手
 
 ---
 
@@ -213,3 +213,30 @@
 2. 学习其 Provider 连接、对话循环、工具系统实现。
 3. 输出一份具体的技术迁移计划。
 4. 从 Phase 1（连接层简化）开始逐步实现。
+
+---
+
+## 九、当前进展更新（2026-07-11）
+
+### 已落地能力
+
+- **Phase 1 CLI 版**：`python run.py agent-setup` 已实现，可引导用户配置 Provider、API Key、主模型。
+- **模型网关**：Anthropic + OpenAI 兼容 Provider、多 key 轮询、指数退避重试、计费统计已可用。
+- **Orchestrator / Dispatcher**：需求拆解、DAG 依赖调度、并发 Worker、场景感知编排（novel/software）、依赖输出注入均已实现。
+- **Worker 工具**：`write_file`、`read_file`、`run_command` 已可用；无代码块时自动兜底保存 `content.txt`。
+- **质量保障**：单元测试 122 个通过；`README.md`、`TESTING.md`、`docs/error-log.md` 已补齐。
+- **Windows 适配**：`run.py` 启动时自动设置 UTF-8，解决 emoji 输出崩溃。
+
+### 当前聚焦
+
+用户反馈**连接配置仍显繁琐且容易出错**，因此把 Phase 1 的下一步从`完善 CLI 向导`调整为`构建图形化配置 UI`，具体方案见：
+
+- `docs/模型连接配置UI工具计划书.md`
+
+### 更新后的下一步动作
+
+1. 按 `docs/模型连接配置UI工具计划书.md` 实现 FastAPI 本地配置界面 MVP。
+2. 内置常用 Provider 预设，支持一键测试连接。
+3. 在 UI 中完成模型池展示与主模型选择。
+4. 验证：UI 保存的配置能被 `python run.py "需求"` 直接使用。
+5. 之后继续 Phase 2（对话式交互改造）。
