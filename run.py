@@ -149,12 +149,16 @@ def build_review_section(review) -> str:
     return "\n".join(lines)
 
 
+def _maybe_insert_run_subcommand(argv: list[str]) -> list[str]:
+    """如果没有显式指定子命令，默认插入 run 子命令"""
+    known_commands = {"setup", "agent-setup", "run", "--help", "-h", "--version"}
+    if len(argv) > 1 and argv[1] not in known_commands:
+        argv.insert(1, "run")
+    return argv
+
+
 if __name__ == "__main__":
     import sys
 
-    # 如果没有显式指定子命令，默认执行 run 命令
-    known_commands = {"setup", "agent-setup", "--help", "-h", "--version"}
-    if len(sys.argv) > 1 and sys.argv[1] not in known_commands:
-        sys.argv.insert(1, "run")
-
+    sys.argv = _maybe_insert_run_subcommand(sys.argv)
     app()
