@@ -55,3 +55,7 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Private notes (not for GitHub)
+private/
+
