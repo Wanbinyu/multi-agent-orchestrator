@@ -19,7 +19,7 @@ class Worker:
         self.gateway = gateway
         self.workers_config = workers_config
 
-    def execute(self, task: Task, output_dir: str = "output") -> TaskResult:
+    def execute(self, task: Task, output_dir: str = "output", context: dict[str, str] | None = None) -> TaskResult:
         """执行一个子任务"""
         worker_cfg = self.workers_config.get(task.type)
         if not worker_cfg:
@@ -32,19 +32,34 @@ class Worker:
 
         system_prompt = worker_cfg.get("system_prompt", "")
         tools = worker_cfg.get("tools", ["write_file"])
+        context = context or {}
+
+        # 将 {{task_id.output}} 占位符替换为前置任务输出
+        task_input = _render_template(task.input, context)
+        task_output_format = _render_template(task.output_format, context)
+        task_acceptance = _render_template(task.acceptance, context)
 
         # 构造完整输入
         user_content = f"""任务标题：{task.title}
 
 任务描述：
-{task.input}
+{task_input}
 
 输出格式要求：
-{task.output_format or "无特殊要求"}
+{task_output_format or "无特殊要求"}
 
 验收标准：
-{task.acceptance or "无"}
+{task_acceptance or "无"}
+"""
+        if context:
+            context_lines = ["\n前置任务输出（供参考）："]
+            for dep_id, dep_content in context.items():
+                context_lines.append(f"\n--- [{dep_id}] 开始 ---")
+                context_lines.append(dep_content[:4000] if len(dep_content) > 4000 else dep_content)
+                context_lines.append(f"--- [{dep_id}] 结束 ---\n")
+            user_content += "\n".join(context_lines)
 
+        user_content += f"""
 {build_tool_instructions(tools)}
 
 请直接输出可执行的代码或结果，使用 Markdown 代码块包裹代码。"""
@@ -156,3 +171,15 @@ def load_workers_config(path: str = "config/workers.yaml") -> dict:
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return data.get("available_workers", {})
+
+
+def _render_template(text: str, context: dict[str, str]) -> str:
+    """将文本中的 {{task_id.output}} 占位符替换为前置任务输出"""
+    if not text:
+        return text
+
+    def replacer(match: re.Match) -> str:
+        task_id = match.group(1)
+        return context.get(task_id, match.group(0))
+
+    return re.sub(r"\{\{(\w+)\.output\}\}", replacer, text)

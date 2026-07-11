@@ -36,7 +36,8 @@ class Dispatcher:
             for task_id in list(remaining):
                 if is_ready(task_id):
                     remaining.remove(task_id)
-                    future = executor.submit(self.worker.execute, tasks[task_id], output_dir)
+                    context = self._build_context(tasks[task_id], completed)
+                    future = executor.submit(self.worker.execute, tasks[task_id], output_dir, context)
                     futures[future] = task_id
 
             while futures:
@@ -56,7 +57,8 @@ class Dispatcher:
                 for next_id in list(remaining):
                     if is_ready(next_id):
                         remaining.remove(next_id)
-                        futures[executor.submit(self.worker.execute, tasks[next_id], output_dir)] = next_id
+                        context = self._build_context(tasks[next_id], completed)
+                        futures[executor.submit(self.worker.execute, tasks[next_id], output_dir, context)] = next_id
 
         # 如果还有剩余任务，说明存在循环依赖或无法到达的任务
         for task_id in remaining:
@@ -74,6 +76,14 @@ class Dispatcher:
         # 按任务 id 排序返回
         results.sort(key=lambda r: r.task.id)
         return results
+
+    def _build_context(self, task: Task, completed: dict[str, TaskResult]) -> dict[str, str]:
+        """收集当前任务依赖的前置任务输出，用于 Worker 提示词渲染"""
+        context: dict[str, str] = {}
+        for dep_id in task.depends_on or []:
+            if dep_id in completed and completed[dep_id].success:
+                context[dep_id] = completed[dep_id].content
+        return context
 
     def _cascade_failure(
         self,

@@ -11,7 +11,7 @@ from src.models.schemas import ChatResponse, Task, TaskPlan, TaskResult
 def _mock_worker(results_map: dict[str, TaskResult]) -> Worker:
     worker = MagicMock(spec=Worker)
 
-    def side_effect(task: Task, output_dir: str = "output"):
+    def side_effect(task: Task, output_dir: str = "output", context: dict | None = None):
         return results_map[task.id]
 
     worker.execute = MagicMock(side_effect=side_effect)
@@ -55,8 +55,8 @@ def test_dispatch_parallel_when_no_dependencies():
 
     assert len(results) == 2
     assert all(r.success for r in results)
-    worker.execute.assert_any_call(t1, "output")
-    worker.execute.assert_any_call(t2, "output")
+    worker.execute.assert_any_call(t1, "output", {})
+    worker.execute.assert_any_call(t2, "output", {})
 
 
 def test_dispatch_respects_dependencies():
@@ -101,6 +101,22 @@ def test_dispatch_cascades_failure():
     # t2 和 t3 不应真正执行
     assert worker.execute.call_count == 1
     assert worker.execute.call_args[0][0].id == "t1"
+
+
+def test_dispatch_passes_dependency_context_to_worker():
+    t1 = Task(id="t1", type="a", title="A", input="", assigned_model="glm-ark")
+    t2 = Task(id="t2", type="b", title="B", input="基于 {{t1.output}} 继续", assigned_model="glm-ark", depends_on=["t1"])
+    plan = TaskPlan(tasks=[t1, t2])
+
+    worker = _mock_worker({"t1": _success_result(t1), "t2": _success_result(t2)})
+    dispatcher = Dispatcher(worker, max_workers=4)
+    dispatcher.dispatch(plan)
+
+    calls = worker.execute.call_args_list
+    # t1 无依赖，context 为空
+    assert calls[0].args[2] == {}
+    # t2 依赖 t1，context 应包含 t1 的输出
+    assert calls[1].args[2] == {"t1": "result of t1"}
 
 
 def test_dispatch_mixed_dependency_chains():

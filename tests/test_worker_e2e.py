@@ -129,6 +129,31 @@ print("ok")
     assert len(result.files_written) == 1
 
 
+def test_execute_substitutes_dependency_placeholders(tmp_path):
+    gateway = _mock_gateway("```python\nprint(1)\n```")
+    worker = Worker(gateway, _sample_workers_config())
+    task = Task(
+        id="t2",
+        type="frontend",
+        title="依赖任务",
+        input="基于 {{t1.output}} 继续",
+        output_format="参考 {{t1.output}} 的格式",
+        acceptance="必须包含 {{t1.output}} 的核心逻辑",
+        assigned_model="glm-ark",
+    )
+
+    worker.execute(task, output_dir=str(tmp_path / "out"), context={"t1": "第一章内容"})
+
+    call_args = gateway.chat.call_args.kwargs
+    messages = call_args["messages"]
+    user_content = messages[1].content
+    assert "基于 第一章内容 继续" in user_content
+    assert "参考 第一章内容 的格式" in user_content
+    assert "必须包含 第一章内容 的核心逻辑" in user_content
+    assert "前置任务输出" in user_content
+    assert "--- [t1] 开始 ---" in user_content
+
+
 def test_execute_passes_worker_system_prompt_to_gateway(tmp_path):
     gateway = _mock_gateway("```python\nprint(1)\n```")
     worker = Worker(gateway, _sample_workers_config())

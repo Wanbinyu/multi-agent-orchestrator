@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.core.orchestrator import Orchestrator
+from src.core.orchestrator import Orchestrator, _detect_scenario
 from src.models.schemas import ChatResponse, TaskPlan
 
 
@@ -195,3 +195,49 @@ def test_init_loads_system_prompt(tmp_path):
     orchestrator = Orchestrator(gateway, config_path=str(config_path))
 
     assert orchestrator.system_prompt == "你是专家"
+
+
+def test_detect_scenario_novel():
+    assert _detect_scenario("帮我写一篇仙侠小说") == "novel"
+    assert _detect_scenario("吸血鬼虐恋故事") == "novel"
+
+
+def test_detect_scenario_software():
+    assert _detect_scenario("开发一个前后端登录系统") == "software"
+    assert _detect_scenario("做一个网站，有注册功能") == "software"
+
+
+def test_detect_scenario_default_novel_when_ambiguous():
+    assert _detect_scenario("随便做点什么") == "novel"
+
+
+def test_plan_appends_scenario_instruction(tmp_path):
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text("orchestrator:\n  model: glm-ark\n  system_prompt: base\n", encoding="utf-8")
+
+    gateway = _mock_gateway('{"summary": "", "tasks": []}')
+    orchestrator = Orchestrator(gateway, config_path=str(config_path))
+    orchestrator.plan("帮我写一篇仙侠小说")
+
+    call_kwargs = gateway.chat.call_args.kwargs
+    messages = call_kwargs["messages"]
+    system_content = messages[0].content
+    assert "base" in system_content
+    assert "小说创作任务编排规则" in system_content
+    assert "章节必须顺序创作" in system_content
+
+
+def test_plan_appends_software_instruction(tmp_path):
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text("orchestrator:\n  model: glm-ark\n  system_prompt: base\n", encoding="utf-8")
+
+    gateway = _mock_gateway('{"summary": "", "tasks": []}')
+    orchestrator = Orchestrator(gateway, config_path=str(config_path))
+    orchestrator.plan("开发一个登录功能")
+
+    call_kwargs = gateway.chat.call_args.kwargs
+    messages = call_kwargs["messages"]
+    system_content = messages[0].content
+    assert "base" in system_content
+    assert "软件开发任务编排规则" in system_content
+    assert "架构/接口文档" in system_content
