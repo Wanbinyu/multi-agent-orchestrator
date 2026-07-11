@@ -1,6 +1,6 @@
 # 任务书：将 Multi-Agent Orchestrator 进化为实用 Agent 工具
 
-> 状态：Phase 1 CLI 版连接向导已实现，正在推进图形化配置界面  
+> 状态：Phase 1 图形化配置 UI（Stage 1）已实现，准备进入 Stage 2 预设模板完善与主模型选择  
 > 后续输入：仍可学习 OpenCode 开源项目源码（已获作者许可），但当前先从独立 UI 方案入手
 
 ---
@@ -224,19 +224,23 @@
 - **模型网关**：Anthropic + OpenAI 兼容 Provider、多 key 轮询、指数退避重试、计费统计已可用。
 - **Orchestrator / Dispatcher**：需求拆解、DAG 依赖调度、并发 Worker、场景感知编排（novel/software）、依赖输出注入均已实现。
 - **Worker 工具**：`write_file`、`read_file`、`run_command` 已可用；无代码块时自动兜底保存 `content.txt`。
-- **质量保障**：单元测试 122 个通过；`README.md`、`TESTING.md`、`docs/error-log.md` 已补齐。
+- **质量保障**：单元测试 **134** 个通过（新增 12 个 UI 接口测试）；`README.md`、`TESTING.md`、`docs/error-log.md` 已补齐。
 - **Windows 适配**：`run.py` 启动时自动设置 UTF-8，解决 emoji 输出崩溃。
 
 ### 当前聚焦
 
-用户反馈**连接配置仍显繁琐且容易出错**，因此把 Phase 1 的下一步从`完善 CLI 向导`调整为`构建图形化配置 UI`，具体方案见：
+用户反馈**连接配置仍显繁琐且容易出错**，因此已完成 Phase 1 Stage 1：
 
-- `docs/模型连接配置UI工具计划书.md`
+- 基于 FastAPI + Jinja2 + Vanilla JS 的本地配置 UI。
+- 一键启动：`python scripts/run_ui.py`（自动打开浏览器）。
+- 内置常用 Provider 预设（Anthropic / OpenAI / 火山方舟 / Kimi / 智谱 GLM / DeepSeek / 自定义）。
+- 支持添加/编辑/删除 Provider、连通性测试、模型映射、主模型选择。
+- 配置同时写入 `config/providers.yaml` 与 `.env`，CLI 与 UI 双向兼容。
+- 详见 `docs/模型连接配置UI工具计划书.md` Stage 1 验收标准。
 
 ### 更新后的下一步动作
 
-1. 按 `docs/模型连接配置UI工具计划书.md` 实现 FastAPI 本地配置界面 MVP。
-2. 内置常用 Provider 预设，支持一键测试连接。
-3. 在 UI 中完成模型池展示与主模型选择。
-4. 验证：UI 保存的配置能被 `python run.py "需求"` 直接使用。
-5. 之后继续 Phase 2（对话式交互改造）。
+1. Stage 2：完善预设模板自动填充、模型池展示、Provider 启用/禁用。
+2. Stage 3：表单校验、API Key 掩码、错误本地化、README 使用说明。
+3. 验证：UI 保存的配置能被 `python run.py "需求"` 直接调用主模型跑通端到端。
+4. 之后继续 Phase 2（对话式交互改造）。

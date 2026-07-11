@@ -212,11 +212,13 @@ FastAPI 后端
 
 ### Stage 1：最小可用 UI（MVP）
 
-1. 搭建 FastAPI 骨架，渲染 `index.html`。
-2. 实现 Provider 列表读取 API（从 `providers.yaml`）。
-3. 实现前端表单：名称、协议、Base URL、API Key、模型映射。
-4. 实现`保存`按钮，写回 `providers.yaml` 和 `.env`。
-5. 实现`测试连接`按钮，调用后端最小请求验证。
+状态：**已完成（2026-07-11）**
+
+1. ✅ 搭建 FastAPI 骨架，渲染 `index.html`。
+2. ✅ 实现 Provider 列表读取 API（从 `providers.yaml`）。
+3. ✅ 实现前端表单：名称、协议、Base URL、API Key、模型映射。
+4. ✅ 实现`保存`按钮，写回 `providers.yaml` 和 `.env`。
+5. ✅ 实现`测试连接`按钮，调用后端最小请求验证。
 
 验收标准：
 
