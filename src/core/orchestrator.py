@@ -35,7 +35,12 @@ def _detect_scenario(user_request: str) -> str:
     """根据用户需求关键词检测场景类型"""
     text = user_request.lower()
     novel_keywords = ["小说", "故事", "章节", "人物", "剧情", "大纲", "仙侠", "玄幻", "言情", "虐恋", "吸血鬼"]
-    software_keywords = ["开发", "系统", "功能", "前端", "后端", "api", "接口", "页面", "网站", "app", "登录", "注册"]
+    software_keywords = [
+        "开发", "系统", "功能", "前端", "后端", "api", "接口", "页面", "网站", "app",
+        "登录", "注册", "程序", "代码", "软件", "脚本", "python", "java", "javascript",
+        "js", "ts", "typescript", "html", "css", "sql", "react", "vue", "fastapi",
+        "flask", "django", "spring", "node", "实现", "搭建", "构建", "部署",
+    ]
 
     novel_score = sum(1 for kw in novel_keywords if kw in text)
     software_score = sum(1 for kw in software_keywords if kw in text)

@@ -8,7 +8,7 @@ import yaml
 
 from src.gateway.client import GatewayClient
 from src.models.schemas import ChatMessage, Task, TaskResult
-from src.tools.file_tools import write_output_files
+from src.tools.file_tools import write_output_files, write_text_file
 from src.tools.worker_tools import execute_tool_call
 
 
@@ -88,6 +88,10 @@ class Worker:
 
             # 写入代码块到文件
             files_written = write_output_files(content, task_output_dir)
+
+            # 兜底：如果没有解析到代码块，把完整响应内容保存为 content.txt
+            if not files_written and content.strip():
+                files_written.append(write_text_file("content.txt", content, task_output_dir))
 
             return TaskResult(
                 task=task,

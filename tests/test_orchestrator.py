@@ -207,8 +207,10 @@ def test_detect_scenario_software():
     assert _detect_scenario("做一个网站，有注册功能") == "software"
 
 
-def test_detect_scenario_default_novel_when_ambiguous():
-    assert _detect_scenario("随便做点什么") == "novel"
+def test_detect_scenario_programming_request():
+    assert _detect_scenario("写一个Hello World Python程序") == "software"
+    assert _detect_scenario("用React做个登录页面") == "software"
+    assert _detect_scenario("帮我部署一个FastAPI后端") == "software"
 
 
 def test_plan_appends_scenario_instruction(tmp_path):

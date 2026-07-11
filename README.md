@@ -146,6 +146,8 @@ Worker 在执行任务时可以使用以下工具：
 
 工具调用通过模型输出中的 ```` ```tool:xxx ```` 代码块触发，执行结果会嵌入到最终 content 中。
 
+如果 Worker 响应中没有 Markdown 代码块，会自动把完整内容保存为 `output/<type>_<id>/content.txt`。
+
 ## 当前支持的模型
 
 - **Anthropic**: Fable 5 / Sonnet 5 / Haiku 4.5
@@ -171,6 +173,8 @@ Worker 在执行任务时可以使用以下工具：
 - [x] 多 key 轮询
 - [x] Token 计费和成本统计
 - [x] 失败重试与指数退避
+- [x] Windows 控制台 UTF-8 自动适配
+- [x] 无 Markdown 代码块时自动保存 `content.txt`
 
 ## 运行测试
 

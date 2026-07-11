@@ -2,7 +2,16 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+# Windows 默认控制台编码（如 GBK）无法输出 emoji，先强制使用 UTF-8
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 import typer
 from dotenv import load_dotenv

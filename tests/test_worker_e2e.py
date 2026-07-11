@@ -173,19 +173,22 @@ def test_execute_passes_worker_system_prompt_to_gateway(tmp_path):
     assert messages[0].content == "你是前端专家"
 
 
-def test_execute_passes_assigned_model_to_gateway(tmp_path):
-    gateway = _mock_gateway("```python\nprint(1)\n```")
+def test_execute_saves_plain_text_as_content_file_when_no_code_blocks(tmp_path):
+    gateway = _mock_gateway("这是一段没有代码块的普通正文内容。")
     worker = Worker(gateway, _sample_workers_config())
     task = Task(
         id="t1",
         type="frontend",
-        title="简单任务",
-        input="写代码",
-        assigned_model="claude-sonnet-5",
+        title="纯文本任务",
+        input="输出一段文字",
+        assigned_model="glm-ark",
     )
+    output_dir = tmp_path / "out"
 
-    worker.execute(task, output_dir=str(tmp_path / "out"))
+    result = worker.execute(task, output_dir=str(output_dir))
 
-    call_args = gateway.chat.call_args.kwargs
-    assert call_args["model_name"] == "claude-sonnet-5"
-    assert call_args["task_id"] == "t1"
+    assert result.success is True
+    assert len(result.files_written) == 1
+    content_path = output_dir / "frontend_t1" / "content.txt"
+    assert content_path.exists()
+    assert content_path.read_text(encoding="utf-8") == "这是一段没有代码块的普通正文内容。"
