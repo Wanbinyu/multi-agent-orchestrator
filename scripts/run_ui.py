@@ -6,6 +6,14 @@ import sys
 import webbrowser
 from pathlib import Path
 
+# Windows 控制台默认 GBK，打印 emoji 会崩溃，先切换到 UTF-8
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 # 当从 scripts/ 目录直接运行时，把项目根目录加入 sys.path
 _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
