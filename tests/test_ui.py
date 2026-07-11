@@ -48,7 +48,11 @@ class TestPresets:
         assert "anthropic" in keys
         assert "openai" in keys
         assert "ark" in keys
-        assert "custom_openai" in keys
+        assert "custom-openai" in keys
+        assert "custom-anthropic" in keys
+        assert "kimi" in keys
+        assert "deepseek" in keys
+        assert "zhipu-glm" in keys
 
     def test_get_preset_detail(self, client):
         res = client.get("/api/presets/openai")
