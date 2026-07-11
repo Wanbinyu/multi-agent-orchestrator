@@ -2,7 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import webbrowser
+from pathlib import Path
+
+# 当从 scripts/ 目录直接运行时，把项目根目录加入 sys.path
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 import uvicorn
 
