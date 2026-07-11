@@ -1,6 +1,11 @@
 # 多模型 Agent 编排工具 —— CLI MVP
 
-一个**总工模型 + 多外部模型并发协作**的命令行原型工具。用户用一句中文描述需求，Orchestrator 自动拆分为带依赖关系的子任务，多个 Worker 并行执行，Reviewer 最终整合并验收。
+一个**总工模型 + 多外部模型并发协作**的命令行原型工具。目标：解决所有问题都用好用且贵的模型导致token消耗过快的问题，总工用贵模型，其他的分工可以连接便宜但是听话的模型。并且现在很多模型的优势并不相同，未来差异可能更大（也可能更小），如果模型差异化更大那就可以让每个擅长不同工作和方向的模型相互配合，发挥它们各自最大的作用。
+主要目的就是为了省token。
+
+A **Chief Engineer Model + Multi-External Model Concurrent Collaboration** command-line prototype tool. **Goal**: Solve the problem of excessive token consumption caused by using only good but expensive models for all tasks. The Chief Engineer uses the expensive model, while other divisions can connect to cheaper but obedient models. Moreover, different models currently have distinct advantages, and future differences may become even greater (or smaller). If model differentiation increases further, each model can be assigned to tasks and directions it excels at, maximizing their individual strengths.
+
+**Primary purpose**: Save tokens.
 
 ## 目录结构
 
