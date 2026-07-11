@@ -448,6 +448,520 @@ CCswitch 把代理层错误统一映射为 HTTP 状态码：
 | `src/config/universalProviderPresets.ts` | 通用网关预设（NewAPI 等） |
 | `src-tauri/src/config.rs` / `provider_defaults.rs` | 配置读取与默认值 |
 
+## 十一、Provider 预设配置文件摘录（来自 GitHub 源码）
+
+> 以下数据从 `https://github.com/farion1231/cc-switch` 的 `src/config/` 目录下载并解析。
+> 字段说明：
+> - **apiFormat**：上游协议格式，空表示由目标应用决定（Claude 默认 anthropic，Codex 默认 openai_responses，Gemini 默认 gemini_native）。
+> - **Base URL**：实际请求地址，优先从 `baseURL` / `env.*_BASE_URL` 提取，否则留空。
+> - **默认模型**：从 `model` / `env.*_MODEL` 提取的默认模型名。
+
+### codingPlanProviders.ts（Coding Plan 路由检测规则）
+
+| id | label | base_url 匹配正则 |
+|---|---|---|
+| kimi |  | （见源码正则） |
+| zhipu |  | （见源码正则） |
+| zhipu_team |  | （见源码正则） |
+| minimax |  | （见源码正则） |
+| zenmux |  | （见源码正则） |
+| volcengine |  | （见源码正则） |
+
+### universalProviderPresets.ts（统一网关预设）
+
+该文件定义**统一供应商（Universal Provider）**，典型如 NewAPI 等聚合网关。
+一份配置会同时生成 Claude / Codex / Gemini 三份输出：
+
+| 应用 | 默认模型示例 |
+|---|---|
+| Claude | claude-sonnet-5 / claude-opus-4-8 / claude-haiku-4-5 |
+| Codex | gpt-5.5（reasoning_effort: high） |
+| Gemini | gemini-3.5-flash |
+
+### claudeProviderPresets.ts（Claude Code Provider 预设，共 70 条）
+
+<details>
+<summary>点击展开 claudeProviderPresets.ts 完整预设表</summary>
+
+| 名称 | 分类 | apiFormat | Base URL | 默认模型 | endpointCandidates | templateValues |
+|---|---|---|---|---|---|---|
+| Claude Official | official |  |  |  |  |  |
+| Shengsuanyun | aggregator |  | https://router.shengsuanyun.com/api | anthropic/claude-sonnet-5 |  |  |
+| PatewayAI | third_party |  | https://api.pateway.ai |  |  |  |
+| 火山Agentplan | cn_official |  | https://ark.cn-beijing.volces.com/api/coding | ark-code-latest |  |  |
+| BytePlus | cn_official |  | https://ark.ap-southeast.bytepluses.com/api/coding | ark-code-latest |  |  |
+| DouBaoSeed | cn_official |  | https://ark.cn-beijing.volces.com/api/compatible | doubao-seed-2-1-pro-260628 |  |  |
+| CCSub | aggregator |  | https://www.ccsub.net |  |  |  |
+| SubRouter | aggregator |  | https://subrouter.ai |  |  |  |
+| Unity2.ai | aggregator |  | https://api.unity2.ai |  |  |  |
+| Qiniu | aggregator |  | https://api.qnaigc.com | Pro/MiniMaxAI/MiniMax-M2.7 | https://api.qnaigc.com<br>https://api.modelink.ai |  |
+| FennoAI | aggregator |  | https://api.fenno.ai |  |  |  |
+| ZetaAPI | aggregator |  | https://api.zetaapi.ai |  |  |  |
+| TeamoRouter | aggregator |  | https://api.teamorouter.com |  |  |  |
+| Amux | aggregator |  | https://api.amux.ai |  |  |  |
+| Gemini Native | third_party | gemini_native | https://generativelanguage.googleapis.com | gemini-3.5-flash | https://generativelanguage.googleapis.com |  |
+| DeepSeek | cn_official |  | https://api.deepseek.com/models | deepseek-v4-pro |  |  |
+| OpenCode Go | third_party | openai_chat | https://opencode.ai/zen/go | deepseek-v4-flash | https://opencode.ai/zen/go |  |
+| Zhipu GLM | cn_official |  | https://open.bigmodel.cn/api/anthropic | glm-5.1 |  |  |
+| Zhipu GLM en | cn_official |  | https://api.z.ai/api/anthropic | glm-5.1 |  |  |
+| Baidu Qianfan Coding Plan | cn_official |  | https://qianfan.baidubce.com/anthropic/coding | qianfan-code-latest | https://qianfan.baidubce.com/anthropic/coding |  |
+| Bailian | cn_official |  | https://dashscope.aliyuncs.com/apps/anthropic |  |  |  |
+| Bailian For Coding | cn_official |  | https://coding.dashscope.aliyuncs.com/apps/anthropic |  |  |  |
+| Kimi | cn_official |  | https://api.moonshot.cn/anthropic | kimi-k2.7-code |  |  |
+| Kimi For Coding | cn_official |  | https://api.kimi.com/coding/ |  |  |  |
+| StepFun | cn_official |  | https://api.stepfun.com/step_plan | step-3.5-flash-2603 | https://api.stepfun.com/step_plan |  |
+| StepFun en | cn_official |  | https://api.stepfun.ai/step_plan | step-3.5-flash-2603 | https://api.stepfun.ai/step_plan |  |
+| ModelScope | aggregator |  | https://api-inference.modelscope.cn | ZhipuAI/GLM-5.1 |  |  |
+| KAT-Coder | cn_official |  |  |  |  |  |
+| Longcat | cn_official |  | https://api.longcat.chat/anthropic | LongCat-2.0 |  |  |
+| MiniMax | cn_official |  | https://api.minimaxi.com/anthropic | MiniMax-M2.7 |  |  |
+| MiniMax en | cn_official |  | https://api.minimax.io/anthropic | MiniMax-M2.7 |  |  |
+| BaiLing | cn_official |  | https://api.tbox.cn/api/anthropic | Ling-2.5-1T |  |  |
+| AiHubMix | aggregator |  | https://aihubmix.com |  | https://aihubmix.com<br>https://api.aihubmix.com |  |
+| CherryIN | aggregator |  | https://open.cherryin.net | anthropic/claude-sonnet-5 | https://open.cherryin.net |  |
+| SiliconFlow | aggregator |  | https://api.siliconflow.cn | Pro/MiniMaxAI/MiniMax-M2.7 |  |  |
+| SiliconFlow en | aggregator |  | https://api.siliconflow.com | MiniMaxAI/MiniMax-M2.7 |  |  |
+| DMXAPI | aggregator |  | https://www.dmxapi.cn |  | https://www.dmxapi.cn<br>https://api.dmxapi.cn |  |
+| PackyCode | third_party |  | https://www.packyapi.com |  | https://www.packyapi.com<br>https://api-slb.packyapi.com |  |
+| APIKEY.FUN | third_party |  | https://api.apikey.fun |  | https://api.apikey.fun<br>https://slb.apikey.fun |  |
+| APINebula | third_party |  | https://apinebula.com |  | https://apinebula.com |  |
+| AtlasCloud | aggregator |  | https://api.atlascloud.ai | zai-org/glm-5.1 | https://api.atlascloud.ai |  |
+| SudoCode | third_party |  | https://sudocode.us |  | https://sudocode.us<br>https://sudocode.run |  |
+| ClaudeAPI | aggregator |  | https://gw.claudeapi.com |  |  |  |
+| Code0 | aggregator |  | https://code0.ai |  |  |  |
+| NekoCode | aggregator |  | https://nekocode.ai |  |  |  |
+| ClaudeCN | third_party |  | https://claudecn.top |  |  |  |
+| RunAPI | aggregator |  | https://runapi.co |  |  |  |
+| RelaxyCode | third_party |  | https://www.relaxycode.com |  |  |  |
+| Cubence | third_party |  | https://api.cubence.com |  | https://api.cubence.com<br>https://api-cf.cubence.com<br>https://api-dmit.cubence.com<br>https://api-bwg.cubence.com |  |
+| AIGoCode | third_party |  | https://api.aigocode.com |  | https://api.aigocode.com |  |
+| RightCode | third_party |  | https://www.right.codes/claude |  |  |  |
+| AICodeMirror | third_party |  | https://api.aicodemirror.com/api/claudecode |  | https://api.aicodemirror.com/api/claudecode<br>https://api.claudecode.net.cn/api/claudecode |  |
+| CrazyRouter | third_party |  | https://cn.crazyrouter.com |  | https://cn.crazyrouter.com |  |
+| SSSAiCode | third_party |  | https://node-hk.sssaicodeapi.com/api |  | https://node-hk.sssaicodeapi.com/api<br>https://node-hk.sssaiapi.com/api<br>https://node-cf.sssaicodeapi.com/api |  |
+| Compshare | aggregator |  | https://api.modelverse.cn |  | https://api.modelverse.cn |  |
+| Compshare Coding Plan | aggregator |  | https://cp.compshare.cn |  | https://cp.compshare.cn |  |
+| Micu | third_party |  | https://www.micuapi.ai |  | https://www.micuapi.ai |  |
+| ETok.ai | third_party |  | https://api.etok.ai |  |  |  |
+| E-FlowCode | third_party |  | https://e-flowcode.cc |  | https://e-flowcode.cc |  |
+| OpenRouter | aggregator |  | https://openrouter.ai/api | anthropic/claude-sonnet-5 |  |  |
+| TheRouter | aggregator |  | https://api.therouter.ai | anthropic/claude-sonnet-5 | https://api.therouter.ai |  |
+| Novita AI | aggregator |  | https://api.novita.ai/anthropic | zai-org/glm-5.1 | https://api.novita.ai/anthropic |  |
+| GitHub Copilot | third_party | openai_chat | https://api.githubcopilot.com | claude-sonnet-5 |  |  |
+| Codex | third_party | openai_responses | https://chatgpt.com/backend-api/codex | gpt-5.5 |  |  |
+| Nvidia | aggregator | openai_chat | https://integrate.api.nvidia.com | moonshotai/kimi-k2.5 |  |  |
+| PIPELLM | aggregator |  | https://cc-api.pipellm.ai | claude-opus-4-8 |  |  |
+| Xiaomi MiMo | cn_official |  | https://api.xiaomimimo.com/anthropic | mimo-v2.5-pro |  |  |
+| Xiaomi MiMo Token Plan (China) | cn_official |  | https://token-plan-cn.xiaomimimo.com/anthropic | mimo-v2.5-pro |  |  |
+| AWS Bedrock (AKSK) | cloud_provider |  |  |  |  |  |
+| AWS Bedrock (API Key) | cloud_provider |  |  |  |  |  |
+
+</details>
+
+### codexProviderPresets.ts（Codex Provider 预设，共 63 条）
+
+<details>
+<summary>点击展开 codexProviderPresets.ts 完整预设表</summary>
+
+| 名称 | 分类 | apiFormat | Base URL | 默认模型 | endpointCandidates | templateValues |
+|---|---|---|---|---|---|---|
+| OpenAI Official | official |  |  |  |  |  |
+| Shengsuanyun | aggregator |  |  |  | https://api.pateway.ai/v1 |  |
+| PatewayAI | third_party |  |  |  | https://api.pateway.ai/v1 |  |
+| 火山Agentplan | cn_official | openai_chat |  | ark-code-latest | https://ark.cn-beijing.volces.com/api/coding/v3 |  |
+| BytePlus | cn_official | openai_chat |  | ark-code-latest | https://ark.ap-southeast.bytepluses.com/api/coding/v3 |  |
+| DouBaoSeed | cn_official | openai_responses |  | doubao-seed-2-1-pro-260628 | https://ark.cn-beijing.volces.com/api/v3 |  |
+| CCSub | aggregator |  |  |  | https://www.ccsub.net/v1 |  |
+| SubRouter | aggregator |  |  |  | https://subrouter.ai/v1 |  |
+| Unity2.ai | aggregator |  |  |  | https://api.unity2.ai |  |
+| Qiniu | aggregator |  |  |  | https://api.qnaigc.com/bypass/openai/v1<br>https://api.modelink.ai/bypass/openai/v1 |  |
+| FennoAI | aggregator |  |  |  | https://api.fenno.ai |  |
+| ZetaAPI | aggregator |  |  |  | https://api.zetaapi.ai/v1 |  |
+| TeamoRouter | aggregator |  |  |  | https://api.teamorouter.com/v1 |  |
+| Amux | aggregator |  |  |  | https://api.amux.ai/v1 |  |
+| Code0 | aggregator |  |  |  | https://code0.ai/v1 |  |
+| NekoCode | aggregator |  |  |  | https://nekocode.ai/v1 |  |
+| Azure OpenAI | third_party |  |  |  | https://YOUR_RESOURCE_NAME.openai.azure.com/openai |  |
+| DeepSeek | cn_official | openai_chat |  | deepseek-v4-flash | https://api.deepseek.com |  |
+| Zhipu GLM | cn_official | openai_chat |  | glm-5.2 | https://open.bigmodel.cn/api/coding/paas/v4 |  |
+| Zhipu GLM en | cn_official | openai_chat |  | glm-5.2 | https://api.z.ai/api/coding/paas/v4 |  |
+| Baidu Qianfan Coding Plan | cn_official | openai_chat |  | qianfan-code-latest | https://qianfan.baidubce.com/v2/coding |  |
+| Bailian | cn_official | openai_responses |  | qwen3-coder-plus | https://dashscope.aliyuncs.com/compatible-mode/v1 |  |
+| Kimi | cn_official | openai_chat |  | kimi-k2.7-code | https://api.moonshot.cn/v1 |  |
+| Kimi For Coding | cn_official | openai_chat |  | kimi-for-coding | https://api.kimi.com/coding/v1 |  |
+| StepFun | cn_official | openai_chat |  | step-3.7-flash | https://api.stepfun.com/step_plan/v1 |  |
+| StepFun en | cn_official | openai_chat |  | step-3.7-flash | https://api.stepfun.ai/step_plan/v1 |  |
+| ModelScope | aggregator | openai_chat |  | ZhipuAI/GLM-5.1 | https://api-inference.modelscope.cn/v1 |  |
+| Longcat | cn_official | openai_responses |  | LongCat-2.0 | https://api.longcat.chat/openai/v1 |  |
+| MiniMax | cn_official | openai_responses |  | MiniMax-M3 | https://api.minimaxi.com/v1 |  |
+| MiniMax en | cn_official | openai_responses |  | MiniMax-M3 | https://api.minimax.io/v1 |  |
+| BaiLing | cn_official | openai_chat |  | Ling-2.6-1T | https://api.tbox.cn/api/llm/v1 |  |
+| Xiaomi MiMo | cn_official | openai_responses |  | mimo-v2.5-pro | https://api.xiaomimimo.com/v1 |  |
+| Xiaomi MiMo Token Plan (China) | cn_official | openai_responses |  | mimo-v2.5-pro | https://token-plan-cn.xiaomimimo.com/v1 |  |
+| SiliconFlow | aggregator | openai_chat |  | Pro/MiniMaxAI/MiniMax-M2.7 | https://api.siliconflow.cn/v1 |  |
+| SiliconFlow en | aggregator | openai_chat |  | MiniMaxAI/MiniMax-M2.7 | https://api.siliconflow.com/v1 |  |
+| Novita AI | aggregator | openai_chat |  | zai-org/glm-5.1 | https://api.novita.ai/openai/v1 |  |
+| Nvidia | aggregator | openai_chat |  | moonshotai/kimi-k2.5 | https://integrate.api.nvidia.com/v1 |  |
+| OpenCode Go | third_party | openai_chat |  | glm-5.2 | https://opencode.ai/zen/go/v1 |  |
+| AiHubMix | aggregator |  |  |  | https://aihubmix.com/v1<br>https://api.aihubmix.com/v1 |  |
+| CherryIN | aggregator |  |  |  | https://open.cherryin.net/v1 |  |
+| DMXAPI | aggregator |  |  |  | https://www.dmxapi.cn/v1 |  |
+| PackyCode | third_party |  |  |  | https://www.packyapi.com/v1<br>https://api-slb.packyapi.com/v1 |  |
+| APIKEY.FUN | third_party | openai_responses |  |  | https://api.apikey.fun/v1<br>https://slb.apikey.fun/v1 |  |
+| APINebula | third_party | openai_responses |  |  | https://apinebula.com/v1 |  |
+| AtlasCloud | aggregator | openai_chat |  | zai-org/glm-5.1 | https://api.atlascloud.ai/v1 |  |
+| SudoCode | third_party | openai_responses |  |  | https://sudocode.us/v1<br>https://sudocode.run/v1 |  |
+| ClaudeCN | third_party |  |  |  |  |  |
+| RunAPI | aggregator |  |  |  |  |  |
+| RelaxyCode | third_party |  |  |  |  |  |
+| Cubence | third_party |  |  |  | https://api.cubence.com/v1<br>https://api-cf.cubence.com/v1<br>https://api-dmit.cubence.com/v1<br>https://api-bwg.cubence.com/v1 |  |
+| AIGoCode | third_party |  |  |  | https://api.aigocode.com |  |
+| RightCode | third_party |  |  |  |  |  |
+| AICodeMirror |  |  |  |  | https://api.aicodemirror.com/api/codex/backend-api/codex<br>https://api.claudecode.net.cn/api/codex/backend-api/codex |  |
+| CrazyRouter |  |  |  |  | https://cn.crazyrouter.com/v1 |  |
+| SSSAiCode | third_party |  |  |  | https://node-hk.sssaicodeapi.com/api/v1<br>https://node-hk.sssaiapi.com/api/v1<br>https://node-cf.sssaicodeapi.com/api/v1 |  |
+| Compshare | aggregator |  |  |  | https://api.modelverse.cn/v1 |  |
+| Compshare Coding Plan | aggregator |  |  |  | https://cp.compshare.cn/v1 |  |
+| Micu | third_party |  |  |  | https://www.micuapi.ai/v1 |  |
+| ETok.ai | third_party |  |  |  | https://api.etok.ai/v1 |  |
+| E-FlowCode | third_party |  |  |  | https://e-flowcode.cc/v1 |  |
+| OpenRouter | aggregator |  |  |  |  |  |
+| TheRouter | aggregator |  |  |  | https://api.therouter.ai/v1 |  |
+
+</details>
+
+### geminiProviderPresets.ts（Gemini CLI Provider 预设，共 21 条）
+
+<details>
+<summary>点击展开 geminiProviderPresets.ts 完整预设表</summary>
+
+| 名称 | 分类 | apiFormat | Base URL | 默认模型 | endpointCandidates | templateValues |
+|---|---|---|---|---|---|---|
+| Google Official | official |  |  |  |  |  |
+| Shengsuanyun | aggregator |  | https://router.shengsuanyun.com/api | google/gemini-3.5-flash |  |  |
+| Unity2.ai | aggregator |  | https://api.unity2.ai | gemini-3.1-pro |  |  |
+| SubRouter | aggregator |  | https://subrouter.ai/v1beta | gemini-3.5-flash | https://subrouter.ai/v1beta |  |
+| Qiniu | aggregator |  | https://api.qnaigc.com/bypass/vertex | gemini-3.1-pro-preview | https://api.qnaigc.com/bypass/vertex<br>https://api.modelink.ai/bypass/vertex |  |
+| Code0 | aggregator |  | https://code0.ai | gemini-3.1-pro-preview |  |  |
+| PackyCode | third_party |  | https://www.packyapi.com | gemini-3.5-flash | https://api-slb.packyapi.com<br>https://www.packyapi.com |  |
+| APIKEY.FUN | third_party |  | https://api.apikey.fun | gemini-3.5-flash | https://api.apikey.fun<br>https://slb.apikey.fun |  |
+| APINebula | third_party |  | https://apinebula.com | gemini-3.5-flash | https://apinebula.com |  |
+| SudoCode | third_party |  | https://sudocode.us | gemini-3.1-flash-lite | https://sudocode.us<br>https://sudocode.run |  |
+| Cubence | third_party |  | https://api.cubence.com | gemini-3.5-flash | https://api.cubence.com/v1<br>https://api-cf.cubence.com/v1<br>https://api-dmit.cubence.com/v1<br>https://api-bwg.cubence.com/v1 |  |
+| AIGoCode | third_party |  | https://api.aigocode.com | gemini-3.5-flash | https://api.aigocode.com |  |
+| AICodeMirror | third_party |  | https://api.aicodemirror.com/api/gemini | gemini-3.5-flash | https://api.aicodemirror.com/api/gemini<br>https://api.claudecode.net.cn/api/gemini |  |
+| CrazyRouter | third_party |  | https://cn.crazyrouter.com | gemini-3.5-flash | https://cn.crazyrouter.com |  |
+| SSSAiCode | third_party |  | https://node-hk.sssaicodeapi.com/api | gemini-3.5-flash | https://node-hk.sssaicodeapi.com/api<br>https://node-hk.sssaiapi.com/api<br>https://node-cf.sssaicodeapi.com/api |  |
+| ETok.ai | third_party |  | https://api.etok.ai/v1beta | gemini-3.5-flash | https://api.etok.ai/v1beta |  |
+| E-FlowCode | third_party |  | https://api.etok.ai/v1beta | gemini-3.5-flash | https://api.etok.ai/v1beta |  |
+| CherryIN | aggregator |  | https://open.cherryin.net | google/gemini-3.5-flash | https://open.cherryin.net |  |
+| OpenRouter | aggregator |  | https://openrouter.ai/api | gemini-3.5-flash |  |  |
+| TheRouter | aggregator |  | https://api.therouter.ai | gemini-3.5-flash | https://api.therouter.ai |  |
+| 自定义 | custom |  |  | gemini-3.5-flash |  |  |
+
+</details>
+
+### openclawProviderPresets.ts（OpenClaw Provider 预设，共 59 条）
+
+<details>
+<summary>点击展开 openclawProviderPresets.ts 完整预设表</summary>
+
+| 名称 | 分类 | apiFormat | Base URL | 默认模型 | endpointCandidates | templateValues |
+|---|---|---|---|---|---|---|
+| Shengsuanyun | aggregator |  |  |  |  |  |
+| 火山Agentplan | cn_official |  |  |  |  |  |
+| BytePlus | cn_official |  |  |  |  |  |
+| DouBaoSeed | cn_official |  |  |  |  |  |
+| CCSub | aggregator |  |  |  |  |  |
+| SubRouter | aggregator |  |  |  |  |  |
+| Qiniu | aggregator |  |  |  |  |  |
+| FennoAI | aggregator |  |  |  |  |  |
+| ZetaAPI | aggregator |  |  |  |  |  |
+| TeamoRouter | aggregator |  |  |  |  |  |
+| Amux | aggregator |  |  |  |  |  |
+| Code0 | aggregator |  |  |  |  |  |
+| NekoCode | aggregator |  |  |  |  |  |
+| Unity2.ai | aggregator |  |  |  |  |  |
+| DeepSeek | cn_official |  |  |  |  |  |
+| Zhipu GLM | cn_official |  |  |  |  |  |
+| Zhipu GLM en | cn_official |  |  |  |  |  |
+| Qwen Coder | cn_official |  |  |  |  |  |
+| Kimi | cn_official |  |  |  |  |  |
+| Kimi For Coding | cn_official |  |  |  |  |  |
+| StepFun | cn_official |  |  |  |  |  |
+| StepFun en | cn_official |  |  |  |  |  |
+| MiniMax | cn_official |  |  |  |  |  |
+| MiniMax en | cn_official |  |  |  |  |  |
+| KAT-Coder | cn_official |  |  |  |  |  |
+| Longcat | cn_official |  |  |  |  |  |
+| BaiLing | cn_official |  |  |  |  |  |
+| Xiaomi MiMo | cn_official |  |  |  |  |  |
+| Xiaomi MiMo Token Plan (China) | cn_official |  |  |  |  |  |
+| AiHubMix | aggregator |  |  |  |  |  |
+| CherryIN | aggregator |  |  |  |  |  |
+| SiliconFlow | aggregator |  |  |  |  |  |
+| SiliconFlow en | aggregator |  |  |  |  |  |
+| DMXAPI | aggregator |  |  |  |  |  |
+| PackyCode | third_party |  |  |  |  |  |
+| APIKEY.FUN | third_party |  |  |  |  |  |
+| APINebula | third_party |  |  |  |  |  |
+| AtlasCloud | aggregator |  |  |  |  |  |
+| SudoCode | third_party |  |  |  |  |  |
+| Cubence | third_party |  |  |  |  |  |
+| AIGoCode | third_party |  |  |  |  |  |
+| RightCode | third_party |  |  |  |  |  |
+| AICodeMirror | third_party |  |  |  |  |  |
+| CrazyRouter | third_party |  |  |  |  |  |
+| SSSAiCode | third_party |  |  |  |  |  |
+| Compshare | aggregator |  |  |  |  |  |
+| Compshare Coding Plan | aggregator |  |  |  |  |  |
+| Micu | third_party |  |  |  |  |  |
+| ETok.ai | third_party |  |  |  |  |  |
+| E-FlowCode | third_party |  |  |  |  |  |
+| OpenRouter | aggregator |  |  |  |  |  |
+| TheRouter | aggregator |  |  |  |  |  |
+| ModelScope | aggregator |  |  |  |  |  |
+| SiliconFlow | aggregator |  |  |  |  |  |
+| SiliconFlow en | aggregator |  |  |  |  |  |
+| Novita AI | aggregator |  |  |  |  |  |
+| Nvidia | aggregator |  |  |  |  |  |
+| PIPELLM | aggregator |  |  |  |  |  |
+| AWS Bedrock | cloud_provider |  |  |  |  |  |
+
+</details>
+
+### opencodeProviderPresets.ts（OpenCode Provider 预设，共 59 条）
+
+<details>
+<summary>点击展开 opencodeProviderPresets.ts 完整预设表</summary>
+
+| 名称 | 分类 | apiFormat | Base URL | 默认模型 | endpointCandidates | templateValues |
+|---|---|---|---|---|---|---|
+| Shengsuanyun | aggregator |  | https://router.shengsuanyun.com/api/v1 |  |  |  |
+| Qiniu | aggregator |  | https://api.qnaigc.com/v1 |  |  |  |
+| FennoAI | aggregator |  | https://api.fenno.ai/v1 |  |  |  |
+| ZetaAPI | aggregator |  | https://api.zetaapi.ai/v1 |  |  |  |
+| TeamoRouter | aggregator |  | https://api.teamorouter.com/v1 |  |  |  |
+| Amux | aggregator |  | https://api.amux.ai/v1 |  |  |  |
+| Code0 | aggregator |  | https://code0.ai/v1 |  |  |  |
+| NekoCode | aggregator |  | https://nekocode.ai/v1 |  |  |  |
+| 火山Agentplan | cn_official |  | https://ark.cn-beijing.volces.com/api/coding/v3 |  |  |  |
+| BytePlus | cn_official |  | https://ark.ap-southeast.bytepluses.com/api/coding/v3 |  |  |  |
+| DouBaoSeed | cn_official |  | https://ark.cn-beijing.volces.com/api/v3 |  |  |  |
+| CCSub | aggregator |  | https://www.ccsub.net/v1 |  |  |  |
+| SubRouter | aggregator |  | https://subrouter.ai/v1 |  |  |  |
+| Unity2.ai | aggregator |  | https://api.unity2.ai/v1 |  |  |  |
+| DeepSeek | cn_official |  | https://api.deepseek.com/v1 |  |  |  |
+| Zhipu GLM | cn_official |  | https://open.bigmodel.cn/api/coding/paas/v4 |  |  |  |
+| Zhipu GLM en | cn_official |  | https://api.z.ai/api/coding/paas/v4 |  |  |  |
+| Bailian | cn_official |  | https://dashscope.aliyuncs.com/compatible-mode/v1 |  |  |  |
+| Kimi | cn_official |  | https://api.moonshot.cn/v1 |  |  |  |
+| Kimi For Coding | cn_official |  | https://api.kimi.com/coding/v1 |  |  |  |
+| StepFun | cn_official |  | https://api.stepfun.com/step_plan/v1 |  |  |  |
+| StepFun en | cn_official |  | https://api.stepfun.ai/step_plan/v1 |  |  |  |
+| StepFun Step Plan | cn_official |  | https://api.stepfun.com/step_plan/v1 |  |  |  |
+| ModelScope | aggregator |  | https://api-inference.modelscope.cn/v1 |  |  |  |
+| KAT-Coder | cn_official |  | https://vanchin.streamlake.ai/api/gateway/v1/endpoints/${ENDPOINT_ID}/openai |  |  |  |
+| Longcat | cn_official |  | https://api.longcat.chat/openai/v1 |  |  |  |
+| MiniMax | cn_official |  | https://api.minimaxi.com/v1 |  |  |  |
+| MiniMax en | cn_official |  | https://api.minimax.io/v1 |  |  |  |
+| BaiLing | cn_official |  | https://api.tbox.cn/v1 |  |  |  |
+| Xiaomi MiMo | cn_official |  | https://api.xiaomimimimo.com/v1 |  |  |  |
+| Xiaomi MiMo Token Plan (China) | cn_official |  | https://token-plan-cn.xiaomimimo.com/v1 |  |  |  |
+| OpenCode Go | third_party |  | https://opencode.ai/zen/go/v1 |  |  |  |
+| AiHubMix | aggregator |  | https://aihubmix.com/v1 |  |  |  |
+| CherryIN | aggregator |  | https://open.cherryin.net/v1 |  |  |  |
+| DMXAPI | aggregator |  | https://www.dmxapi.cn/v1 |  |  |  |
+| OpenRouter | aggregator |  | https://openrouter.ai/api/v1 |  |  |  |
+| TheRouter | aggregator |  | https://api.therouter.ai/v1 |  |  |  |
+| Novita AI | aggregator |  | https://api.novita.ai/openai |  |  |  |
+| Nvidia | aggregator |  | https://integrate.api.nvidia.com/v1 |  |  |  |
+| PIPELLM | aggregator |  | https://cc-api.pipellm.ai |  |  |  |
+| PackyCode | third_party |  | https://www.packyapi.com/v1 |  |  |  |
+| APIKEY.FUN | third_party |  | https://api.apikey.fun/v1 |  |  |  |
+| APINebula | third_party |  | https://apinebula.com/v1 |  |  |  |
+| AtlasCloud | aggregator |  | https://api.atlascloud.ai/v1 |  |  |  |
+| SudoCode | third_party |  | https://sudocode.us/v1 |  |  |  |
+| Cubence | third_party |  | https://api.cubence.com/v1 |  |  |  |
+| AIGoCode | third_party |  | https://api.aigocode.com |  |  |  |
+| RightCode | third_party |  | https://right.codes/codex/v1 |  |  |  |
+| AICodeMirror | third_party |  | https://api.aicodemirror.com/api/claudecode |  |  |  |
+| ClaudeCN | third_party |  | https://claudecn.top |  |  |  |
+| RunAPI | aggregator |  | https://runapi.co |  |  |  |
+| CrazyRouter | third_party |  | https://cn.crazyrouter.com |  |  |  |
+| SSSAiCode | third_party |  | https://node-hk.sssaicodeapi.com/api/v1 |  |  |  |
+| Micu | third_party |  | https://www.micuapi.ai/v1 |  |  |  |
+| ETok.ai | third_party |  | https://api.etok.ai/v1 |  |  |  |
+| E-FlowCode | third_party |  | https://e-flowcode.cc/v1 |  |  |  |
+| AWS Bedrock | cloud_provider |  |  |  |  |  |
+| Oh My OpenCode | omo |  |  |  |  |  |
+| Oh My OpenCode Slim | omo-slim |  |  |  |  |  |
+
+</details>
+
+### hermesProviderPresets.ts（Hermes Provider 预设，共 60 条）
+
+<details>
+<summary>点击展开 hermesProviderPresets.ts 完整预设表</summary>
+
+| 名称 | 分类 | apiFormat | Base URL | 默认模型 | endpointCandidates | templateValues |
+|---|---|---|---|---|---|---|
+| Shengsuanyun | aggregator |  |  |  |  |  |
+| Qiniu | aggregator |  |  |  |  |  |
+| FennoAI | aggregator |  |  |  |  |  |
+| ZetaAPI | aggregator |  |  |  |  |  |
+| TeamoRouter | aggregator |  |  |  |  |  |
+| Amux | aggregator |  |  |  |  |  |
+| Code0 | aggregator |  |  |  |  |  |
+| NekoCode | aggregator |  |  |  |  |  |
+| 火山Agentplan | cn_official |  |  |  |  |  |
+| BytePlus | cn_official |  |  |  |  |  |
+| DouBaoSeed | cn_official |  |  |  |  |  |
+| CCSub | aggregator |  |  |  |  |  |
+| SubRouter | aggregator |  |  |  |  |  |
+| Unity2.ai | aggregator |  |  |  |  |  |
+| OpenRouter | aggregator |  |  |  |  |  |
+| DeepSeek | cn_official |  |  |  |  |  |
+| Together AI | aggregator |  |  |  |  |  |
+| Nous Research | official |  |  |  |  |  |
+| Zhipu GLM | cn_official |  |  |  |  |  |
+| Zhipu GLM en | cn_official |  |  |  |  |  |
+| Bailian | cn_official |  |  |  |  |  |
+| Bailian For Coding | cn_official |  |  |  |  |  |
+| Kimi | cn_official |  |  |  |  |  |
+| Kimi For Coding | cn_official |  |  |  |  |  |
+| StepFun | cn_official |  |  |  |  |  |
+| ModelScope | aggregator |  |  |  |  |  |
+| KAT-Coder | cn_official |  |  |  |  |  |
+| Longcat | cn_official |  |  |  |  |  |
+| MiniMax | cn_official |  |  |  |  |  |
+| MiniMax en | cn_official |  |  |  |  |  |
+| BaiLing | cn_official |  |  |  |  |  |
+| AiHubMix | aggregator |  |  |  |  |  |
+| CherryIN | aggregator |  |  |  |  |  |
+| SiliconFlow | aggregator |  |  |  |  |  |
+| SiliconFlow en | aggregator |  |  |  |  |  |
+| DMXAPI | aggregator |  |  |  |  |  |
+| PackyCode | third_party |  |  |  |  |  |
+| APIKEY.FUN | third_party |  |  |  |  |  |
+| APINebula | third_party |  |  |  |  |  |
+| AtlasCloud | aggregator |  |  |  |  |  |
+| SudoCode | third_party |  |  |  |  |  |
+| Cubence | third_party |  |  |  |  |  |
+| ClaudeCN | third_party |  |  |  |  |  |
+| RunAPI | aggregator |  |  |  |  |  |
+| AIGoCode | third_party |  |  |  |  |  |
+| RightCode | third_party |  |  |  |  |  |
+| AICodeMirror | third_party |  |  |  |  |  |
+| CrazyRouter | third_party |  |  |  |  |  |
+| SSSAiCode | third_party |  |  |  |  |  |
+| Compshare | aggregator |  |  |  |  |  |
+| Compshare Coding Plan | aggregator |  |  |  |  |  |
+| Micu | third_party |  |  |  |  |  |
+| ETok.ai | third_party |  |  |  |  |  |
+| E-FlowCode | third_party |  |  |  |  |  |
+| TheRouter | aggregator |  |  |  |  |  |
+| Novita AI | aggregator |  |  |  |  |  |
+| Nvidia | aggregator |  |  |  |  |  |
+| PIPELLM | aggregator |  |  |  |  |  |
+| Xiaomi MiMo | cn_official |  |  |  |  |  |
+| Xiaomi MiMo Token Plan (China) | cn_official |  |  |  |  |  |
+
+</details>
+
+### claudeDesktopProviderPresets.ts（Claude Desktop Provider 预设，共 67 条）
+
+<details>
+<summary>点击展开 claudeDesktopProviderPresets.ts 完整预设表</summary>
+
+| 名称 | 分类 | apiFormat | Base URL | 默认模型 | endpointCandidates | templateValues |
+|---|---|---|---|---|---|---|
+| Claude Desktop Official | official | anthropic |  |  |  |  |
+| Shengsuanyun | aggregator | anthropic |  |  |  |  |
+| PatewayAI | third_party | anthropic |  |  |  |  |
+| Qiniu | aggregator | anthropic |  |  | https://api.qnaigc.com<br>https://api.modelink.ai |  |
+| FennoAI | aggregator | anthropic |  |  |  |  |
+| ZetaAPI | aggregator | anthropic |  |  |  |  |
+| TeamoRouter | aggregator | anthropic |  |  |  |  |
+| Amux | aggregator | anthropic |  |  |  |  |
+| 火山Agentplan | cn_official | anthropic |  |  |  |  |
+| BytePlus | cn_official | anthropic |  |  |  |  |
+| DouBaoSeed | cn_official | anthropic |  |  |  |  |
+| CCSub | aggregator | anthropic |  |  |  |  |
+| SubRouter | aggregator | anthropic |  |  |  |  |
+| Unity2.ai | aggregator | anthropic |  |  |  |  |
+| Gemini Native | third_party | gemini_native |  |  | https://generativelanguage.googleapis.com |  |
+| GitHub Copilot | third_party | openai_chat |  |  |  |  |
+| Codex | third_party | openai_responses |  |  |  |  |
+| DeepSeek | cn_official | anthropic |  |  |  |  |
+| OpenCode Go | third_party | openai_chat |  |  | https://opencode.ai/zen/go |  |
+| Zhipu GLM | cn_official | anthropic |  |  |  |  |
+| Zhipu GLM en | cn_official | anthropic |  |  |  |  |
+| Baidu Qianfan Coding Plan | cn_official | anthropic |  |  | https://qianfan.baidubce.com/anthropic/coding |  |
+| Bailian | cn_official | anthropic |  |  |  |  |
+| Bailian For Coding | cn_official | anthropic |  |  |  |  |
+| Kimi | cn_official | anthropic |  |  |  |  |
+| Kimi For Coding | cn_official | anthropic |  |  |  |  |
+| StepFun | cn_official | anthropic |  |  | https://api.stepfun.com/step_plan |  |
+| StepFun en | cn_official | anthropic |  |  | https://api.stepfun.ai/step_plan |  |
+| ModelScope | aggregator | anthropic |  |  |  |  |
+| Longcat | cn_official | anthropic |  |  |  |  |
+| MiniMax | cn_official | anthropic |  |  |  |  |
+| MiniMax en | cn_official | anthropic |  |  |  |  |
+| BaiLing | cn_official | anthropic |  |  |  |  |
+| AiHubMix | aggregator | anthropic |  |  | https://aihubmix.com<br>https://api.aihubmix.com |  |
+| CherryIN | aggregator | anthropic |  |  | https://open.cherryin.net |  |
+| SiliconFlow | aggregator | anthropic |  |  |  |  |
+| SiliconFlow en | aggregator | anthropic |  |  |  |  |
+| DMXAPI | aggregator | anthropic |  |  | https://www.dmxapi.cn<br>https://api.dmxapi.cn |  |
+| PackyCode | third_party | anthropic |  |  | https://www.packyapi.com<br>https://api-slb.packyapi.com |  |
+| APIKEY.FUN | third_party | anthropic |  |  | https://api.apikey.fun<br>https://slb.apikey.fun |  |
+| APINebula | third_party | anthropic |  |  | https://apinebula.com |  |
+| AtlasCloud | aggregator | anthropic |  |  | https://api.atlascloud.ai |  |
+| SudoCode | third_party | anthropic |  |  | https://sudocode.us<br>https://sudocode.run |  |
+| ClaudeAPI | aggregator | anthropic |  |  |  |  |
+| Code0 | aggregator | anthropic |  |  |  |  |
+| NekoCode | aggregator | anthropic |  |  |  |  |
+| ClaudeCN | third_party | anthropic |  |  |  |  |
+| RunAPI | aggregator | anthropic |  |  |  |  |
+| RelaxyCode | third_party | anthropic |  |  |  |  |
+| Cubence | third_party | anthropic |  |  | https://api.cubence.com<br>https://api-cf.cubence.com<br>https://api-cf.cubence.com<br>https://api-bwg.cubence.com |  |
+| AIGoCode | third_party | anthropic |  |  | https://api.aigocode.com |  |
+| RightCode | third_party | anthropic |  |  |  |  |
+| AICodeMirror | third_party | anthropic |  |  | https://api.aicodemirror.com/api/claudecode<br>https://api.claudecode.net.cn/api/claudecode |  |
+| CrazyRouter | third_party | anthropic |  |  | https://cn.crazyrouter.com |  |
+| SSSAiCode | third_party | anthropic |  |  | https://node-hk.sssaicodeapi.com/api<br>https://node-hk.sssaiapi.com/api<br>https://node-cf.sssaicodeapi.com/api |  |
+| Compshare | aggregator | anthropic |  |  | https://api.modelverse.cn |  |
+| Compshare Coding Plan | aggregator | anthropic |  |  | https://cp.compshare.cn |  |
+| Micu | third_party | anthropic |  |  | https://www.micuapi.ai |  |
+| ETok.ai | third_party | anthropic |  |  |  |  |
+| E-FlowCode | third_party | anthropic |  |  | https://e-flowcode.cc |  |
+| OpenRouter | aggregator | anthropic |  |  |  |  |
+| TheRouter | aggregator | anthropic |  |  | https://api.therouter.ai |  |
+| Novita AI | aggregator | anthropic |  |  | https://api.novita.ai/anthropic |  |
+| Nvidia | aggregator | openai_chat |  |  |  |  |
+| PIPELLM | aggregator | anthropic |  |  |  |  |
+| Xiaomi MiMo | cn_official | anthropic |  |  |  |  |
+| Xiaomi MiMo Token Plan (China) | cn_official | anthropic |  |  |  |  |
+
+</details>
+
+### mcpPresets.ts（MCP Server 预设，共 5 条）
+
+<details>
+<summary>点击展开 mcpPresets.ts 完整预设表</summary>
+
+| 名称 | 分类 | apiFormat | Base URL | 默认模型 | endpointCandidates | templateValues |
+|---|---|---|---|---|---|---|
+| mcp-server-fetch |  |  |  |  |  |  |
+| @modelcontextprotocol/server-time |  |  |  |  |  |  |
+| @modelcontextprotocol/server-memory |  |  |  |  |  |  |
+| @modelcontextprotocol/server-sequential-thinking |  |  |  |  |  |  |
+| @upstash/context7-mcp |  |  |  |  |  |  |
+
+</details>
+
+
 ---
 
 ## 十、总结
