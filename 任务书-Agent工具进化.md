@@ -1,6 +1,6 @@
 # 任务书：将 Multi-Agent Orchestrator 进化为实用 Agent 工具
 
-> 状态：Phase 1 图形化配置 UI（Stage 1）已实现，准备进入 Stage 2 预设模板完善与主模型选择  
+> 状态：Phase 1 图形化配置 UI（Stage 1/2/3）已全部完成并端到端验证通过，准备进入 Phase 2 对话式交互改造  
 > 后续输入：仍可学习 OpenCode 开源项目源码（已获作者许可），但当前先从独立 UI 方案入手
 
 ---
@@ -216,31 +216,44 @@
 
 ---
 
-## 九、当前进展更新（2026-07-11）
+## 九、当前进展更新（2026-07-12）
 
 ### 已落地能力
 
 - **Phase 1 CLI 版**：`python run.py agent-setup` 已实现，可引导用户配置 Provider、API Key、主模型。
-- **模型网关**：Anthropic + OpenAI 兼容 Provider、多 key 轮询、指数退避重试、计费统计已可用。
+- **Phase 1 UI 版**：`python scripts/run_ui.py` 图形化配置界面已完成，支持预设、测试、启用/禁用、主模型选择。
+- **模型网关**：Anthropic + OpenAI 兼容 Provider、多 key 轮询、指数退避重试、计费统计、模型回退策略已可用。
 - **Orchestrator / Dispatcher**：需求拆解、DAG 依赖调度、并发 Worker、场景感知编排（novel/software）、依赖输出注入均已实现。
 - **Worker 工具**：`write_file`、`read_file`、`run_command` 已可用；无代码块时自动兜底保存 `content.txt`。
-- **质量保障**：单元测试 **134** 个通过（新增 12 个 UI 接口测试）；`README.md`、`TESTING.md`、`docs/error-log.md` 已补齐。
+- **质量保障**：单元测试 **134** 个通过；`README.md`、`TESTING.md`、`docs/error-log.md` 已补齐。
 - **Windows 适配**：`run.py` 启动时自动设置 UTF-8，解决 emoji 输出崩溃。
+
+### Phase 1 验收结论
+
+- ✅ UI 保存的配置能被 `python run.py "需求"` 直接调用并跑通。
+- ✅ 在 UI 中禁用 3 个 Provider 后，`run.py` 自动回退到唯一启用的 `ark` Provider。
+- ✅ 端到端验证命令：
+  ```bash
+  python run.py "用一句话总结 Python" --max-workers 1
+  ```
+  输出结果并保存到 `output/writer_t1/generated_1.txt`。
 
 ### 当前聚焦
 
-用户反馈**连接配置仍显繁琐且容易出错**，因此已完成 Phase 1 Stage 1：
+用户反馈**连接配置仍显繁琐且容易出错**，因此已完成 Phase 1 Stage 1 / 2 / 3：
 
-- 基于 FastAPI + Jinja2 + Vanilla JS 的本地配置 UI。
-- 一键启动：`python scripts/run_ui.py`（自动打开浏览器）。
-- 内置常用 Provider 预设（Anthropic / OpenAI / 火山方舟 / Kimi / 智谱 GLM / DeepSeek / 自定义）。
+- 基于 FastAPI + Jinja2 + Vanilla JS 的本地配置 UI，科幻暗色主题界面。
+- 一键启动：`python scripts/run_ui.py`（自动打开浏览器、Windows UTF-8 适配）。
+- 内置 15+ 常用 Provider 预设，选择后自动填充 Base URL、协议与默认模型映射。
+- Provider 卡片显示连通状态：绿色=已连通、黄色=待测试、灰色=未配置 Key。
+- 支持一键启用/禁用 Provider；禁用后模型池与 `GatewayClient` 自动过滤。
+- 连通性测试状态持久化到 `config/ui_state.yaml`，刷新不丢失。
+- API Key 仅保存于 `.env`，编辑时留空保留原 Key，永不返回前端。
 - 支持添加/编辑/删除 Provider、连通性测试、模型映射、主模型选择。
-- 配置同时写入 `config/providers.yaml` 与 `.env`，CLI 与 UI 双向兼容。
-- 详见 `docs/模型连接配置UI工具计划书.md` Stage 1 验收标准。
+- 模型回退策略：当 `workers.yaml` 中的 Orchestrator / Reviewer / Worker 默认模型失效或被禁用时，自动回退到 `GatewayClient` 主模型，再回退到第一个可用模型，避免运行时报`未知模型`。
 
 ### 更新后的下一步动作
 
-1. Stage 2：完善预设模板自动填充、模型池展示、Provider 启用/禁用。
-2. Stage 3：表单校验、API Key 掩码、错误本地化、README 使用说明。
-3. 验证：UI 保存的配置能被 `python run.py "需求"` 直接调用主模型跑通端到端。
-4. 之后继续 Phase 2（对话式交互改造）。
+1. 进入 Phase 2：对话式交互改造。
+2. 将 `python run.py "需求"` 的单次命令模式升级为持续对话界面/会话。
+3. 在主模型中支持工具调用循环（读文件、写文件、执行命令、调用子模型）。

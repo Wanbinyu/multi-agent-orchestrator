@@ -9,28 +9,25 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
-
-@dataclass
-class ToolResult:
-    """工具执行结果"""
-    success: bool
-    output: str = ""
-    error: str = ""
+from src.tools.memory_tools import search_memory, search_project_files
+from src.tools.tool_result import ToolResult
 
 
 def _resolve_path(path: str, base_dir: str) -> Path:
-    """把相对路径解析到 base_dir 下，防止目录穿越"""
+    """解析路径：绝对路径直接使用；相对路径限制在 base_dir 内，防止目录穿越"""
+    target = Path(path)
+    if target.is_absolute():
+        return target.resolve()
+
     base = Path(base_dir).resolve()
-    target = (base / path).resolve()
-    # 确保 target 在 base 内部
+    resolved = (base / path).resolve()
     try:
-        target.relative_to(base)
+        resolved.relative_to(base)
     except ValueError as exc:
         raise ValueError(f"路径越界：{path}") from exc
-    return target
+    return resolved
 
 
 def read_file(path: str, base_dir: str = ".") -> ToolResult:
@@ -109,11 +106,29 @@ def run_command(
         return ToolResult(success=False, error=str(e))
 
 
+def write_file(path: str, content: str, base_dir: str = ".") -> ToolResult:
+    """在 base_dir 下写入文件，支持自动创建父目录"""
+    try:
+        target = _resolve_path(path, base_dir)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(content)
+        return ToolResult(success=True, output=f"已写入文件：{path}")
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
 def execute_tool_call(tool_name: str, params: dict, base_dir: str, allowed_prefixes: list[str] | None = None) -> ToolResult:
     """统一分发工具调用"""
     if tool_name == "read_file":
         return read_file(params.get("path", ""), base_dir)
     elif tool_name == "run_command":
         return run_command(params.get("command", ""), base_dir, allowed_prefixes)
+    elif tool_name == "write_file":
+        return write_file(params.get("path", ""), params.get("content", ""), base_dir)
+    elif tool_name == "search_project_files":
+        return search_project_files(params.get("query", ""), base_dir, params.get("top_k", 5))
+    elif tool_name == "search_memory":
+        return search_memory(params.get("query", ""), params.get("top_k", 5))
     else:
         return ToolResult(success=False, error=f"未知工具：{tool_name}")

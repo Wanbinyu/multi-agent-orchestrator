@@ -16,16 +16,20 @@ multi-agent-orchestrator/
 │   └── workers.yaml          # Worker 角色与 Orchestrator / Reviewer 提示词
 ├── docs/                     # 设计文档与开发记录
 ├── output/                   # 默认输出目录
+├── sessions/                 # 对话会话存储
 ├── src/
 │   ├── cli/
 │   │   ├── agent_setup.py    # 新版 Provider / 主模型连接向导
 │   │   ├── setup_wizard.py   # 旧版场景化配置向导
+│   │   ├── chat_command.py   # CLI 对话 REPL
 │   │   └── provider_presets.py
 │   ├── core/
 │   │   ├── orchestrator.py   # 总工：拆任务
 │   │   ├── dispatcher.py     # 调度器：DAG 并发执行
 │   │   ├── reviewer.py       # 审查收口
-│   │   └── worker.py         # Worker：执行单任务
+│   │   ├── worker.py         # Worker：执行单任务
+│   │   ├── session.py        # 多轮会话持久化
+│   │   └── agent.py          # 对话 Agent（工具循环）
 │   ├── gateway/
 │   │   ├── provider.py       # Provider 抽象与 Anthropic/OpenAI 实现
 │   │   ├── router.py         # 模型路由
@@ -34,10 +38,25 @@ multi-agent-orchestrator/
 │   │   └── model_catalog.py
 │   ├── models/
 │   │   └── schemas.py        # Pydantic 数据模型
-│   └── tools/
-│       ├── file_tools.py     # 代码块解析与文件写入
-│       └── worker_tools.py   # read_file / run_command 工具
+│   ├── tools/
+│   │   ├── file_tools.py     # 代码块解析与文件写入
+│   │   └── worker_tools.py   # read_file / run_command 工具
+│   └── ui/                   # 图形化界面
+│       ├── app.py
+│       ├── routers/
+│       │   ├── providers.py  # 模型连接配置 API
+│       │   └── chat.py       # 对话 API
+│       ├── presets/
+│       ├── templates/
+│       │   ├── index.html    # 配置页
+│       │   └── chat.html     # 对话页
+│       └── static/
+│           ├── css/style.css
+│           ├── js/app.js     # 配置页逻辑
+│           └── js/chat.js    # 对话页逻辑
 ├── tests/                    # pytest 测试
+├── scripts/
+│   └── run_ui.py             # 一键启动 UI
 ├── run.py                    # CLI 入口
 ├── requirements.txt
 ├── 项目计划书.md
@@ -52,17 +71,27 @@ multi-agent-orchestrator/
 pip install -r requirements.txt
 ```
 
-### 2. 配置 Provider 和主模型（推荐新版向导）
+### 2. 配置 Provider 和主模型（推荐图形化界面）
 
 ```bash
-python run.py agent-setup
+python scripts/run_ui.py
 ```
 
-该向导会引导你：
-1. 选择或添加 Provider（Anthropic / OpenAI 兼容 / 自定义）
-2. 配置 API Key 与 base_url
-3. 选择主模型（main_model）
-4. 生成 `config/providers.yaml` 和 `.env`
+浏览器会自动打开 `http://127.0.0.1:8000`，界面支持：
+
+1. 从 15+ 常用 Provider 预设中选择（Anthropic / OpenAI / DeepSeek / 火山方舟 / Kimi / 智谱 GLM / 自定义等）。
+2. 粘贴 API Key，自动填充 Base URL 与默认模型映射。
+3. 点击`测试连接`，实时查看连通状态。
+4. 启用/禁用任意 Provider；模型池自动过滤只显示启用 Provider 的模型。
+5. 选择主模型并保存。
+
+配置会同步写入 `config/providers.yaml` 与 `.env`，与 CLI 完全兼容。
+
+> 如果不方便使用浏览器，也可以继续用命令行向导：
+>
+> ```bash
+> python run.py agent-setup
+> ```
 
 ### 3. 配置 Worker 角色（旧版向导，可选）
 
@@ -101,7 +130,44 @@ python run.py "开发一个登录页面" \
 
 > 如果没有指定子命令，`run.py` 会自动把第一个非命令参数当作 `run` 命令的请求参数。
 
-### 5. 切换总指挥模型
+### 5. 进入持续对话模式（CLI）
+
+完成连接配置后，可以直接在命令行与主模型持续多轮对话：
+
+```bash
+python run.py chat
+```
+
+常用 REPL 命令：
+
+| 命令 | 说明 |
+|---|---|
+| `/new [标题]` | 创建新会话 |
+| `/load <session_id>` | 加载已有会话 |
+| `/save` | 手动保存当前会话 |
+| `/plan <需求>` | 调用 Orchestrator 执行一次性任务计划 |
+| `/tools` | 显示当前可用工具 |
+| `/exit` | 退出 |
+
+对话产物保存在 `sessions/<session_id>/output/`。
+
+助手回答会**逐块流式打印**到终端，工具调用与文件写入在回答结束后展示。
+
+### 6. 打开 Web 对话页面
+
+```bash
+python scripts/run_ui.py
+```
+
+浏览器打开 `http://127.0.0.1:8123/chat`：
+
+- 左侧会话列表，点击可切换历史会话。
+- 右侧消息区支持 **SSE 流式显示**，助手回答逐字出现。
+- 支持 Markdown、代码块、工具调用结果和生成文件展示。
+- 主模型自动调用 `read_file` / `write_file` / `run_command` 工具。
+- 旧的同步接口 `POST /api/chat/sessions/{id}/messages` 仍然保留；新增流式接口 `POST /api/chat/sessions/{id}/messages/stream`。
+
+### 7. 切换总指挥模型
 
 默认总指挥（Orchestrator）在 `config/workers.yaml` 的 `orchestrator.model` 中配置。当前示例配置默认使用 `glm-ark`（你接入的火山方舟模型）。
 
@@ -122,7 +188,7 @@ orchestrator:
 
 > 注意：总指挥负责拆任务和验收，模型越强拆得越准。便宜模型可以当总指挥，但任务拆分质量可能下降。
 
-### 6. 手动配置（可选）
+### 8. 手动配置（可选）
 
 如果你不想用向导，也可以手动创建 `.env`：
 
@@ -170,11 +236,22 @@ Worker 在执行任务时可以使用以下工具：
 - [x] 代码块自动保存到 output 目录
 - [x] Provider 连接向导与连通性测试
 - [x] 模型别名与 Provider `model_map`
+- [x] **图形化模型连接配置 UI**（FastAPI + 浏览器界面）
+- [x] 常用 Provider 预设一键填充与扩展
+- [x] Provider 启用/禁用与模型池自动过滤
+- [x] API Key 本地 `.env` 存储，编辑时留空保持不变
+- [x] 连通性测试状态持久化，页面刷新后仍可见
 - [x] 多 key 轮询
 - [x] Token 计费和成本统计
 - [x] 失败重试与指数退避
 - [x] Windows 控制台 UTF-8 自动适配
 - [x] 无 Markdown 代码块时自动保存 `content.txt`
+- [x] 多轮会话持久化（YAML）
+- [x] 对话 Agent 工具循环（最多 5 轮）
+- [x] CLI 持续对话 REPL（`python run.py chat`）
+- [x] Web 对话页面（`/chat`）
+- [x] **流式回答**：Web 与 CLI 均支持逐块输出（SSE）
+- [x] 工具循环场景下多轮流式拼接
 
 ## 运行测试
 

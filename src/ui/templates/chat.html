@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MAO - 对话</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>Multi-Agent Orchestrator — 对话模式</h1>
+    <p class="subtitle">与主模型持续对话，支持读文件、写文件、执行命令</p>
+  </header>
+
+  <nav class="top-nav">
+    <a href="/" class="nav-link">⚙️ 连接配置</a>
+    <a href="/chat" class="nav-link active">💬 对话</a>
+  </nav>
+
+  <main class="chat-layout">
+    <aside class="chat-sidebar">
+      <div class="sidebar-header">
+        <h2>会话列表</h2>
+        <button id="btn-new-session" class="btn btn-primary" type="button">➕ 新建</button>
+      </div>
+      <ul id="session-list" class="session-list"></ul>
+    </aside>
+
+    <section class="chat-main">
+      <div class="chat-main-header">
+        <span id="mode-indicator" class="mode-indicator" title="Shift+Tab 切换">approve</span>
+        <button id="btn-toggle-rightbar" class="btn btn-secondary btn-sm" type="button">📋 上下文</button>
+      </div>
+      <div id="chat-messages" class="chat-messages"></div>
+
+      <div class="chat-input-area">
+        <textarea
+          id="chat-input"
+          class="chat-input"
+          placeholder="输入消息，Shift+Enter 换行，Enter 发送…"
+          rows="2"
+        ></textarea>
+        <button id="btn-send" class="btn btn-primary" type="button">发送</button>
+      </div>
+      <div class="mode-hint">Shift+Tab 切换权限模式：auto 自动 / approve 需批准 / readonly 只读</div>
+
+      <div id="chat-status" class="chat-status hidden"></div>
+    </section>
+
+    <aside class="chat-rightbar" id="chat-rightbar">
+      <div class="rightbar-header">
+        <h2>上下文 / 记忆</h2>
+        <button id="btn-close-rightbar" class="btn btn-secondary btn-sm" type="button">✕</button>
+      </div>
+
+      <div class="rightbar-section" id="ctx-section-current">
+        <h3 class="rightbar-section-title">当前会话</h3>
+        <div class="meta-list" id="ctx-current-meta">
+          <div class="meta-item"><span>ID</span><code id="ctx-session-id">-</code></div>
+          <div class="meta-item"><span>模式</span><span id="ctx-session-mode">-</span></div>
+          <div class="meta-item"><span>创建</span><span id="ctx-session-created">-</span></div>
+          <div class="meta-item"><span>更新</span><span id="ctx-session-updated">-</span></div>
+        </div>
+        <button id="btn-summarize-session" class="btn btn-primary btn-sm btn-block" type="button">📝 总结会话</button>
+        <div id="ctx-summarize-status" class="section-status hidden"></div>
+      </div>
+
+      <div class="rightbar-section" id="ctx-section-memory">
+        <div class="rightbar-section-title">
+          <span>长期记忆</span>
+          <button id="btn-refresh-memories" class="btn btn-icon" type="button" title="刷新">🔄</button>
+        </div>
+        <form id="form-add-memory" class="memory-form">
+          <select id="memory-category" class="input-sm" required>
+            <option value="preference">偏好</option>
+            <option value="decision">决策</option>
+            <option value="fact">事实</option>
+            <option value="project_structure">项目结构</option>
+            <option value="session_summary">会话总结</option>
+            <option value="code_symbol">代码符号</option>
+          </select>
+          <input type="text" id="memory-content" class="input-sm" placeholder="记忆内容" required>
+          <button type="submit" class="btn btn-primary btn-sm">添加</button>
+        </form>
+        <input type="text" id="memory-search" class="input-sm" placeholder="搜索记忆…">
+        <ul id="memory-list" class="memory-list">
+          <li class="empty-item">暂无记忆</li>
+        </ul>
+      </div>
+
+      <div class="rightbar-section" id="ctx-section-index">
+        <h3 class="rightbar-section-title">项目索引</h3>
+        <div class="index-status" id="ctx-index-status">
+          <span class="status-badge" id="ctx-index-badge">未索引</span>
+          <span class="index-meta" id="ctx-index-meta"></span>
+        </div>
+        <button id="btn-rebuild-index" class="btn btn-secondary btn-sm btn-block" type="button">🔄 重建索引</button>
+        <div id="ctx-index-msg" class="section-status hidden"></div>
+      </div>
+
+      <div class="rightbar-section" id="ctx-section-turnlog">
+        <h3 class="rightbar-section-title">本轮记录</h3>
+        <div id="turn-log" class="turn-log">
+          <div class="empty-item">发送消息后将显示工具调用和文件记录</div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/static/js/chat.js"></script>
+</body>
+</html>

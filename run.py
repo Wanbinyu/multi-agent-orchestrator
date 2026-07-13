@@ -1,4 +1,4 @@
-﻿"""CLI 入口"""
+"""CLI 入口"""
 from __future__ import annotations
 
 import os
@@ -19,10 +19,13 @@ from rich.console import Console
 from rich.panel import Panel
 
 from src.cli.agent_setup import AgentSetupWizard
+from src.cli.chat_command import run_chat_loop
 from src.cli.setup_wizard import run_setup_wizard
 from src.core.dispatcher import Dispatcher
+from src.core.memory import MemoryContextBuilder, MemoryStore
 from src.core.orchestrator import Orchestrator
 from src.core.reviewer import Reviewer
+from src.core.session import SessionStore
 from src.core.worker import Worker, load_workers_config
 from src.gateway.client import GatewayClient
 from src.tools.file_tools import write_text_file
@@ -56,12 +59,27 @@ def agent_setup(
 
 
 @app.command()
+def chat(
+    session: str = typer.Option(None, "--session", "-s", help="会话 ID，不指定则创建新会话"),
+    config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
+):
+    """进入交互式多轮对话"""
+    project_root = Path(__file__).parent
+    os.chdir(project_root)
+
+    gateway = GatewayClient(config_path=f"{config_dir}/providers.yaml")
+    store = SessionStore(base_dir="sessions")
+    run_chat_loop(gateway, store, session_id=session)
+
+
+@app.command()
 def run(
     request: str = typer.Argument(..., help="一句话开发需求，例如：开发一个登录页面"),
     output_dir: str = typer.Option("output", "--output", "-o", help="输出目录"),
     config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
     max_workers: int = typer.Option(4, "--max-workers", "-w", help="最大并发 Worker 数"),
     orchestrator_model: str = typer.Option(None, "--orchestrator-model", "-m", help="指定总指挥模型，例如 glm-ark"),
+    assume_yes: bool = typer.Option(False, "--yes", "-y", help="跳过执行前的确认提示，直接执行"),
 ):
     """运行多模型 Agent 编排流程"""
     # 切换到项目根目录（兼容从任意位置运行）
@@ -70,8 +88,12 @@ def run(
 
     console.print(Panel.fit(f"🚀 开始处理需求：\n{request}", title="Multi-Agent Orchestrator"))
 
-    # 初始化网关
+    # 初始化网关与记忆
     gateway = GatewayClient(config_path=f"{config_dir}/providers.yaml")
+    memory_store = MemoryStore(config_path=f"{config_dir}/memory.yaml")
+    memory_context = ""
+    if memory_store.config.enabled:
+        memory_context = MemoryContextBuilder(memory_store).build_context(request)
 
     # 总工拆任务
     console.print("\n[bold cyan]🧠 Orchestrator 正在分析需求...[/bold cyan]")
@@ -80,18 +102,28 @@ def run(
         config_path=f"{config_dir}/workers.yaml",
         model_override=orchestrator_model,
     )
-    plan = orchestrator.plan(request)
+    plan = orchestrator.plan(request, memory_context=memory_context)
 
     console.print(f"\n[bold green]📋 拆分为 {len(plan.tasks)} 个子任务：[/bold green]")
     for task in plan.tasks:
         console.print(f"  • [{task.type}] {task.title} → {task.assigned_model}")
+
+    # 执行前确认：交互式终端且未传 --yes 时，征求用户同意
+    if not assume_yes and sys.stdin.isatty():
+        console.print(
+            f"\n[bold yellow]即将执行 {len(plan.tasks)} 个子任务并自动写入文件到 {output_dir}[/bold yellow]"
+        )
+        answer = console.input("允许执行？(y/n)：")
+        if answer.strip().lower() not in ("y", "yes", "是", "允许"):
+            console.print("[dim]已取消[/dim]")
+            return
 
     # 并发执行
     console.print("\n[bold cyan]⚙️ Worker 开始并发执行...[/bold cyan]")
     workers_config = load_workers_config(f"{config_dir}/workers.yaml")
     worker = Worker(gateway, workers_config)
     dispatcher = Dispatcher(worker, max_workers=max_workers)
-    results = dispatcher.dispatch(plan, output_dir=output_dir)
+    results = dispatcher.dispatch(plan, output_dir=output_dir, memory_context=memory_context)
 
     # 汇总结果
     console.print("\n[bold green]📁 输出文件：[/bold green]")
@@ -160,7 +192,7 @@ def build_review_section(review) -> str:
 
 def _maybe_insert_run_subcommand(argv: list[str]) -> list[str]:
     """如果没有显式指定子命令，默认插入 run 子命令"""
-    known_commands = {"setup", "agent-setup", "run", "--help", "-h", "--version"}
+    known_commands = {"setup", "agent-setup", "chat", "run", "--help", "-h", "--version"}
     if len(argv) > 1 and argv[1] not in known_commands:
         argv.insert(1, "run")
     return argv

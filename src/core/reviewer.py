@@ -22,12 +22,13 @@ class Reviewer:
         self.gateway = gateway
         self.config = self._load_config(config_path)
         reviewer_cfg = self.config.get("reviewer", {})
-        self.model = (
+        preferred = (
             model_override
             or reviewer_cfg.get("model")
             or gateway.get_main_model()
             or "glm-ark"
         )
+        self.model = gateway.resolve_model(preferred)
         self.system_prompt = reviewer_cfg.get("system_prompt", self._default_system_prompt())
 
     def _load_config(self, path: str) -> dict:

@@ -59,3 +59,9 @@ Thumbs.db
 # Private notes (not for GitHub)
 private/
 
+# Runtime data
+sessions/
+memory/
+config/memory/
+config/ui_state.yaml
+config/*.bak

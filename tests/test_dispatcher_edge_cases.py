@@ -11,7 +11,13 @@ from src.models.schemas import ChatResponse, Task, TaskPlan, TaskResult
 def _mock_worker(results_map: dict[str, TaskResult]) -> Worker:
     worker = MagicMock(spec=Worker)
 
-    def side_effect(task: Task, output_dir: str = "output", context: dict | None = None):
+    def side_effect(
+        task: Task,
+        output_dir: str = "output",
+        context: dict | None = None,
+        progress_callback=None,
+        memory_context: str | None = None,
+    ):
         return results_map[task.id]
 
     worker.execute = MagicMock(side_effect=side_effect)

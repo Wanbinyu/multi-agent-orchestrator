@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any, Callable
 
 import yaml
 
@@ -12,6 +13,9 @@ from src.tools.file_tools import write_output_files, write_text_file
 from src.tools.worker_tools import execute_tool_call
 
 
+ProgressCallback = Callable[[str, dict[str, Any]], None]
+
+
 class Worker:
     """执行单一子任务"""
 
@@ -19,7 +23,14 @@ class Worker:
         self.gateway = gateway
         self.workers_config = workers_config
 
-    def execute(self, task: Task, output_dir: str = "output", context: dict[str, str] | None = None) -> TaskResult:
+    def execute(
+        self,
+        task: Task,
+        output_dir: str = "output",
+        context: dict[str, str] | None = None,
+        progress_callback: ProgressCallback | None = None,
+        memory_context: str | None = None,
+    ) -> TaskResult:
         """执行一个子任务"""
         worker_cfg = self.workers_config.get(task.type)
         if not worker_cfg:
@@ -59,6 +70,9 @@ class Worker:
                 context_lines.append(f"--- [{dep_id}] 结束 ---\n")
             user_content += "\n".join(context_lines)
 
+        if memory_context:
+            user_content = f"【项目记忆与上下文】\n{memory_context}\n\n" + user_content
+
         user_content += f"""
 {build_tool_instructions(tools)}
 
@@ -70,9 +84,10 @@ class Worker:
         ]
 
         try:
+            model_name = self.gateway.resolve_model(task.assigned_model)
             response = self.gateway.chat(
                 messages=messages,
-                model_name=task.assigned_model,
+                model_name=model_name,
                 task_id=task.id,
                 max_tokens=4096,
                 temperature=0.2,
@@ -86,12 +101,33 @@ class Worker:
                 allowed_prefixes=worker_cfg.get("allowed_commands"),
             )
 
+            # 收集通过 write_file 工具实际写入的文件
+            files_from_tools: list[str] = []
+            for tr in tool_results:
+                if tr["tool"] == "write_file" and tr["success"]:
+                    path = tr["params"].get("path")
+                    if path and path not in files_from_tools:
+                        files_from_tools.append(path)
+
             # 写入代码块到文件
             files_written = write_output_files(content, task_output_dir)
 
             # 兜底：如果没有解析到代码块，把完整响应内容保存为 content.txt
             if not files_written and content.strip():
                 files_written.append(write_text_file("content.txt", content, task_output_dir))
+
+            files_written.extend(f for f in files_from_tools if f not in files_written)
+
+            # 如果既没有内容也没有文件，判定为执行失败
+            if not content.strip() and not files_written:
+                return TaskResult(
+                    task=task,
+                    success=False,
+                    content="",
+                    error="模型未返回可执行内容或文件",
+                    response=response,
+                    files_written=[],
+                )
 
             return TaskResult(
                 task=task,
@@ -108,13 +144,34 @@ class Worker:
                 error=str(e),
             )
 
+    def _task_to_payload(self, task: Task, result: TaskResult | None) -> dict[str, Any]:
+        payload = {
+            "id": task.id,
+            "type": task.type,
+            "title": task.title,
+            "assigned_model": task.assigned_model,
+        }
+        if result:
+            payload.update({
+                "success": result.success,
+                "error": result.error,
+                "files_written": result.files_written,
+                "content": result.content,
+            })
+        return payload
+
 
 def build_tool_instructions(tools: list[str]) -> str:
     """根据可用工具生成提示词"""
-    if not tools or tools == ["write_file"]:
+    if not tools:
         return ""
 
-    lines = ["你可以使用以下工具（在回复中以代码块形式调用）："]
+    lines = ["你可以使用以下工具（在回复中以 Markdown 代码块形式调用）："]
+    if "write_file" in tools:
+        lines.append(
+            '- write_file：写入文件。格式：\\n```tool:write_file\\n{"path": "relative/path", "content": "文件内容"}\\n```\\n'
+            "如果用户指定了绝对路径（如 G:\\\\MAO_test\\\\login.js），请直接使用该路径；否则写到当前任务输出目录。"
+        )
     if "read_file" in tools:
         lines.append(
             '- read_file：读取已有文件内容。格式：\\n```tool:read_file\\n{"path": "relative/path"}\\n```'
@@ -123,6 +180,14 @@ def build_tool_instructions(tools: list[str]) -> str:
         lines.append(
             '- run_command：运行测试或构建命令。格式：\\n```tool:run_command\\n{"command": "pytest"}\\n```\\n'
             "注意：命令必须在白名单内，白名单外命令会被拒绝。"
+        )
+    if "search_project_files" in tools:
+        lines.append(
+            '- search_project_files：基于项目索引搜索相关源码文件。格式：\\n```tool:search_project_files\\n{"query": "SessionStore"}\\n```'
+        )
+    if "search_memory" in tools:
+        lines.append(
+            '- search_memory：搜索已保存的长期记忆。格式：\\n```tool:search_memory\\n{"query": "用户偏好"}\\n```'
         )
     return "\n".join(lines)
 

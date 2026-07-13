@@ -5,16 +5,20 @@ from src.core.worker import build_tool_instructions, process_tool_calls
 
 
 def test_build_tool_instructions_with_read_and_run():
-    instructions = build_tool_instructions(["write_file", "read_file", "run_command"])
+    instructions = build_tool_instructions(["write_file", "read_file", "run_command", "search_project_files", "search_memory"])
     assert "read_file" in instructions
     assert "run_command" in instructions
+    assert "search_project_files" in instructions
+    assert "search_memory" in instructions
     assert "tool:read_file" in instructions
-    assert "tool:run_command" in instructions
+    assert "tool:search_project_files" in instructions
 
 
 def test_build_tool_instructions_only_write_file():
     instructions = build_tool_instructions(["write_file"])
-    assert instructions == ""
+    assert "write_file" in instructions
+    assert "tool:write_file" in instructions
+    assert "search_project_files" not in instructions
 
 
 def test_process_tool_calls_read_file(tmp_path):

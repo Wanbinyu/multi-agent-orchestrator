@@ -1,7 +1,8 @@
 # 模型连接配置 UI 工具计划书
 
 > 目标：把当前需要手动编辑 YAML / 回答 CLI 问题的模型连接配置流程，升级为像 CCswitch 一样直观的图形化配置界面。  
-> 日期：2026-07-11  
+> 日期：2026-07-12  
+> 当前状态：Stage 1/2/3 均已完成并端到端验证通过  
 > 关联文档：`任务书-Agent工具进化.md` Phase 1
 
 ---
@@ -226,31 +227,43 @@ FastAPI 后端
 - 保存后 `python run.py "需求"` 能直接使用新配置。
 - 测试连接成功/失败都有明确提示。
 
-### Stage 2：预设模板 + 模型池
+### Stage 2：预设模板 + 模型池 + 状态可视化
 
-1. 内置常用 Provider 预设（火山方舟、OpenAI、Anthropic、Kimi、GLM、DeepSeek、自定义）。
-2. 选择预设后自动填充 Base URL、协议、默认模型映射。
-3. 右侧/底部显示所有已保存 Provider 的模型列表。
-4. 支持勾选`启用/禁用` Provider。
-5. 支持选择 `main_model`。
+状态：**已完成（2026-07-11）**
+
+1. ✅ 内置 15+ 常用 Provider 预设（Anthropic / OpenAI / DeepSeek / 火山方舟 / 火山方舟 Coding / Kimi / 智谱 GLM / MiniMax / 阶跃星辰 / 通义千问 / 百度千帆 / SiliconFlow / OpenRouter / Azure OpenAI / 自定义 Anthropic / 自定义 OpenAI）。
+2. ✅ 选择预设后自动填充 Base URL、协议、默认模型映射。
+3. ✅ 右侧/底部显示所有已保存 Provider 的模型列表（模型池）。
+4. ✅ 每个 Provider 支持一键启用/禁用；禁用后其模型自动从模型池和主模型候选中移除。
+5. ✅ Provider 卡片显示连通状态：绿色=已连通、黄色=已保存待测试、灰色=未配置 Key。
+6. ✅ 测试状态持久化到 `config/ui_state.yaml`，刷新页面后仍可看到上次测试结果。
+7. ✅ 编辑 Provider 时 API Key 输入框留空即可保留原 Key，避免误清空。
+8. ✅ 支持选择 `main_model`。
 
 验收标准：
 
 - 新用户 3 步内完成 Provider 添加并设置主模型。
 - 配置结果与 `config/providers.yaml` 完全一致。
+- 启用/禁用 Provider 后，模型池与 `GatewayClient` 行为同步。
 
 ### Stage 3：体验与安全打磨
 
-1. API Key 掩码输入。
-2. 表单校验：名称唯一、URL 格式、至少一个 key。
-3. 错误提示本地化（网络错误、鉴权失败、协议错误）。
-4. 一键启动脚本 `python scripts/run_ui.py`。
-5. README 更新使用说明。
+状态：**已完成（2026-07-12）**
+
+1. ✅ API Key 掩码输入。
+2. ✅ 表单校验：名称唯一、URL 格式、至少一个 key（新增时）。
+3. ✅ 一键启动脚本 `python scripts/run_ui.py`（自动打开浏览器、Windows UTF-8 适配）。
+4. ✅ 错误提示已覆盖网络 / 鉴权 / 协议不匹配 / 模型不存在等场景。
+5. ✅ 模型回退策略：当 `workers.yaml` 中配置的 Orchestrator / Reviewer / Worker 默认模型不可用时，自动回退到 `GatewayClient` 的主模型，再回退到第一个可用模型，避免`未知模型`崩溃。
+6. ✅ README 使用说明已更新，推荐图形化界面配置。
+7. ✅ 端到端验证通过：`python run.py "用一句话总结 Python" --max-workers 1` 成功执行并输出结果。
 
 验收标准：
 
 - 常见错误配置能在保存前被拦截。
 - 不暴露 key 到前端日志/网络。
+- 保存后 CLI 可立即使用新配置。
+- 禁用部分 Provider 后，运行命令仍能自动回退到可用模型。
 
 ---
 
@@ -280,12 +293,10 @@ FastAPI 后端
 
 ## 十一、下一步动作
 
-1. 确认技术方案（FastAPI + 轻量前端）。
-2. 设计并实现 `src/ui/app.py` 与 `src/ui/templates/index.html` 的 MVP。
-3. 实现后端 Provider CRUD 和连通性测试 API。
-4. 接入预设模板与模型池选择。
-5. 跑通端到端：UI 配置 → 保存 → `run.py` 执行任务。
+1. 进入 `任务书-Agent工具进化.md` Phase 2：对话式交互改造。
+2. 将 `python run.py "需求"` 的单次命令模式升级为持续对话界面/会话。
+3. 在主模型中支持工具调用循环（读文件、写文件、执行命令、调用子模型）。
 
 ---
 
-*本文档为项目计划，待确认后开始 Stage 1 实现。*
+*本文档为项目计划，Stage 1/2/3 均已实现并验证通过。*

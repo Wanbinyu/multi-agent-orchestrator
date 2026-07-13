@@ -1,0 +1,309 @@
+"""Agent 多模型协作分支单元测试"""
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.core.agent import Agent
+from src.core.session import Session
+from src.models.schemas import (
+    ChatResponse,
+    ChatStreamEvent,
+    ReviewResult,
+    StreamChunk,
+    Task,
+    TaskPlan,
+    TaskResult,
+)
+
+
+def _make_session(tmp_path) -> Session:
+    return Session(
+        id="test-session",
+        title="test",
+        created_at="2026-07-12T00:00:00+00:00",
+        updated_at="2026-07-12T00:00:00+00:00",
+        output_dir=str(tmp_path / "output"),
+    )
+
+
+def _collect_events(agent: Agent, text: str) -> list[ChatStreamEvent]:
+    async def _run():
+        return [e async for e in agent.run_turn_stream(text)]
+
+    return asyncio.run(_run())
+
+
+def _mock_gateway(collaborate: bool = True):
+    gateway = MagicMock()
+    gateway.billing.summary.side_effect = [
+        {"total_input_tokens": 0, "total_output_tokens": 0, "total_cost_usd": 0.0},
+        {"total_input_tokens": 100, "total_output_tokens": 50, "total_cost_usd": 0.001},
+    ]
+    gateway.chat_with_main_model.return_value = ChatResponse(
+        content=f'{{"collaborate": {str(collaborate).lower()}}}',
+        model="main",
+        provider="test",
+        input_tokens=10,
+        output_tokens=5,
+        cost_usd=0.0001,
+    )
+    return gateway
+
+
+def test_should_collaborate_false_goes_single_model(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(collaborate=False)
+    gateway.chat_with_main_model_stream.return_value = _async_chunks(
+        StreamChunk(type="delta", content="你好"),
+        StreamChunk(type="usage", input_tokens=5, output_tokens=3, cost_usd=0.00005),
+    )
+    agent = Agent(gateway, session)
+
+    events = _collect_events(agent, "你好")
+
+    assert any(e.type == "delta" for e in events)
+    done = [e for e in events if e.type == "done"][0]
+    assert done.assistant_message == "你好"
+
+
+def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(collaborate=True)
+    agent = Agent(gateway, session)
+
+    t1 = Task(id="t1", type="frontend", title="写前端", input="", assigned_model="glm-ark")
+    t2 = Task(id="t2", type="backend", title="写后端", input="", assigned_model="glm-ark")
+    plan = TaskPlan(summary="开发登录功能", tasks=[t1, t2])
+
+    def _fake_dispatch(plan_obj, output_dir, progress_callback=None, memory_context=None):
+        if progress_callback:
+            progress_callback("task_start", {"id": "t1", "type": "frontend", "title": "写前端", "assigned_model": "glm-ark"})
+            progress_callback("task_complete", {
+                "id": "t1",
+                "type": "frontend",
+                "title": "写前端",
+                "assigned_model": "glm-ark",
+                "success": True,
+                "files_written": ["output/frontend_t1/page.tsx"],
+                "content": "frontend code",
+            })
+            progress_callback("task_start", {"id": "t2", "type": "backend", "title": "写后端", "assigned_model": "glm-ark"})
+            progress_callback("task_complete", {
+                "id": "t2",
+                "type": "backend",
+                "title": "写后端",
+                "assigned_model": "glm-ark",
+                "success": True,
+                "files_written": ["output/backend_t2/api.py"],
+                "content": "backend code",
+            })
+        return [
+            TaskResult(task=t1, success=True, content="frontend code", files_written=["output/frontend_t1/page.tsx"]),
+            TaskResult(task=t2, success=True, content="backend code", files_written=["output/backend_t2/api.py"]),
+        ]
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
+         patch("src.core.dispatcher.Dispatcher") as MockDispatcher, \
+         patch("src.core.reviewer.Reviewer") as MockReviewer:
+        MockOrchestrator.return_value.plan.return_value = plan
+        MockDispatcher.return_value.dispatch.side_effect = _fake_dispatch
+        MockReviewer.return_value.review.return_value = ReviewResult(
+            passed=True,
+            issues=[],
+            final_output="已完成前后端登录功能。",
+        )
+
+        events = _collect_events(agent, "开发一个登录功能")
+
+    plan_events = [e for e in events if e.type == "plan"]
+    task_starts = [e for e in events if e.type == "task_start"]
+    task_completes = [e for e in events if e.type == "task_complete"]
+    review_events = [e for e in events if e.type == "review_complete"]
+    done_events = [e for e in events if e.type == "done"]
+
+    assert len(plan_events) == 1
+    assert plan_events[0].plan["summary"] == "开发登录功能"
+    assert len(plan_events[0].plan["tasks"]) == 2
+
+    assert len(task_starts) == 2
+    assert len(task_completes) == 2
+
+    assert len(review_events) == 1
+    assert review_events[0].review["passed"] is True
+    assert "已完成前后端登录功能" in review_events[0].review["final_output"]
+
+    assert len(done_events) == 1
+    done = done_events[0]
+    assert done.assistant_message == "已完成前后端登录功能。"
+    assert "output/frontend_t1/page.tsx" in done.files_written
+    assert "output/backend_t2/api.py" in done.files_written
+    assert done.input_tokens == 100
+    assert done.output_tokens == 50
+    assert done.cost_usd == pytest.approx(0.001)
+
+    # 最终答案应被追加到会话历史
+    assert session.messages[-1].role == "assistant"
+    assert session.messages[-1].content == "已完成前后端登录功能。"
+
+
+def test_collaboration_stream_handles_task_failure(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(collaborate=True)
+    agent = Agent(gateway, session)
+
+    t1 = Task(id="t1", type="frontend", title="写前端", input="", assigned_model="glm-ark")
+    plan = TaskPlan(summary="开发登录功能", tasks=[t1])
+
+    def _fake_dispatch(plan_obj, output_dir, progress_callback=None, memory_context=None):
+        if progress_callback:
+            progress_callback("task_start", {"id": "t1", "type": "frontend", "title": "写前端", "assigned_model": "glm-ark"})
+            progress_callback("task_complete", {
+                "id": "t1",
+                "type": "frontend",
+                "title": "写前端",
+                "assigned_model": "glm-ark",
+                "success": False,
+                "error": "模型调用失败",
+                "files_written": [],
+            })
+        return [TaskResult(task=t1, success=False, content="", error="模型调用失败")]
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
+         patch("src.core.dispatcher.Dispatcher") as MockDispatcher, \
+         patch("src.core.reviewer.Reviewer") as MockReviewer:
+        MockOrchestrator.return_value.plan.return_value = plan
+        MockDispatcher.return_value.dispatch.side_effect = _fake_dispatch
+        MockReviewer.return_value.review.return_value = ReviewResult(
+            passed=False,
+            issues=["前端任务失败"],
+            final_output="前端任务执行失败，请检查模型配置。",
+        )
+
+        events = _collect_events(agent, "开发一个登录功能")
+
+    complete = [e for e in events if e.type == "task_complete"][0]
+    assert complete.task["success"] is False
+    assert "模型调用失败" in complete.task["error"]
+
+    review = [e for e in events if e.type == "review_complete"][0]
+    assert review.review["passed"] is False
+
+
+def _async_chunks(*events: ChatStreamEvent):
+    async def _gen():
+        for e in events:
+            yield e
+    return _gen()
+
+
+def test_collaboration_approve_mode_requests_permission_then_runs(tmp_path):
+    """approve 模式：协作前产出 permission_request，批准后正常 dispatch"""
+    session = _make_session(tmp_path)
+    session.approval_mode = "approve"
+    gateway = _mock_gateway(collaborate=True)
+    agent = Agent(gateway, session)
+
+    t1 = Task(id="t1", type="frontend", title="写前端", input="", assigned_model="glm-ark")
+    plan = TaskPlan(summary="开发登录功能", tasks=[t1])
+
+    dispatch_count = {"n": 0}
+
+    def _fake_dispatch(plan_obj, output_dir, progress_callback=None, memory_context=None):
+        dispatch_count["n"] += 1
+        if progress_callback:
+            progress_callback("task_complete", {
+                "id": "t1",
+                "type": "frontend",
+                "title": "写前端",
+                "assigned_model": "glm-ark",
+                "success": True,
+                "files_written": ["output/frontend_t1/page.tsx"],
+                "content": "code",
+            })
+        return [TaskResult(task=t1, success=True, content="code", files_written=["output/frontend_t1/page.tsx"])]
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
+         patch("src.core.dispatcher.Dispatcher") as MockDispatcher, \
+         patch("src.core.reviewer.Reviewer") as MockReviewer:
+        MockOrchestrator.return_value.plan.return_value = plan
+        MockDispatcher.return_value.dispatch.side_effect = _fake_dispatch
+        MockReviewer.return_value.review.return_value = ReviewResult(
+            passed=True, issues=[], final_output="已完成登录功能。"
+        )
+
+        async def _run():
+            events = []
+            async for event in agent.run_turn_stream("开发登录功能"):
+                events.append(event)
+                if event.type == "permission_request":
+                    req_id = event.permission_request["request_id"]
+                    asyncio.get_event_loop().call_soon(agent.respond_to_permission, req_id, True)
+            return events
+
+        events = asyncio.run(_run())
+
+    perm = [e for e in events if e.type == "permission_request"]
+    assert len(perm) == 1
+    assert perm[0].permission_request["tool"] == "collaboration"
+    assert perm[0].permission_request["params"]["task_count"] == 1
+    assert dispatch_count["n"] == 1
+    done = [e for e in events if e.type == "done"][0]
+    assert done.assistant_message == "已完成登录功能。"
+
+
+def test_collaboration_approve_mode_cancelled_when_denied(tmp_path):
+    """approve 模式：拒绝后不 dispatch，done 提示已取消"""
+    session = _make_session(tmp_path)
+    session.approval_mode = "approve"
+    gateway = _mock_gateway(collaborate=True)
+    agent = Agent(gateway, session)
+
+    t1 = Task(id="t1", type="frontend", title="写前端", input="", assigned_model="glm-ark")
+    plan = TaskPlan(summary="开发登录功能", tasks=[t1])
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
+         patch("src.core.dispatcher.Dispatcher") as MockDispatcher, \
+         patch("src.core.reviewer.Reviewer") as MockReviewer:
+        MockOrchestrator.return_value.plan.return_value = plan
+
+        async def _run():
+            events = []
+            async for event in agent.run_turn_stream("开发登录功能"):
+                events.append(event)
+                if event.type == "permission_request":
+                    req_id = event.permission_request["request_id"]
+                    asyncio.get_event_loop().call_soon(agent.respond_to_permission, req_id, False)
+            return events
+
+        events = asyncio.run(_run())
+
+    perm = [e for e in events if e.type == "permission_request"]
+    assert len(perm) == 1
+    assert MockDispatcher.return_value.dispatch.called is False
+    done = [e for e in events if e.type == "done"][0]
+    assert "取消" in done.assistant_message
+    assert done.files_written == []
+
+
+def test_collaboration_skipped_in_readonly_mode(tmp_path):
+    """readonly 模式：不触发协作，走单模型路径"""
+    session = _make_session(tmp_path)
+    session.approval_mode = "readonly"
+    gateway = _mock_gateway(collaborate=True)
+    gateway.chat_with_main_model_stream.return_value = _async_chunks(
+        StreamChunk(type="delta", content="只读模式回答"),
+        StreamChunk(type="usage", input_tokens=5, output_tokens=3, cost_usd=0.0),
+    )
+    agent = Agent(gateway, session)
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator:
+        events = _collect_events(agent, "开发登录功能")
+
+    assert not any(e.type == "plan" for e in events)
+    assert not any(e.type == "permission_request" for e in events)
+    assert not any(e.type == "task_start" for e in events)
+    done = [e for e in events if e.type == "done"][0]
+    assert done.assistant_message == "只读模式回答"

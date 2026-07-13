@@ -32,9 +32,10 @@ class ProviderForm(BaseModel):
     provider_name: str = Field(..., min_length=1)
     display_name: str = Field(..., min_length=1)
     base_url: str
-    api_key: str = Field(..., min_length=1)
+    api_key: str = ""
     timeout: int = 120
     models: list[ModelEntry] = Field(..., min_length=1)
+    enabled: bool = True
     set_as_main: bool = False
 
     @field_validator("base_url")
@@ -48,13 +49,27 @@ class ProviderForm(BaseModel):
 class TestConnectionForm(BaseModel):
     provider_type: str
     base_url: str
-    api_key: str = Field(..., min_length=1)
+    api_key: str = ""
     model_id: str = Field(..., min_length=1)
     timeout: int = 30
 
 
 class MainModelForm(BaseModel):
     alias: str
+
+
+class EnabledForm(BaseModel):
+    enabled: bool
+
+
+@router.post("/api/config/providers/{provider_name}/enabled")
+def set_provider_enabled(provider_name: str, form: EnabledForm) -> dict[str, Any]:
+    cfg = config_manager.load_config()
+    if provider_name not in cfg.get("providers", {}):
+        raise HTTPException(status_code=404, detail=f"Provider {provider_name} 不存在")
+    cfg["providers"][provider_name]["enabled"] = form.enabled
+    config_manager.save_yaml(config_manager.DEFAULT_CONFIG_PATH, cfg)
+    return {"success": True, "enabled": form.enabled}
 
 
 @router.get("/api/presets")
@@ -82,12 +97,17 @@ def get_preset_detail(preset_key: str) -> dict[str, Any]:
 @router.get("/api/config")
 def get_config() -> dict[str, Any]:
     cfg = config_manager.load_config()
-    # API Key 不返回给前端
+    ui_state = config_manager.load_ui_state()
+    # API Key 不返回给前端，只返回是否有 key
     providers: dict[str, Any] = {}
     for name, data in cfg.get("providers", {}).items():
         masked = dict(data)
         masked["api_keys"] = ["${...}"]
         masked["env_var"] = get_env_var_name(name)
+        masked["has_key"] = config_manager.get_api_key(
+            config_manager.DEFAULT_ENV_PATH, name
+        ) is not None
+        masked["test_status"] = ui_state.get("provider_tests", {}).get(name)
         providers[name] = masked
     return {
         "providers": providers,
@@ -98,10 +118,6 @@ def get_config() -> dict[str, Any]:
 
 @router.post("/api/config/providers")
 def create_or_update_provider(form: ProviderForm) -> dict[str, Any]:
-    cfg = config_manager.load_config()
-    if form.provider_name in cfg.get("providers", {}) and form.set_as_main:
-        pass
-
     preset = get_preset(form.preset_key)
     model_map = preset.get("model_map")
 
@@ -117,6 +133,7 @@ def create_or_update_provider(form: ProviderForm) -> dict[str, Any]:
             timeout=form.timeout,
             models=[m.model_dump() for m in form.models],
             model_map=model_map,
+            enabled=form.enabled,
             set_as_main=form.set_as_main,
         )
     except Exception as e:
@@ -157,6 +174,14 @@ def test_provider(provider_name: str, payload: TestConnectionForm) -> dict[str, 
         model_id=payload.model_id,
         timeout=payload.timeout,
     )
+
+    config_manager.record_test_state(
+        config_manager.DEFAULT_UI_STATE_PATH,
+        provider_name,
+        success=result.success,
+        error_message=result.error_message,
+    )
+
     return {
         "success": result.success,
         "provider": result.provider_name,

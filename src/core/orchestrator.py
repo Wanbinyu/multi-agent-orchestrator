@@ -58,23 +58,26 @@ class Orchestrator:
     def __init__(self, gateway: GatewayClient, config_path: str = "config/workers.yaml", model_override: str | None = None):
         self.gateway = gateway
         self.config = self._load_config(config_path)
-        self.model = (
+        preferred = (
             model_override
             or self.config.get("orchestrator", {}).get("model")
             or gateway.get_main_model()
             or "claude-fable-5"
         )
+        self.model = gateway.resolve_model(preferred)
         self.system_prompt = self.config.get("orchestrator", {}).get("system_prompt", "")
 
     def _load_config(self, path: str) -> dict:
         with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
-    def plan(self, user_request: str) -> TaskPlan:
+    def plan(self, user_request: str, memory_context: str | None = None) -> TaskPlan:
         """将用户需求拆分为任务计划"""
         scenario = _detect_scenario(user_request)
         scenario_instruction = SCENARIO_INSTRUCTIONS.get(scenario, "")
         system_prompt = f"{self.system_prompt}\n{scenario_instruction}".strip()
+        if memory_context:
+            system_prompt = f"{system_prompt}\n\n{memory_context}".strip()
 
         messages = [
             ChatMessage(role="system", content=system_prompt),
@@ -96,9 +99,10 @@ class Orchestrator:
         available_workers = self.config.get("available_workers", {})
         for task in tasks:
             if not task.assigned_model:
-                task.assigned_model = available_workers.get(task.type, {}).get(
-                    "default_model", "glm-ark"
+                default_model = available_workers.get(task.type, {}).get(
+                    "default_model"
                 )
+                task.assigned_model = self.gateway.resolve_model(default_model)
 
         return TaskPlan(summary=plan_data.get("summary", ""), tasks=tasks)
 

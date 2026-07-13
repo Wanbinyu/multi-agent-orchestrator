@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from src.ui.routers import providers
+from src.ui.routers import chat, memory, providers
 
 app = FastAPI(title="Multi-Agent Orchestrator - 模型连接配置")
 
@@ -17,6 +17,8 @@ app.mount("/static", StaticFiles(directory=str(_base_dir / "static")), name="sta
 templates = Jinja2Templates(directory=str(_base_dir / "templates"))
 
 app.include_router(providers.router)
+app.include_router(chat.router)
+app.include_router(memory.router)
 
 
 @app.get("/")

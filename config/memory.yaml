@@ -1,0 +1,22 @@
+enabled: true
+storage_path: "memory"
+max_injected_chars: 3000
+indexed_extensions:
+  - ".py"
+  - ".yaml"
+  - ".yml"
+  - ".md"
+  - ".js"
+  - ".ts"
+  - ".json"
+excluded_dirs:
+  - ".git"
+  - "__pycache__"
+  - ".claude"
+  - "node_modules"
+  - "venv"
+  - ".venv"
+  - "sessions"
+  - "memory"
+  - "output"
+max_indexed_file_size: 500000

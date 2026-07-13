@@ -138,7 +138,41 @@ from src.ui.presets.builtin import example  # noqa: F401
 
 ---
 
-## 七、测试
+## 运行时行为与 UI 状态
+
+### Provider 启用/禁用
+
+每个 Provider 在 `providers.yaml` 中都有一个 `enabled` 字段（默认 `true`）。
+
+- UI 左侧卡片提供启用/禁用开关，调用 `POST /api/config/providers/{name}/enabled`。
+- 被禁用的 Provider：
+  - 其模型不会出现在`模型池`和`主模型`下拉框中。
+  - `GatewayClient` 加载配置时会跳过该 Provider 及其模型。
+  - 如果当前 `main_model` 正好属于被禁用的 Provider，`GatewayClient` 会自动回退到第一个可用模型。
+
+### API Key 保留策略
+
+- API Key 仅保存在本地 `.env`，从不会返回给浏览器。
+- `GET /api/config` 只返回每个 Provider 的 `has_key`（是否有 key）和 `env_var` 名称。
+- 编辑 Provider 时，前端将 API Key 输入框清空并显示占位提示`已保存，留空则保持不变`；后端会用 `.env` 中已存在的 key 补齐空值，避免误删。
+
+### 测试状态持久化
+
+连通性测试结果写入 `config/ui_state.yaml`：
+
+```yaml
+provider_tests:
+  kimi:
+    success: true
+    error_message: ""
+    tested_at: "2026-07-11T12:34:56+00:00"
+```
+
+刷新页面后，Provider 卡片会保留上次测试成功/失败状态和时间戳。
+
+---
+
+## 测试
 
 新增或修改预设后，运行：
 

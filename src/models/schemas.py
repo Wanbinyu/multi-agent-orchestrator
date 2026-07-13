@@ -29,6 +29,7 @@ class ProviderConfig(BaseModel):
     api_keys: list[str]
     timeout: int = 120
     rpm_limit: int = 60
+    enabled: bool = True
     model_map: dict[str, str] = Field(default_factory=dict, description="逻辑模型名 -> 上游真实模型名映射")
 
 
@@ -55,6 +56,18 @@ class ChatMessage(BaseModel):
     content: str
 
 
+ApprovalMode = Literal["auto", "approve", "readonly"]
+
+
+class PermissionRequest(BaseModel):
+    """权限确认请求"""
+
+    request_id: str
+    tool: str
+    params: dict[str, Any]
+    message: str
+
+
 class ChatResponse(BaseModel):
     """统一响应格式"""
     content: str
@@ -64,6 +77,48 @@ class ChatResponse(BaseModel):
     output_tokens: int = 0
     cost_usd: float = 0.0
     raw_response: Any = None
+
+
+class StreamChunk(BaseModel):
+    """流式输出内部块（Provider -> Gateway -> Agent）"""
+
+    type: Literal["delta", "usage"]
+    content: str | None = None  # delta 文本
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+class ChatStreamEvent(BaseModel):
+    """SSE 事件消息体（Agent -> Web/CLI）"""
+
+    type: Literal[
+        "delta",
+        "usage",
+        "done",
+        "error",
+        "plan",
+        "task_start",
+        "task_complete",
+        "review_complete",
+        "permission_request",
+    ]
+    delta: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    assistant_message: str = ""
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    files_written: list[str] = Field(default_factory=list)
+    error: str = ""
+
+    # 多模型协作相关 payload
+    plan: dict[str, Any] = Field(default_factory=dict)
+    task: dict[str, Any] = Field(default_factory=dict)
+    review: dict[str, Any] = Field(default_factory=dict)
+
+    # 权限确认请求 payload
+    permission_request: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskResult(BaseModel):

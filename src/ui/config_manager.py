@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,10 @@ import yaml
 
 DEFAULT_CONFIG_PATH = "config/providers.yaml"
 DEFAULT_ENV_PATH = ".env"
+DEFAULT_UI_STATE_PATH = "config/ui_state.yaml"
+
+
+_PLACEHOLDER_KEYS = {"", "••••••", "******", "${...}"}
 
 
 def _resolve_config_path(config_path: str | None) -> str:
@@ -21,6 +26,10 @@ def _resolve_config_path(config_path: str | None) -> str:
 
 def _resolve_env_path(env_path: str | None) -> str:
     return env_path if env_path is not None else DEFAULT_ENV_PATH
+
+
+def _resolve_ui_state_path(ui_state_path: str | None) -> str:
+    return ui_state_path if ui_state_path is not None else DEFAULT_UI_STATE_PATH
 
 
 def load_config(config_path: str | None = None) -> dict[str, Any]:
@@ -106,6 +115,16 @@ def get_api_key(env_path: str | None, provider_name: str) -> str | None:
     return None
 
 
+def _coalesce_api_key(env_path: str | None, provider_name: str, api_key: str) -> str:
+    """如果 api_key 为空或占位符，则尝试读取已保存的 key"""
+    if api_key and api_key not in _PLACEHOLDER_KEYS:
+        return api_key
+    existing = get_api_key(env_path, provider_name)
+    if existing:
+        return existing
+    raise ValueError("API Key 不能为空")
+
+
 def save_provider(
     config_path: str | None,
     env_path: str | None,
@@ -118,10 +137,15 @@ def save_provider(
     models: list[dict[str, Any]],
     model_map: dict[str, str] | None = None,
     rpm_limit: int = 60,
+    enabled: bool = True,
     set_as_main: bool = False,
 ) -> None:
     """新增或更新一个 Provider，同时更新 .env 中的 API Key"""
     cfg = load_config(config_path)
+    existing_provider = cfg.get("providers", {}).get(provider_name, {})
+
+    # key 保留策略：留空则沿用旧 key
+    final_key = _coalesce_api_key(env_path, provider_name, api_key)
 
     provider_cfg: dict[str, Any] = {
         "name": display_name,
@@ -130,9 +154,14 @@ def save_provider(
         "api_keys": [f"${{{_env_var_name(provider_name)}}}"],
         "timeout": timeout,
         "rpm_limit": rpm_limit,
+        "enabled": enabled,
     }
     if model_map:
         provider_cfg["model_map"] = model_map
+
+    # 继承旧 provider 的 enabled 状态（编辑时未显式传则保持原值）
+    if "enabled" in existing_provider and enabled is True and existing_provider.get("enabled") is False:
+        provider_cfg["enabled"] = False
 
     cfg["providers"][provider_name] = provider_cfg
 
@@ -157,7 +186,7 @@ def save_provider(
             cfg["main_model"] = models[0]["alias"]
 
     save_yaml(config_path, cfg)
-    save_api_key(env_path, provider_name, api_key)
+    save_api_key(env_path, provider_name, final_key)
 
 
 def delete_provider(config_path: str | None, env_path: str | None, provider_name: str) -> None:
@@ -173,6 +202,8 @@ def delete_provider(config_path: str | None, env_path: str | None, provider_name
         cfg["main_model"] = next(iter(cfg["models"]), None)
     save_yaml(config_path, cfg)
     delete_api_key(env_path, provider_name)
+    # 同时清理测试状态
+    delete_test_state(ui_state_path=None, provider_name=provider_name)
 
 
 def set_main_model(config_path: str | None, model_alias: str) -> None:
@@ -182,3 +213,46 @@ def set_main_model(config_path: str | None, model_alias: str) -> None:
         raise ValueError(f"未知模型别名: {model_alias}")
     cfg["main_model"] = model_alias
     save_yaml(config_path, cfg)
+
+
+def load_ui_state(ui_state_path: str | None = None) -> dict[str, Any]:
+    """加载 UI 状态（测试记录等）"""
+    path = Path(_resolve_ui_state_path(ui_state_path))
+    if not path.exists():
+        return {"provider_tests": {}}
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return {
+        "provider_tests": data.get("provider_tests", {}),
+    }
+
+
+def save_ui_state(ui_state_path: str | None, data: dict[str, Any]) -> None:
+    """保存 UI 状态"""
+    path = Path(_resolve_ui_state_path(ui_state_path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
+def record_test_state(
+    ui_state_path: str | None,
+    provider_name: str,
+    success: bool,
+    error_message: str = "",
+) -> None:
+    """记录 Provider 连通性测试结果"""
+    state = load_ui_state(ui_state_path)
+    state["provider_tests"][provider_name] = {
+        "success": success,
+        "error_message": error_message,
+        "tested_at": datetime.now(timezone.utc).isoformat(),
+    }
+    save_ui_state(ui_state_path, state)
+
+
+def delete_test_state(ui_state_path: str | None, provider_name: str) -> None:
+    """删除 Provider 的测试状态"""
+    state = load_ui_state(ui_state_path)
+    state["provider_tests"].pop(provider_name, None)
+    save_ui_state(ui_state_path, state)

@@ -1,5 +1,5 @@
 """CLI 入口单元测试"""
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -22,6 +22,8 @@ def test_run_help_shows_all_options():
     assert "-w" in result.output
     assert "--orchestrator-model" in result.output
     assert "-m" in result.output
+    assert "--yes" in result.output
+    assert "-y" in result.output
 
 
 def test_setup_help_shows_config_option():
@@ -114,8 +116,8 @@ def test_run_command_executes_full_flow(tmp_path, monkeypatch):
     assert result_invoke.exit_code == 0, result_invoke.output
     assert "开始处理需求" in result_invoke.output
     assert "审查通过" in result_invoke.output
-    mock_orchestrator.plan.assert_called_once_with("开发一个登录页面")
-    mock_dispatcher.dispatch.assert_called_once_with(plan, output_dir=str(output_dir))
+    mock_orchestrator.plan.assert_called_once_with("开发一个登录页面", memory_context=ANY)
+    mock_dispatcher.dispatch.assert_called_once_with(plan, output_dir=str(output_dir), memory_context=ANY)
     mock_reviewer.review.assert_called_once()
 
 

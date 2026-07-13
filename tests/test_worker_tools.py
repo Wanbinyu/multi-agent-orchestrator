@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.tools.worker_tools import read_file, run_command
+from src.tools.worker_tools import read_file, run_command, write_file
 
 
 def test_read_file_success(tmp_path):
@@ -52,3 +52,17 @@ def test_run_command_timeout(tmp_path):
     result = run_command("python -c \"import time; time.sleep(5)\"", str(tmp_path), timeout=1)
     assert result.success is False
     assert "超时" in result.error
+
+
+def test_write_file_relative(tmp_path):
+    result = write_file("sub/hello.txt", "hello", str(tmp_path))
+    assert result.success is True
+    assert (tmp_path / "sub" / "hello.txt").read_text(encoding="utf-8") == "hello"
+
+
+def test_write_file_absolute_path(tmp_path):
+    """用户指定绝对路径时应直接写入该路径，不受 base_dir 限制"""
+    target = tmp_path / "external.txt"
+    result = write_file(str(target), "abc", str(tmp_path / "output"))
+    assert result.success is True
+    assert target.read_text(encoding="utf-8") == "abc"

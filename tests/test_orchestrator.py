@@ -19,6 +19,7 @@ def _mock_gateway(response_content: str, main_model: str | None = "main-model") 
         cost_usd=0.0001,
     )
     gateway.get_main_model.return_value = main_model
+    gateway.resolve_model = MagicMock(side_effect=lambda preferred: preferred or main_model or "claude-fable-5")
     return gateway
 
 
@@ -102,7 +103,7 @@ def test_plan_uses_fallback_when_worker_default_missing(tmp_path):
     orchestrator = Orchestrator(gateway, config_path=str(config_path))
     plan = orchestrator.plan("未知类型")
 
-    assert plan.tasks[0].assigned_model == "glm-ark"
+    assert plan.tasks[0].assigned_model == "main-model"
 
 
 def test_parse_json_bare_json(tmp_path):

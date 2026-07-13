@@ -53,7 +53,7 @@
     const data = await api("/api/presets");
     state.presets = data.presets || [];
     els.presetSelect.innerHTML = state.presets
-      .map((p) => `<option value="${p.key}">${p.name}</option>`)
+      .map((p) => `<option value="${p.key}">${escapeHtml(p.name)}</option>`)
       .join("");
     await applyPreset(state.presets[0]?.key);
   }
@@ -71,44 +71,108 @@
     }
   }
 
+  function providerStatus(p) {
+    if (p.test_status?.success) return { cls: "status-success", text: "已连通" };
+    if (p.has_key) return { cls: "status-pending", text: "待测试" };
+    return { cls: "status-empty", text: "未配置 Key" };
+  }
+
+  function formatTestedAt(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleString("zh-CN", { hour12: false });
+  }
+
   function renderProviderList() {
     els.providerList.innerHTML = "";
     const names = Object.keys(state.config.providers || {});
     if (names.length === 0) {
       els.providerList.innerHTML =
-        '<li class="provider-item" style="cursor:default"><span class="meta">暂无 Provider，点击右上角添加</span></li>';
+        '<li class="provider-item empty" style="cursor:default"><span class="meta">暂无 Provider，点击右上角添加</span></li>';
       return;
     }
     names.forEach((name) => {
       const p = state.config.providers[name];
+      const status = providerStatus(p);
+      const isActive = state.editingProvider === name;
       const li = document.createElement("li");
-      li.className =
-        "provider-item" + (state.editingProvider === name ? " active" : "");
+      li.className = "provider-item" + (isActive ? " active" : "");
+      li.dataset.name = name;
       li.innerHTML = `
-        <div class="name">${escapeHtml(name)}</div>
-        <div class="meta">${escapeHtml(p.name)} · ${escapeHtml(p.type)}</div>
+        <div class="provider-row">
+          <span class="status-dot ${status.cls}" title="${escapeHtml(
+            status.text
+          )}"></span>
+          <div class="provider-info">
+            <div class="name">${escapeHtml(name)}</div>
+            <div class="meta">${escapeHtml(p.name)} · ${escapeHtml(p.type)}</div>
+          </div>
+          <label class="switch" title="启用/禁用">
+            <input type="checkbox" class="toggle-enabled" ${p.enabled !== false ? "checked" : ""}>
+            <span class="slider"></span>
+          </label>
+        </div>
+        ${p.test_status
+          ? `<div class="test-meta">上次测试: ${p.test_status.success ? "✅ 成功" : "❌ 失败"} · ${formatTestedAt(p.test_status.tested_at)}</div>`
+          : ""}
       `;
-      li.addEventListener("click", () => editProvider(name));
+
+      // 切换启用状态
+      const toggle = li.querySelector(".toggle-enabled");
+      toggle.addEventListener("change", (e) => {
+        e.stopPropagation();
+        toggleProvider(name, e.target.checked);
+      });
+
+      // 点击卡片进入编辑
+      li.addEventListener("click", (e) => {
+        if (e.target.closest(".switch")) return;
+        editProvider(name);
+      });
+
       els.providerList.appendChild(li);
     });
   }
 
+  function enabledProviders() {
+    return Object.entries(state.config.providers || {})
+      .filter(([, p]) => p.enabled !== false)
+      .map(([name]) => name);
+  }
+
+  function enabledModels() {
+    const providers = new Set(enabledProviders());
+    return Object.entries(state.config.models || {})
+      .filter(([, data]) => providers.has(data.provider))
+      .map(([alias, data]) => ({ alias, ...data }));
+  }
+
   function renderModelPool() {
-    const models = state.config.models || {};
-    const aliases = Object.keys(models);
+    const models = enabledModels();
+    const aliases = models.map((m) => m.alias);
+
     els.mainModelSelect.innerHTML = aliases
       .map(
         (a) =>
           `<option value="${escapeHtml(a)}" ${a === state.config.main_model ? "selected" : ""}>` +
-          `${escapeHtml(a)} (${escapeHtml(models[a].model_id)})</option>`
+          `${escapeHtml(a)}</option>`
       )
       .join("");
 
-    els.modelPool.innerHTML = aliases
-      .map((a) => {
-        const isMain = a === state.config.main_model;
-        return `<span class="model-tag ${isMain ? "main" : ""}">${isMain ? "⭐ " : ""}${escapeHtml(
-          a
+    if (aliases.length === 0) {
+      els.modelPool.innerHTML =
+        '<span class="model-tag">暂无可用模型，请添加并启用 Provider</span>';
+      return;
+    }
+
+    els.modelPool.innerHTML = models
+      .map((m) => {
+        const isMain = m.alias === state.config.main_model;
+        return `<span class="model-tag ${isMain ? "main" : ""}" title="${escapeHtml(
+          m.model_id
+        )} · ${escapeHtml(m.provider)}">${isMain ? "⭐ " : ""}${escapeHtml(
+          m.alias
         )}</span>`;
       })
       .join("");
@@ -174,6 +238,8 @@
     els.baseUrl.value = p.base_url;
     els.timeout.value = p.timeout || 120;
     els.apiKey.value = "";
+    els.apiKey.placeholder = "已保存，留空则保持不变";
+    els.apiKey.required = false;
     els.setAsMain.checked = false;
     els.btnDelete.disabled = false;
     els.presetSelect.value = preset?.key || "";
@@ -189,6 +255,7 @@
       }));
     renderModelRowsFromPreset(owned);
     renderProviderList();
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function resetForm() {
@@ -198,6 +265,8 @@
     els.btnDelete.disabled = true;
     els.formTitle.textContent = "添加 Provider";
     els.testResult.classList.add("hidden");
+    els.apiKey.placeholder = "sk-...";
+    els.apiKey.required = true;
     applyPreset(els.presetSelect.value);
     renderProviderList();
   }
@@ -218,6 +287,7 @@
       api_key: els.apiKey.value.trim(),
       timeout: parseInt(els.timeout.value, 10) || 120,
       models,
+      enabled: true,
       set_as_main: els.setAsMain.checked,
     };
 
@@ -241,6 +311,7 @@
       return;
     }
     const preset = state.currentPreset;
+    const name = els.providerName.value.trim() || "new";
     const payload = {
       provider_type: preset?.type || "openai",
       base_url: els.baseUrl.value.trim(),
@@ -250,19 +321,31 @@
     };
     showResult("正在测试连接...", true, true);
     try {
-      const res = await api(
-        `/api/config/providers/${encodeURIComponent(
-          els.providerName.value.trim() || "new"
-        )}/test`,
-        { method: "POST", body: JSON.stringify(payload) }
-      );
+      const res = await api(`/api/config/providers/${encodeURIComponent(name)}/test`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
       if (res.success) {
         showResult(`✅ 连接成功 · ${res.response_time_ms}ms`, true);
       } else {
         showResult(`❌ 连接失败：${res.error_message}`, false);
       }
+      await loadConfig();
     } catch (err) {
       showResult(err.message, false);
+    }
+  }
+
+  async function toggleProvider(name, enabled) {
+    try {
+      await api(`/api/config/providers/${encodeURIComponent(name)}/enabled`, {
+        method: "POST",
+        body: JSON.stringify({ enabled }),
+      });
+      await loadConfig();
+    } catch (err) {
+      alert(err.message);
+      await loadConfig();
     }
   }
 

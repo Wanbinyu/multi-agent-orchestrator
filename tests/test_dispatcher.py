@@ -11,7 +11,13 @@ from src.models.schemas import ChatResponse, Task, TaskPlan, TaskResult
 def _mock_worker(results_map: dict[str, TaskResult]) -> Worker:
     worker = MagicMock(spec=Worker)
 
-    def side_effect(task: Task, output_dir: str = "output", context: dict | None = None):
+    def side_effect(
+        task: Task,
+        output_dir: str = "output",
+        context: dict | None = None,
+        progress_callback=None,
+        memory_context: str | None = None,
+    ):
         return results_map[task.id]
 
     worker.execute = MagicMock(side_effect=side_effect)
@@ -55,8 +61,8 @@ def test_dispatch_parallel_when_no_dependencies():
 
     assert len(results) == 2
     assert all(r.success for r in results)
-    worker.execute.assert_any_call(t1, "output", {})
-    worker.execute.assert_any_call(t2, "output", {})
+    worker.execute.assert_any_call(t1, "output", {}, None, None)
+    worker.execute.assert_any_call(t2, "output", {}, None, None)
 
 
 def test_dispatch_respects_dependencies():
