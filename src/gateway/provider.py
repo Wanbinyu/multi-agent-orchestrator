@@ -100,13 +100,17 @@ class AnthropicProvider(BaseProvider):
                 chat_messages.append({"role": m.role, "content": _clean_text_for_api(m.content)})
 
         upstream_model_id = self.map_model_id(model_config.model_id)
-        response = client.messages.create(
-            model=upstream_model_id,
-            max_tokens=kwargs.get("max_tokens", 4096),
-            system=system_msg or anthropic.NOT_GIVEN,
-            messages=chat_messages,
-            temperature=kwargs.get("temperature", 0.2),
-        )
+        request_kwargs: dict[str, Any] = {
+            "model": upstream_model_id,
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "system": system_msg or anthropic.NOT_GIVEN,
+            "messages": chat_messages,
+            "temperature": kwargs.get("temperature", 0.2),
+        }
+        tools = kwargs.get("tools")
+        if tools:
+            request_kwargs["tools"] = tools
+        response = client.messages.create(**request_kwargs)
 
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
@@ -142,13 +146,17 @@ class AnthropicProvider(BaseProvider):
                 chat_messages.append({"role": m.role, "content": _clean_text_for_api(m.content)})
 
         upstream_model_id = self.map_model_id(model_config.model_id)
-        with client.messages.stream(
-            model=upstream_model_id,
-            max_tokens=kwargs.get("max_tokens", 4096),
-            system=system_msg or anthropic.NOT_GIVEN,
-            messages=chat_messages,
-            temperature=kwargs.get("temperature", 0.2),
-        ) as stream:
+        stream_kwargs: dict[str, Any] = {
+            "model": upstream_model_id,
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "system": system_msg or anthropic.NOT_GIVEN,
+            "messages": chat_messages,
+            "temperature": kwargs.get("temperature", 0.2),
+        }
+        tools = kwargs.get("tools")
+        if tools:
+            stream_kwargs["tools"] = tools
+        with client.messages.stream(**stream_kwargs) as stream:
             current_tool: dict[str, Any] | None = None
             real_usage = False
             full_content = ""
@@ -180,12 +188,7 @@ class AnthropicProvider(BaseProvider):
                     except json.JSONDecodeError:
                         tool_input = {}
                     tool_name = current_tool["name"]
-                    params = {
-                        k: v
-                        for k, v in tool_input.items()
-                        if k in {"path", "content", "command"}
-                    }
-                    tool_md = f"```tool:{tool_name}\n{json.dumps(params, ensure_ascii=False)}\n```"
+                    tool_md = f"```tool:{tool_name}\n{json.dumps(tool_input, ensure_ascii=False)}\n```"
                     full_content += tool_md
                     yield StreamChunk(type="delta", content=tool_md)
                     current_tool = None
@@ -229,11 +232,8 @@ class AnthropicProvider(BaseProvider):
                 parts.append(block.text)
             elif block_type == "tool_use":
                 tool_input = getattr(block, "input", {}) or {}
-                params = {
-                    k: v for k, v in tool_input.items() if k in {"path", "content", "command"}
-                }
                 parts.append(
-                    f"```tool:{getattr(block, 'name', '')}\n{json.dumps(params, ensure_ascii=False)}\n```"
+                    f"```tool:{getattr(block, 'name', '')}\n{json.dumps(tool_input, ensure_ascii=False)}\n```"
                 )
             # thinking 块不加入对话内容，避免刷屏和上下文膨胀
         return "\n".join(parts)
@@ -258,12 +258,16 @@ class OpenAICompatibleProvider(BaseProvider):
             timeout=self.config.timeout,
         )
 
-        response = client.chat.completions.create(
-            model=self.map_model_id(model_config.model_id),
-            messages=[{"role": m.role, "content": _clean_text_for_api(m.content)} for m in messages],
-            max_tokens=kwargs.get("max_tokens", 4096),
-            temperature=kwargs.get("temperature", 0.2),
-        )
+        request_kwargs: dict[str, Any] = {
+            "model": self.map_model_id(model_config.model_id),
+            "messages": [{"role": m.role, "content": _clean_text_for_api(m.content)} for m in messages],
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "temperature": kwargs.get("temperature", 0.2),
+        }
+        tools = kwargs.get("tools")
+        if tools:
+            request_kwargs["tools"] = tools
+        response = client.chat.completions.create(**request_kwargs)
 
         input_tokens = response.usage.prompt_tokens if response.usage else 0
         output_tokens = response.usage.completion_tokens if response.usage else 0
@@ -307,6 +311,9 @@ class OpenAICompatibleProvider(BaseProvider):
             "temperature": kwargs.get("temperature", 0.2),
             "stream": True,
         }
+        tools = kwargs.get("tools")
+        if tools:
+            request_kwargs["tools"] = tools
 
         # 部分 OpenAI 兼容服务不支持 stream_options，捕获后降级
         try:
@@ -336,7 +343,6 @@ class OpenAICompatibleProvider(BaseProvider):
                     params = json.loads(args)
                 except json.JSONDecodeError:
                     params = {}
-                params = {k: v for k, v in params.items() if k in {"path", "content", "command"}}
                 markdown += f"```tool:{name}\n{json.dumps(params, ensure_ascii=False)}\n```\n"
             pending_tool_calls.clear()
             return markdown
@@ -413,7 +419,6 @@ class OpenAICompatibleProvider(BaseProvider):
                 params = json.loads(getattr(fn, "arguments", "") or "{}")
             except json.JSONDecodeError:
                 params = {}
-            params = {k: v for k, v in params.items() if k in {"path", "content", "command"}}
             parts.append(f"```tool:{name}\n{json.dumps(params, ensure_ascii=False)}\n```")
         return "\n".join(parts)
 
@@ -430,5 +435,13 @@ def create_provider(name: str, config: ProviderConfig) -> BaseProvider:
         return AnthropicProvider(name, config)
     elif config.type == "openai":
         return OpenAICompatibleProvider(name, config)
+    elif config.type == "ollama":
+        from src.gateway.local_provider import OllamaProvider
+
+        return OllamaProvider(name, config)
+    elif config.type == "llamacpp":
+        from src.gateway.local_provider import LocalLlamaCppProvider
+
+        return LocalLlamaCppProvider(name, config)
     else:
         raise ValueError(f"不支持的 provider 类型: {config.type}")

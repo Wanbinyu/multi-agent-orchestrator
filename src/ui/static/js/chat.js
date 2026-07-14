@@ -381,11 +381,17 @@
     let html = "";
     toolCalls.forEach((c) => {
       const status = c.success ? "✅" : "❌";
-      const detail = c.params?.path || c.params?.command || c.params?.query || "";
+      const p = c.params || {};
+      const detail =
+        p.path || p.command || p.url || p.query ||
+        Object.entries(p)
+          .filter(([_, v]) => v !== undefined && v !== null && v !== "")
+          .map(([k, v]) => `${k}=${v}`)
+          .join(", ");
       html += `
         <div class="turn-log-item">
           <div class="turn-log-title">${status} ${escapeHtml(c.tool)}</div>
-          ${detail ? `<div class="turn-log-detail">${escapeHtml(detail)}</div>` : ""}
+          ${detail ? `<div class="turn-log-detail">${escapeHtml(String(detail))}</div>` : ""}
         </div>
       `;
     });
@@ -582,10 +588,23 @@
     if (tool === "collaboration") {
       const taskCount = params.task_count || (params.tasks ? params.tasks.length : 0);
       detail = `<span>${taskCount} 个子任务 · 输出 <code>${escapeHtml(params.output_dir || "")}</code></span>`;
-    } else if (tool === "run_command") {
-      detail = `<code>${escapeHtml(params.command || "")}</code>`;
     } else {
-      detail = `<code>${escapeHtml(params.path || "")}</code>`;
+      // 通用展示：优先关键字段，兜底显示全部参数
+      const keys = ["path", "command", "url", "query"];
+      let shown = "";
+      for (const k of keys) {
+        if (params[k]) {
+          shown = `<code>${escapeHtml(String(params[k]))}</code>`;
+          break;
+        }
+      }
+      if (!shown) {
+        const entries = Object.entries(params)
+          .filter(([_, v]) => v !== undefined && v !== null && v !== "")
+          .map(([k, v]) => `${k}=${escapeHtml(String(v))}`);
+        shown = entries.length ? `<span>${entries.join(", ")}</span>` : "";
+      }
+      detail = shown;
     }
 
     div.innerHTML = `

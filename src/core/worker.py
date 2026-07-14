@@ -10,6 +10,7 @@ import yaml
 from src.gateway.client import GatewayClient
 from src.models.schemas import ChatMessage, Task, TaskResult
 from src.tools.file_tools import write_output_files, write_text_file
+from src.tools.registry import tool_registry
 from src.tools.worker_tools import execute_tool_call
 
 
@@ -162,33 +163,21 @@ class Worker:
 
 
 def build_tool_instructions(tools: list[str]) -> str:
-    """根据可用工具生成提示词"""
+    """根据可用工具生成提示词（从注册表自动生成）"""
     if not tools:
         return ""
 
-    lines = ["你可以使用以下工具（在回复中以 Markdown 代码块形式调用）："]
-    if "write_file" in tools:
-        lines.append(
-            '- write_file：写入文件。格式：\\n```tool:write_file\\n{"path": "relative/path", "content": "文件内容"}\\n```\\n'
-            "如果用户指定了绝对路径（如 G:\\\\MAO_test\\\\login.js），请直接使用该路径；否则写到当前任务输出目录。"
-        )
-    if "read_file" in tools:
-        lines.append(
-            '- read_file：读取已有文件内容。格式：\\n```tool:read_file\\n{"path": "relative/path"}\\n```'
-        )
-    if "run_command" in tools:
-        lines.append(
-            '- run_command：运行测试或构建命令。格式：\\n```tool:run_command\\n{"command": "pytest"}\\n```\\n'
-            "注意：命令必须在白名单内，白名单外命令会被拒绝。"
-        )
-    if "search_project_files" in tools:
-        lines.append(
-            '- search_project_files：基于项目索引搜索相关源码文件。格式：\\n```tool:search_project_files\\n{"query": "SessionStore"}\\n```'
-        )
-    if "search_memory" in tools:
-        lines.append(
-            '- search_memory：搜索已保存的长期记忆。格式：\\n```tool:search_memory\\n{"query": "用户偏好"}\\n```'
-        )
+    instructions = tool_registry.build_instructions(tools)
+    if not instructions:
+        return ""
+
+    lines = ["你可以使用以下工具（在回复中以 Markdown 代码块形式调用）：", ""]
+    # build_instructions 已包含工具列表，直接追加特定说明
+    lines.append(instructions.rstrip())
+    lines.append("")
+    lines.append(
+        "如果用户指定了绝对路径（如 G:\\\\MAO_test\\\\login.js），请直接使用该路径；否则写到当前任务输出目录。"
+    )
     return "\n".join(lines)
 
 

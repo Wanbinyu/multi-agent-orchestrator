@@ -1,0 +1,23 @@
+# hooks.yaml 示例配置
+#
+# 工具调用前后钩子。钩子是可导入的 Python 可调用对象（dotted path）。
+# 复制为 hooks.yaml 后生效。真正的 hooks.yaml 不被 gitignore 忽略（无敏感信息）。
+#
+# pre 钩子签名: fn(tool_name: str, params: dict) -> dict | None
+#   返回 dict 替换 params；返回 None 保持；抛 HookAbort 阻止执行。
+# post 钩子签名: fn(tool_name: str, params: dict, result: ToolResult) -> ToolResult | None
+#   返回 ToolResult 替换结果；返回 None 保持。
+
+pre:
+  # 内置审计钩子：记录每次工具调用
+  - src.core.hooks:audit_pre
+
+post:
+  - src.core.hooks:audit_post
+
+# 注意：audit_pre / audit_post 需先实例化 AuditLogHook 并暴露为模块级函数。
+# 见 src/core/hooks.py 中 AuditLogHook；如需启用审计，在启动代码中：
+#   from src.core.hooks import AuditLogHook, tool_registry
+#   h = AuditLogHook("logs/tool_audit.log")
+#   tool_registry.add_pre_hook(h.pre)
+#   tool_registry.add_post_hook(h.post)

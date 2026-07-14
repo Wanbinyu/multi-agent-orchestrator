@@ -1,8 +1,6 @@
 """Worker 可用的工具实现
 
-支持：
-- read_file：读取指定文件内容
-- run_command：在指定目录下执行白名单内的命令
+工具通过 src.tools.registry.tool_registry 注册，供 Agent 和协作 Worker 统一发现/执行。
 """
 from __future__ import annotations
 
@@ -11,25 +9,25 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from src.tools.memory_tools import search_memory, search_project_files
+from src.tools.paths import resolve_path as _resolve_path
+from src.tools.registry import tool_registry
 from src.tools.tool_result import ToolResult
 
 
-def _resolve_path(path: str, base_dir: str) -> Path:
-    """解析路径：绝对路径直接使用；相对路径限制在 base_dir 内，防止目录穿越"""
-    target = Path(path)
-    if target.is_absolute():
-        return target.resolve()
-
-    base = Path(base_dir).resolve()
-    resolved = (base / path).resolve()
-    try:
-        resolved.relative_to(base)
-    except ValueError as exc:
-        raise ValueError(f"路径越界：{path}") from exc
-    return resolved
+# 引入 memory_tools / web_tools / search_tools 以完成其注册
+import src.tools.memory_tools  # noqa: F401
+import src.tools.search_tools  # noqa: F401
+import src.tools.web_tools  # noqa: F401
+# 引入 contrib 示例工具（第三方工具也可在此统一 import 注册）
+import src.tools.contrib.example_tools  # noqa: F401
 
 
+@tool_registry.register(
+    name="read_file",
+    description="读取项目内文件内容，支持相对路径和绝对路径",
+    params={"path": {"type": "string", "description": "相对或绝对路径"}},
+    category="read",
+)
 def read_file(path: str, base_dir: str = ".") -> ToolResult:
     """读取 base_dir 下的文件内容"""
     try:
@@ -66,6 +64,12 @@ def _is_command_allowed(command: str, allowed_prefixes: list[str] | None) -> boo
     return any(stripped.startswith(prefix) for prefix in allowed_prefixes)
 
 
+@tool_registry.register(
+    name="run_command",
+    description="在指定目录下执行白名单内的命令（如 python、pytest、npm、git status 等）",
+    params={"command": {"type": "string", "description": "要执行的命令"}},
+    category="execute",
+)
 def run_command(
     command: str,
     base_dir: str = ".",
@@ -106,6 +110,15 @@ def run_command(
         return ToolResult(success=False, error=str(e))
 
 
+@tool_registry.register(
+    name="write_file",
+    description="写入文件到项目目录或用户指定的绝对路径，支持自动创建父目录",
+    params={
+        "path": {"type": "string", "description": "相对或绝对路径"},
+        "content": {"type": "string", "description": "文件内容"},
+    },
+    category="write",
+)
 def write_file(path: str, content: str, base_dir: str = ".") -> ToolResult:
     """在 base_dir 下写入文件，支持自动创建父目录"""
     try:
@@ -118,17 +131,52 @@ def write_file(path: str, content: str, base_dir: str = ".") -> ToolResult:
         return ToolResult(success=False, error=str(e))
 
 
-def execute_tool_call(tool_name: str, params: dict, base_dir: str, allowed_prefixes: list[str] | None = None) -> ToolResult:
-    """统一分发工具调用"""
-    if tool_name == "read_file":
-        return read_file(params.get("path", ""), base_dir)
-    elif tool_name == "run_command":
-        return run_command(params.get("command", ""), base_dir, allowed_prefixes)
-    elif tool_name == "write_file":
-        return write_file(params.get("path", ""), params.get("content", ""), base_dir)
-    elif tool_name == "search_project_files":
-        return search_project_files(params.get("query", ""), base_dir, params.get("top_k", 5))
-    elif tool_name == "search_memory":
-        return search_memory(params.get("query", ""), params.get("top_k", 5))
-    else:
-        return ToolResult(success=False, error=f"未知工具：{tool_name}")
+@tool_registry.register(
+    name="edit_file",
+    description="精确替换文件中的某段文本，old_string 必须在文件中唯一存在，避免误改",
+    params={
+        "path": {"type": "string", "description": "相对或绝对路径"},
+        "old_string": {"type": "string", "description": "要被替换的原文"},
+        "new_string": {"type": "string", "description": "替换后的新文本"},
+    },
+    category="write",
+)
+def edit_file(path: str, old_string: str, new_string: str, base_dir: str = ".") -> ToolResult:
+    """精确替换文件中的文本片段，要求 old_string 唯一"""
+    try:
+        if not old_string:
+            return ToolResult(success=False, error="old_string 不能为空")
+        target = _resolve_path(path, base_dir)
+        if not target.exists():
+            return ToolResult(success=False, error=f"文件不存在：{path}")
+        if not target.is_file():
+            return ToolResult(success=False, error=f"不是文件：{path}")
+
+        with open(target, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        occurrences = content.count(old_string)
+        if occurrences == 0:
+            return ToolResult(success=False, error=f"未在文件中找到指定文本：{path}")
+        if occurrences > 1:
+            return ToolResult(
+                success=False,
+                error=f"指定文本在文件中出现 {occurrences} 次，不唯一；请提供更长上下文以精确定位。",
+            )
+
+        new_content = content.replace(old_string, new_string)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        return ToolResult(success=True, output=f"已更新文件：{path}")
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
+def execute_tool_call(
+    tool_name: str,
+    params: dict,
+    base_dir: str,
+    allowed_prefixes: list[str] | None = None,
+) -> ToolResult:
+    """统一分发工具调用（向后兼容入口）"""
+    return tool_registry.execute(tool_name, params, base_dir, allowed_prefixes)

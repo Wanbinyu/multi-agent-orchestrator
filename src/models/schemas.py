@@ -24,13 +24,14 @@ class TaskPlan(BaseModel):
 class ProviderConfig(BaseModel):
     """Provider 配置"""
     name: str
-    type: Literal["anthropic", "openai"]
+    type: Literal["anthropic", "openai", "ollama", "llamacpp"]
     base_url: str
     api_keys: list[str]
     timeout: int = 120
     rpm_limit: int = 60
     enabled: bool = True
     model_map: dict[str, str] = Field(default_factory=dict, description="逻辑模型名 -> 上游真实模型名映射")
+    extra: dict[str, Any] = Field(default_factory=dict, description="Provider 专属参数，如 llamacpp 的 n_gpu_layers/n_ctx")
 
 
 class ModelConfig(BaseModel):
@@ -40,6 +41,8 @@ class ModelConfig(BaseModel):
     input_price_per_1m: float = 0.0
     output_price_per_1m: float = 0.0
     capabilities: list[str] = Field(default_factory=list, description="模型能力标签，如 tool_use/coding/reasoning/vision")
+    max_context_tokens: int = Field(default=0, description="上下文窗口大小；0 表示使用默认值")
+    native_tools: bool | None = Field(default=None, description="是否启用原生 tool_use；None=按 capabilities 自动判断")
 
 
 class WorkerConfig(BaseModel):

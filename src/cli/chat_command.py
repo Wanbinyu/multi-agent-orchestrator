@@ -54,6 +54,17 @@ COMMANDS = """
 MODES = ["auto", "approve", "readonly"]
 
 
+def _summarize_params(params: dict) -> str:
+    """把工具参数摘要成单行展示文本，优先关键字段"""
+    for key in ("path", "command", "url", "query"):
+        value = params.get(key)
+        if value:
+            return str(value)
+    if not params:
+        return ""
+    return ", ".join(f"{k}={v}" for k, v in params.items())
+
+
 def _mode_color(mode: str) -> str:
     """返回模式对应的 prompt_toolkit HTML 颜色名"""
     if mode == "auto":
@@ -172,14 +183,28 @@ async def _stream_turn(agent: Agent, user_input: str):
                 if req.get("tool") == "collaboration":
                     console.print(f"  子任务数：{params.get('task_count', 0)}")
                     console.print(f"  输出目录：{params.get('output_dir', '')}")
-                elif req.get("tool") == "run_command":
-                    console.print(f"  命令：{params.get('command', '')}")
-                elif req.get("tool") == "write_file":
-                    path = params.get("path", "")
-                    content_len = len(params.get("content", ""))
-                    console.print(f"  路径：{path}（约 {content_len} 字符）")
                 else:
-                    console.print(f"  路径：{params.get('path', '')}")
+                    # 通用展示：优先关键字段，兜底显示全部参数
+                    shown = False
+                    for key, label in (
+                        ("path", "路径"),
+                        ("command", "命令"),
+                        ("url", "URL"),
+                        ("query", "查询"),
+                    ):
+                        value = params.get(key)
+                        if value:
+                            if key == "path" and req.get("tool") == "write_file":
+                                content_len = len(params.get("content", "") or "")
+                                console.print(f"  {label}：{value}（约 {content_len} 字符）")
+                            else:
+                                console.print(f"  {label}：{value}")
+                            shown = True
+                    if not shown and params:
+                        console.print(
+                            "  参数："
+                            + ", ".join(f"{k}={v}" for k, v in params.items())
+                        )
                 answer = await asyncio.to_thread(
                     console.input, "允许执行？(y/n/auto)："
                 )
@@ -272,11 +297,19 @@ async def _stream_turn(agent: Agent, user_input: str):
             elif tool_name == "run_command":
                 command = params.get("command", "")
                 console.print(f"[{color}]● Run({command})[/{color}]")
+            elif tool_name == "web_search":
+                query = params.get("query", "")
+                console.print(f"[{color}]● WebSearch({query})[/{color}]")
+            elif tool_name == "fetch_url":
+                url = params.get("url", "")
+                console.print(f"[{color}]● Fetch({url})[/{color}]")
             elif tool_name in ("search_project_files", "search_memory"):
                 query = params.get("query", "")
                 console.print(f"[{color}]● Search({query})[/{color}]")
             else:
-                console.print(f"[{color}]● {tool_name}(...)[/{color}]")
+                # 通用兜底：优先关键字段，否则显示全部参数
+                summary = _summarize_params(params)
+                console.print(f"[{color}]● {tool_name}({summary})[/{color}]")
 
     if files_written:
         file_text = Text("\n".join(f"✓ {f}" for f in files_written))
@@ -438,13 +471,18 @@ def _cmd_plan(gateway: GatewayClient, request: str, output_dir: str, approval_mo
 
 
 def _cmd_tools():
+    from src.tools.registry import tool_registry
+
+    console.print("[bold]可用工具：[/bold]")
+    for name in tool_registry.list_tools():
+        spec = tool_registry.get(name)
+        if spec is None:
+            continue
+        params_str = ", ".join(spec.params.keys()) if spec.params else ""
+        suffix = f"({params_str})" if params_str else ""
+        console.print(f"  • [cyan]{name}{suffix}[/cyan] - {spec.description}")
     console.print(
-        """
-可用工具格式：
-  read_file：```tool:read_file\n{"path": "relative/path"}\n```
-  write_file：```tool:write_file\n{"path": "relative/path", "content": "..."}\n```
-  run_command：```tool:run_command\n{"command": "python -m pytest"}\n```
-"""
+        "\n调用格式：```tool:<工具名>\\n{JSON 参数}\\n```"
     )
 
 
@@ -477,6 +515,10 @@ def run_chat_loop(
     mode_ref = [session.approval_mode]
     pt_session = _make_prompt_session(mode_ref)
     memory_store = MemoryStore()
+    # 加载扩展（Hooks + MCP 工具源），幂等
+    from src.tools.extensions import load_extensions
+
+    load_extensions()
     agent = Agent(gateway, session, memory_store=memory_store)
 
     _print_welcome(session.id, mode_ref[0])

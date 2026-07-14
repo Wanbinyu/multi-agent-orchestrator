@@ -1,0 +1,85 @@
+# providers.yaml 示例配置
+#
+# 复制为 providers.yaml 并填入你自己的 key/路径。
+# 真正的 providers.yaml 已被 .gitignore 忽略，不会提交。
+
+main_model: glm-ark
+
+providers:
+  # ---- OpenAI 兼容（GLM/Kimi/DeepSeek/Qwen 等）----
+  glm:
+    name: glm
+    type: openai
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    api_keys:
+      - "${GLM_API_KEY}"
+    timeout: 120
+    rpm_limit: 60
+
+  # ---- Anthropic ----
+  anthropic:
+    name: anthropic
+    type: anthropic
+    base_url: ""
+    api_keys:
+      - "${ANTHROPIC_API_KEY}"
+    timeout: 120
+
+  # ---- Ollama 本地模型（推荐，最快上手）----
+  # 前置：安装 Ollama 并拉取模型，如 `ollama pull qwen2.5:7b`
+  # 无需 API key，base_url 指向 Ollama 的 OpenAI 兼容端点
+  ollama:
+    name: ollama
+    type: ollama
+    base_url: http://localhost:11434/v1
+    api_keys: []
+    timeout: 300
+    rpm_limit: 1000
+
+  # ---- llama.cpp 进程内加载（可选，真正内置模型）----
+  # 前置：pip install llama-cpp-python，并下载 GGUF 模型文件
+  # base_url 填 GGUF 文件绝对路径；extra 传 llama.cpp 参数
+  llamacpp:
+    name: llamacpp
+    type: llamacpp
+    base_url: "D:/models/qwen2.5-7b-instruct-q4_k_m.gguf"
+    api_keys: []
+    timeout: 600
+    extra:
+      n_ctx: 4096
+      n_gpu_layers: 0      # 0=纯CPU；有 GPU 改为层数如 35
+      n_threads: 8
+
+models:
+  glm-ark:
+    provider: glm
+    model_id: glm-4.6
+    input_price_per_1m: 0.5
+    output_price_per_1m: 0.5
+    capabilities: [tool_use, coding, reasoning]
+    max_context_tokens: 131072   # 上下文窗口，用于自动压缩触发
+
+  claude-sonnet-5:
+    provider: anthropic
+    model_id: claude-sonnet-5
+    input_price_per_1m: 3.0
+    output_price_per_1m: 15.0
+    capabilities: [tool_use, coding, reasoning, vision]
+    max_context_tokens: 200000
+
+  # 本地模型（不计费）
+  qwen-local:
+    provider: ollama
+    model_id: qwen2.5:7b
+    input_price_per_1m: 0.0
+    output_price_per_1m: 0.0
+    capabilities: [coding]
+    max_context_tokens: 32768
+
+  qwen-llamacpp:
+    provider: llamacpp
+    model_id: qwen2.5-7b-instruct
+    input_price_per_1m: 0.0
+    output_price_per_1m: 0.0
+    capabilities: [coding]
+    max_context_tokens: 4096

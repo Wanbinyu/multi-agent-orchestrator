@@ -6,9 +6,19 @@ from pathlib import Path
 from typing import Any
 
 from src.core.memory import MemoryStore, ProjectIndexer
+from src.tools.registry import tool_registry
 from src.tools.tool_result import ToolResult
 
 
+@tool_registry.register(
+    name="search_project_files",
+    description="基于项目文件索引搜索相关源码文件",
+    params={
+        "query": {"type": "string", "description": "搜索关键词"},
+        "top_k": {"type": "integer", "description": "返回结果数量", "default": 5},
+    },
+    category="read",
+)
 def search_project_files(query: str, base_dir: str = ".", top_k: int = 5) -> ToolResult:
     """基于本地项目文件索引搜索相关文件
 
@@ -46,6 +56,15 @@ def search_project_files(query: str, base_dir: str = ".", top_k: int = 5) -> Too
         return ToolResult(success=False, error=str(e))
 
 
+@tool_registry.register(
+    name="search_memory",
+    description="搜索已保存的长期记忆",
+    params={
+        "query": {"type": "string", "description": "搜索关键词"},
+        "top_k": {"type": "integer", "description": "返回结果数量", "default": 5},
+    },
+    category="read",
+)
 def search_memory(query: str, top_k: int = 5) -> ToolResult:
     """搜索长期记忆条目"""
     if not query.strip():

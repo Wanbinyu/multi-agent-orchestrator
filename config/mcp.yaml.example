@@ -1,0 +1,20 @@
+# mcp.yaml 示例配置
+#
+# MCP (Model Context Protocol) 外部工具服务器。
+# 复制为 mcp.yaml 后，启动时自动加载并注册到 tool_registry。
+# 真正的 mcp.yaml 不被 gitignore 忽略。
+#
+# 依赖：pip install mcp（可选，未安装时 MCP 工具不可用但其他功能不受影响）
+
+servers:
+  # stdio 传输：通过子进程通信
+  - name: filesystem
+    command: npx
+    args:
+      - "-y"
+      - "@modelcontextprotocol/server-filesystem"
+      - "/tmp"
+
+  # SSE 传输：连接已运行的 HTTP/SSE server
+  # - name: remote
+  #   url: http://localhost:8080/sse
