@@ -308,6 +308,9 @@ async def _stream_turn(agent: Agent, user_input: str):
     engineering_evidence_count = 0
     engineering_recon_status = ""
     engineering_recon_categories = 0
+    engineering_verification_count = 0
+    engineering_audit_status = ""
+    engineering_audit_gaps: list[str] = []
 
     def _start_spinner(message: str):
         nonlocal spinner_task, spinner_message
@@ -381,6 +384,19 @@ async def _stream_turn(agent: Agent, user_input: str):
                     engineering_recon_categories = len(
                         reconnaissance.get("observed_categories", []) or []
                     )
+                if "verification_count" in engineering:
+                    engineering_verification_count = int(
+                        engineering.get("verification_count") or 0
+                    )
+                audit = engineering.get("audit") or {}
+                if audit:
+                    engineering_audit_status = str(
+                        audit.get("status", engineering_audit_status)
+                    )
+                    engineering_audit_gaps = list(dict.fromkeys([
+                        *(audit.get("missing_checks") or []),
+                        *(audit.get("failed_checks") or []),
+                    ]))
                 _start_spinner("🧠 思考中")
             elif event.type == "permission_request":
                 live.stop()
@@ -569,6 +585,25 @@ async def _stream_turn(agent: Agent, user_input: str):
             console.print(
                 f"[dim]证据：{engineering_evidence_count} 条 · "
                 f"项目侦察：{recon_text}（{engineering_recon_categories}/6）[/dim]"
+            )
+        if engineering_audit_status:
+            audit_labels = {
+                "not_required": "无需工程验证",
+                "passed": "已通过",
+                "blocked": "未闭环",
+                "failed": "运行失败",
+            }
+            audit_text = audit_labels.get(
+                engineering_audit_status, engineering_audit_status
+            )
+            gap_text = (
+                f" · 缺口：{'、'.join(engineering_audit_gaps)}"
+                if engineering_audit_gaps
+                else ""
+            )
+            console.print(
+                f"[dim]验证门：{engineering_verification_count} 个 · "
+                f"完成审计：{audit_text}{gap_text}[/dim]"
             )
 
 

@@ -107,5 +107,38 @@ def test_reviewer_fallback_for_non_json(tmp_path, monkeypatch):
     reviewer = Reviewer(gateway, config_path=str(config_path))
     result = reviewer.review("写一个登录页面", _sample_plan(), _sample_results())
 
-    assert result.passed is True
+    assert result.passed is False
+    assert "不能自动通过" in result.issues[0]
     assert result.final_output == "这是纯文本输出，没有 JSON。"
+
+
+def test_reviewer_cannot_override_failed_deterministic_audit(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text("reviewer:\n  model: glm-ark\n", encoding="utf-8")
+    gateway = _mock_gateway(
+        '{"passed": true, "issues": [], "final_output": "全部完成"}'
+    )
+    reviewer = Reviewer(gateway, config_path=str(config_path))
+
+    result = reviewer.review(
+        "写一个登录页面",
+        _sample_plan(),
+        _sample_results(),
+        engineering_context={
+            "evidence": [],
+            "verification": [],
+            "audit": {
+                "can_complete": False,
+                "summary": "验证未闭环",
+                "missing_checks": ["集成测试", "全量回归"],
+                "failed_checks": [],
+            },
+        },
+    )
+
+    assert result.passed is False
+    assert "确定性工程审计未通过：集成测试、全量回归" in result.issues
+    prompt = gateway.chat.call_args.kwargs["messages"][1].content
+    assert "确定性工程审计" in prompt
+    assert "缺失检查：集成测试、全量回归" in prompt

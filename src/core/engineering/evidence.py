@@ -51,7 +51,7 @@ def _path(params: dict[str, Any]) -> str:
     return str(value)
 
 
-def _is_test_command(command: str) -> bool:
+def is_test_command(command: str) -> bool:
     normalized = command.strip().lower()
     return any(
         marker in normalized
@@ -116,7 +116,7 @@ class ToolEvidenceRecorder:
         if tool_name in {"glob_files", "grep_content"}:
             action = "已完成" if result.success else "执行失败"
             return "search", f"{action}代码检索：{path or '.'}"
-        if tool_name == "run_command" and _is_test_command(command):
+        if tool_name == "run_command" and is_test_command(command):
             outcome = "通过" if result.success else "失败"
             return "test", f"测试命令执行{outcome}：{command}"
         if tool_name in {"write_file", "edit_file"}:
@@ -156,7 +156,7 @@ class ToolEvidenceRecorder:
         if tool_name == "git_status":
             recon.observe("git")
             return True
-        if tool_name == "run_command" and _is_test_command(command):
+        if tool_name == "run_command" and is_test_command(command):
             recon.observe("tests")
             return True
         if tool_name != "read_file":

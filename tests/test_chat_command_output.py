@@ -108,6 +108,12 @@ class _EngineeringEventAgent(_FakeAgent):
                     "status": "partial",
                     "observed_categories": ["structure", "docs"],
                 },
+                "verification_count": 1,
+                "audit": {
+                    "status": "blocked",
+                    "missing_checks": ["相邻模块回归"],
+                    "failed_checks": [],
+                },
             },
         )
         yield ChatStreamEvent(type="done", assistant_message="完成")
@@ -120,6 +126,9 @@ def test_stream_turn_prints_engineering_run_status(capsys):
     assert "review / medium / 只读" in output
     assert "证据：3 条" in output
     assert "项目侦察：部分覆盖（2/6）" in output
+    assert "验证门：1 个" in output
+    assert "完成审计：未闭环" in output
+    assert "缺口：相邻模块回归" in output
 
 
 class _PlainStreamingAgent(_FakeAgent):

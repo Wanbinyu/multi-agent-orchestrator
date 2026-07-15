@@ -671,12 +671,27 @@
       const evidenceDetail = `证据 ${evidenceCount} 条 · 项目侦察 ${
         reconLabels[recon.status] || recon.status || "未开始"
       }（${observedCount}/6）`;
+      const audit = run.audit || {};
+      const auditLabels = {
+        not_required: "无需工程验证",
+        passed: "已通过",
+        blocked: "未闭环",
+        failed: "运行失败",
+      };
+      const auditGaps = [
+        ...(audit.missing_checks || []),
+        ...(audit.failed_checks || []),
+      ].filter((item, index, values) => values.indexOf(item) === index);
+      const verificationDetail = `验证门 ${Number(run.verification_count || 0)} 个 · 完成审计 ${
+        auditLabels[audit.status] || audit.status || "进行中"
+      }${auditGaps.length ? ` · 缺口 ${auditGaps.join("、")}` : ""}`;
       html += `
         <div class="turn-log-item engineering-run ${escapeHtml(run.status || "running")}">
           <div class="turn-log-title">${icon} 工程记录 · ${escapeHtml(labels[run.status] || run.status)}</div>
           <div class="turn-log-detail">${escapeHtml(run.run_id)}</div>
           <div class="turn-log-detail">${escapeHtml(intentDetail)}</div>
           <div class="turn-log-detail">${escapeHtml(evidenceDetail)}</div>
+          <div class="turn-log-detail">${escapeHtml(verificationDetail)}</div>
         </div>
       `;
     });

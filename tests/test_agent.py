@@ -128,6 +128,37 @@ def test_auto_change_task_records_write_authorization(tmp_path):
     assert result.engineering["intent"]["kind"] == "change"
     assert result.engineering["intent"]["write_authorized"] is True
     assert (tmp_path / "output" / "fixed.txt").exists()
+    assert result.engineering["status"] == "blocked"
+    assert "验证未闭环" in result.assistant_message
+    assert result.engineering["audit"]["missing_checks"] == [
+        "针对性验证",
+        "相邻模块回归",
+    ]
+
+
+def test_auto_change_can_complete_with_direct_standard_verification(tmp_path):
+    session = _make_session(tmp_path)
+    tests_dir = tmp_path / "output" / "tests"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_a.py").write_text("def test_a(): assert True\n", encoding="utf-8")
+    (tests_dir / "test_b.py").write_text("def test_b(): assert True\n", encoding="utf-8")
+    gateway = _mock_gateway(
+        (
+            '```tool:write_file\n{"path":"fixed.py","content":"VALUE = 1"}\n```\n'
+            '```tool:run_command\n'
+            '{"command":"python -m pytest -q tests/test_a.py tests/test_b.py"}\n```'
+        ),
+        "修复和验证完成",
+    )
+    agent = Agent(gateway, session, approval_mode="auto")
+
+    result = agent.run_turn("修复 fixed.py 的问题")
+
+    assert result.engineering["status"] == "completed"
+    assert result.engineering["audit"]["status"] == "passed"
+    assert result.engineering["verification_count"] == 2
+    assert result.engineering["requirement_counts"]["satisfied"] == 3
+    assert "验证未闭环" not in result.assistant_message
 
 
 def test_run_turn_failure_marks_journal_failed(tmp_path):

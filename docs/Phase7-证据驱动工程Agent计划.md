@@ -343,10 +343,23 @@ CLI / Web 展示精简事件：
 
 ### Phase 7.3：验证门与完成审计
 
-- 风险分级测试选择。
-- 需求矩阵。
-- Reviewer 基于证据验收。
-- 缺少验证时禁止输出“已完成”。
+- [x] `VerificationTracker` 只从真实测试 `ToolResult` 生成验证门，不接受模型正文作为测试结果。
+- [x] 验证深度映射为确定性检查：targeted、adjacent、integration、full、smoke、external mock/live。
+- [x] 普通修改要求针对性测试与相邻模块回归；高风险构建要求针对性、集成、全量和 smoke 验证。
+- [x] `RequirementCheck` 将实现证据、验证门和状态组成需求矩阵；高风险构建的使用说明必须有 README/docs/Markdown 写入证据。
+- [x] `CompletionAuditor` 在 RunJournal 完成前执行；缺少实现或验证证据时把 `completed` 降为 `blocked`，并在最终答复追加未闭环原因。
+- [x] 只读或未获写授权的任务不误触工程验证门；失败和取消状态保留原始语义。
+- [x] Reviewer 接收 Evidence、VerificationGate、需求矩阵和审计结果；模型 `passed: true` 无法覆盖确定性审计失败。
+- [x] Reviewer 非 JSON 或无效格式不再默认通过。
+- [x] CLI/Web 显示验证门数量、完成审计状态和缺口。
+
+完成于 2026-07-15。验证结果：
+
+- 验证策略、命令分类、需求矩阵、完成降级、Reviewer、同步/流式、协作和 CLI/Web 定向测试通过。
+- 全量测试 `469 passed, 1 warning`；JavaScript 语法、Python 编译和差异格式检查通过。
+- 真实 Web SSE 失败路径显示“验证门 0 个 · 完成审计 运行失败”，浏览器控制台无错误。
+- 当前 Coding Plan Key 仍返回 401 key 格式错误；失败审计和 RunJournal 均正常持久化。
+- Worker 结构化结果可作为执行证据，但不会被当作真实测试门；Phase 7.4 接入 Worker 工具轨迹前，缺少直接测试证据的协作实现会保持 `blocked`。
 
 ### Phase 7.4：多模型工程协作
 

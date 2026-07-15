@@ -155,16 +155,28 @@ def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
 
     assert len(done_events) == 1
     done = done_events[0]
-    assert done.assistant_message == "已完成前后端登录功能。"
+    assert done.assistant_message.startswith("已完成前后端登录功能。")
+    assert "验证未闭环" in done.assistant_message
     assert "output/frontend_t1/page.tsx" in done.files_written
     assert "output/backend_t2/api.py" in done.files_written
     assert done.input_tokens == 100
     assert done.output_tokens == 50
     assert done.cost_usd == pytest.approx(0.001)
+    engineering = next(
+        event.engineering for event in events if event.type == "engineering_complete"
+    )
+    assert engineering["status"] == "blocked"
+    assert engineering["audit"]["missing_checks"] == [
+        "针对性验证",
+        "集成测试",
+        "全量回归",
+        "运行时 smoke 验证",
+        "使用说明",
+    ]
 
     # 最终答案应被追加到会话历史
     assert session.messages[-1].role == "assistant"
-    assert session.messages[-1].content == "已完成前后端登录功能。"
+    assert session.messages[-1].content == done.assistant_message
 
 
 def test_collaboration_stream_handles_task_failure(tmp_path):
@@ -339,7 +351,8 @@ def test_collaboration_approve_mode_requests_permission_then_runs(tmp_path):
     assert perm[0].permission_request["params"]["task_count"] == 1
     assert dispatch_count["n"] == 1
     done = [e for e in events if e.type == "done"][0]
-    assert done.assistant_message == "已完成登录功能。"
+    assert done.assistant_message.startswith("已完成登录功能。")
+    assert "验证未闭环" in done.assistant_message
 
 
 def test_collaboration_approve_mode_cancelled_when_denied(tmp_path):

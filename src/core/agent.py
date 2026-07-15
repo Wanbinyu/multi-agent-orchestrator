@@ -13,11 +13,14 @@ from pydantic import BaseModel, Field
 
 from src.core.compactor import ContextCompactor
 from src.core.engineering import (
+    CompletionAuditor,
+    Evidence,
     RunJournal,
     RunJournalStore,
     TaskIntent,
     TaskIntentClassifier,
     ToolEvidenceRecorder,
+    VerificationTracker,
 )
 from src.core.memory import MemoryContextBuilder, MemoryStore
 from src.core.session import Session
@@ -44,6 +47,7 @@ TOOL_RULES = """规则：
 - 如果用户请求需要读取、写入或执行命令，请直接输出对应的工具代码块。
 - 当用户要求分析、检查或审阅项目时，先调用 project_tree 获取精简结构，再调用 git_status 检查版本状态；随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
 - 项目判断必须以工具返回的文件、检索、Git 或测试结果为证据；工具没有确认的细节标记为“待确认”，禁止把推测写成事实。
+- 修改任务必须运行与风险匹配的真实验证：普通修改至少覆盖针对性测试和相邻模块回归；高风险构建还要有 integration/e2e、全量测试和 smoke 验证。缺少任何一层时必须说明“验证未闭环”，不能宣称已完成。
 - 当你说要“查看”、“读取”或“探查”某个文件时，必须在同一轮回复中立即调用 read_file 工具，不能只口头描述而不调用工具。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块（正文代码块不会被保存为文件）。每个文件一次 write_file，path 用有意义的文件名。
 - 如果用户指定了绝对路径（如 G:\\MAO_test\\index.html），直接使用该路径；如果只给了文件夹（如 G:\\MAO_test），请在该文件夹下创建合理的文件名，例如 index.html、login.js、style.css。
@@ -62,6 +66,7 @@ TOOL_RULES_NATIVE = """规则：
 - 你可以通过原生工具调用（tool_use）使用提供的工具完成用户任务。
 - 分析、检查或审阅项目时，先调用 project_tree，再调用 git_status；随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
 - 项目判断必须以工具返回的文件、检索、Git 或测试结果为证据；未由工具确认的细节标记为“待确认”，禁止把推测写成事实。
+- 修改任务必须运行与风险匹配的真实验证：普通修改至少覆盖针对性测试和相邻模块回归；高风险构建还要有 integration/e2e、全量测试和 smoke 验证。缺少任何一层时必须说明“验证未闭环”，不能宣称已完成。
 - 当你说要“查看”或“读取”某个文件时，必须立即调用 read_file，不能只口头描述。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块。
 - 如果用户指定了绝对路径，直接使用该路径；如果只给了文件夹，请在该文件夹下创建合理的文件名。
@@ -148,6 +153,8 @@ class Agent:
         )
         self.intent_classifier = intent_classifier or TaskIntentClassifier()
         self.evidence_recorder = ToolEvidenceRecorder()
+        self.verification_tracker = VerificationTracker()
+        self.completion_auditor = CompletionAuditor()
         self._active_run_journal: RunJournal | None = None
 
     def _start_engineering_run(self, user_input: str) -> RunJournal:
@@ -185,20 +192,55 @@ class Agent:
     ) -> dict[str, Any]:
         if files_changed and journal.intent.policy.allow_project_writes:
             journal.intent.write_authorized = True
+        audit = self.completion_auditor.audit(journal, status)
+        resolved_status = status
+        resolved_risks = list(residual_risks or [])
+        if status == "completed" and not audit.can_complete:
+            resolved_status = "blocked"
+            audit_detail = [*audit.missing_checks, *audit.failed_checks]
+            resolved_risks.append(
+                "验证未闭环" + (f"：{'、'.join(audit_detail)}" if audit_detail else "")
+            )
         journal.finish(
-            status,
+            resolved_status,
             files_changed=files_changed,
             metrics={
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "cost_usd": cost_usd,
             },
-            residual_risks=residual_risks,
+            residual_risks=resolved_risks,
         )
         self.journal_store.save(journal)
         if self._active_run_journal is journal:
             self._active_run_journal = None
         return journal.event_payload()
+
+    @staticmethod
+    def _apply_completion_audit_notice(
+        content: str, engineering: dict[str, Any]
+    ) -> str:
+        audit = engineering.get("audit") or {}
+        if engineering.get("status") != "blocked" or (
+            not audit.get("missing_checks") and not audit.get("failed_checks")
+        ):
+            return content
+        details = [
+            *(audit.get("missing_checks") or []),
+            *(audit.get("failed_checks") or []),
+        ]
+        notice = "验证未闭环，本轮结果已保留但未标记为完成"
+        if details:
+            notice += f"：{'、'.join(dict.fromkeys(details))}"
+        if notice in content:
+            return content
+        return f"{content.rstrip()}\n\n{notice}。".strip()
+
+    def _replace_latest_assistant_message(self, content: str) -> None:
+        for message in reversed(self.session.messages):
+            if message.role == "assistant":
+                message.content = content
+                return
 
     def _fail_engineering_run(
         self, journal: RunJournal, error: str
@@ -223,7 +265,7 @@ class Agent:
         skipped: bool = False,
     ) -> bool:
         """记录真实工具结果；有状态变化时立即原子持久化。"""
-        changed = self.evidence_recorder.record(
+        evidence_changed = self.evidence_recorder.record(
             journal,
             tool_name,
             params,
@@ -231,6 +273,15 @@ class Agent:
             cached=cached,
             skipped=skipped,
         )
+        verification_changed = self.verification_tracker.record(
+            journal,
+            tool_name,
+            params,
+            result,
+            cached=cached,
+            skipped=skipped,
+        )
+        changed = evidence_changed or verification_changed
         if changed:
             self.journal_store.save(journal)
         return changed
@@ -781,6 +832,8 @@ class Agent:
             output_tokens=total_output,
             cost_usd=total_cost,
         )
+        final_content = self._apply_completion_audit_notice(final_content, engineering)
+        self._replace_latest_assistant_message(final_content)
 
         return AgentTurnResult(
             session_id=self.session.id,
@@ -836,7 +889,9 @@ class Agent:
             and run_journal.intent.policy.collaboration_allowed
             and await self._should_collaborate(user_input, run_journal.intent)
         ):
-            async for event in self._run_collaboration_stream(user_input, billing_before):
+            async for event in self._run_collaboration_stream(
+                user_input, billing_before, run_journal
+            ):
                 if event.type == "done":
                     run_status = (
                         "blocked" if "取消" in event.assistant_message else "completed"
@@ -850,6 +905,10 @@ class Agent:
                         output_tokens=event.output_tokens,
                         cost_usd=event.cost_usd,
                     )
+                    event.assistant_message = self._apply_completion_audit_notice(
+                        event.assistant_message, engineering
+                    )
+                    self._replace_latest_assistant_message(event.assistant_message)
                     yield ChatStreamEvent(
                         type="engineering_complete",
                         engineering=engineering,
@@ -1164,6 +1223,8 @@ class Agent:
             output_tokens=total_output,
             cost_usd=total_cost,
         )
+        final_content = self._apply_completion_audit_notice(final_content, engineering)
+        self._replace_latest_assistant_message(final_content)
         yield ChatStreamEvent(
             type="engineering_complete",
             engineering=engineering,
@@ -1223,6 +1284,7 @@ class Agent:
         self,
         user_input: str,
         billing_before: dict[str, Any],
+        run_journal: RunJournal,
     ) -> AsyncIterator[ChatStreamEvent]:
         """多模型协作流：Orchestrator -> Dispatcher -> Reviewer"""
         from src.core.dispatcher import Dispatcher
@@ -1347,6 +1409,38 @@ class Agent:
                     )
             yield ChatStreamEvent(type=event_type, task=payload)
 
+        evidence_changed = False
+        for result in results:
+            excerpt = (result.content if result.success else result.error).strip()
+            _, added = run_journal.add_evidence(
+                Evidence(
+                    source=f"worker:{result.task.id}",
+                    claim=(
+                        f"Worker {result.task.id} 执行成功"
+                        if result.success
+                        else f"Worker {result.task.id} 执行失败"
+                    ),
+                    excerpt=excerpt[:800],
+                    kind="change" if result.files_written else (
+                        "test" if "test" in result.task.type.lower() else "runtime"
+                    ),
+                    success=result.success,
+                    metadata={
+                        "task_id": result.task.id,
+                        "task_type": result.task.type,
+                        "files_written": result.files_written,
+                    },
+                )
+            )
+            evidence_changed = evidence_changed or added
+        self.completion_auditor.audit(run_journal, "completed")
+        await asyncio.to_thread(self.journal_store.save, run_journal)
+        if evidence_changed or run_journal.audit is not None:
+            yield ChatStreamEvent(
+                type="engineering_update",
+                engineering=run_journal.event_payload(),
+            )
+
         # 3. Reviewer 整合
         reviewer = Reviewer(self.gateway)
         review = await asyncio.to_thread(
@@ -1354,6 +1448,16 @@ class Agent:
             user_request=user_input,
             plan=plan,
             results=results,
+            engineering_context={
+                "evidence": [item.model_dump() for item in run_journal.evidence],
+                "verification": [
+                    item.model_dump() for item in run_journal.verification
+                ],
+                "requirements": [
+                    item.model_dump() for item in run_journal.requirements
+                ],
+                "audit": run_journal.audit.model_dump() if run_journal.audit else None,
+            },
         )
         yield ChatStreamEvent(
             type="review_complete",
@@ -1361,6 +1465,7 @@ class Agent:
                 "passed": review.passed,
                 "issues": review.issues,
                 "final_output": review.final_output,
+                "audit": run_journal.audit.model_dump() if run_journal.audit else None,
             },
         )
 

@@ -45,11 +45,22 @@ class Reviewer:
             '输出格式：{"passed": true/false, "issues": ["..."], "final_output": "整合后的最终内容"}'
         )
 
-    def review(self, user_request: str, plan: TaskPlan, results: list[TaskResult]) -> ReviewResult:
+    def review(
+        self,
+        user_request: str,
+        plan: TaskPlan,
+        results: list[TaskResult],
+        engineering_context: dict | None = None,
+    ) -> ReviewResult:
         """执行审查"""
         messages = [
             ChatMessage(role="system", content=self.system_prompt),
-            ChatMessage(role="user", content=self._build_review_prompt(user_request, plan, results)),
+            ChatMessage(
+                role="user",
+                content=self._build_review_prompt(
+                    user_request, plan, results, engineering_context
+                ),
+            ),
         ]
 
         response = self.gateway.chat(
@@ -63,28 +74,42 @@ class Reviewer:
         try:
             review_data = self._parse_json(response.content)
         except ValueError:
-            # 模型没有按 JSON 输出，直接把原文当作 final_output
-            return ReviewResult(
-                passed=True,
-                issues=[],
-                final_output=str(response.content),
+            return self._enforce_engineering_audit(
+                ReviewResult(
+                    passed=False,
+                    issues=["Reviewer 未返回可解析的结构化 JSON，不能自动通过"],
+                    final_output=str(response.content),
+                ),
+                engineering_context,
             )
 
         # 兼容模型只返回文本的情况：构造一个默认 ReviewResult
         if not isinstance(review_data, dict):
-            return ReviewResult(
-                passed=True,
-                issues=[],
-                final_output=str(response.content),
+            return self._enforce_engineering_audit(
+                ReviewResult(
+                    passed=False,
+                    issues=["Reviewer 返回格式无效，不能自动通过"],
+                    final_output=str(response.content),
+                ),
+                engineering_context,
             )
 
-        return ReviewResult(
-            passed=bool(review_data.get("passed", True)),
-            issues=review_data.get("issues", []),
-            final_output=review_data.get("final_output", ""),
+        return self._enforce_engineering_audit(
+            ReviewResult(
+                passed=bool(review_data.get("passed", False)),
+                issues=review_data.get("issues", []),
+                final_output=review_data.get("final_output", ""),
+            ),
+            engineering_context,
         )
 
-    def _build_review_prompt(self, user_request: str, plan: TaskPlan, results: list[TaskResult]) -> str:
+    def _build_review_prompt(
+        self,
+        user_request: str,
+        plan: TaskPlan,
+        results: list[TaskResult],
+        engineering_context: dict | None = None,
+    ) -> str:
         lines = [
             "原始需求：",
             user_request,
@@ -105,8 +130,57 @@ class Reviewer:
                 lines.append("输出内容：")
                 lines.append(result.content)
 
+        if engineering_context:
+            audit = engineering_context.get("audit") or {}
+            lines.extend(["", "确定性工程审计："])
+            lines.append(f"可完成：{bool(audit.get('can_complete', False))}")
+            lines.append(f"摘要：{audit.get('summary', '')}")
+            lines.append(
+                "缺失检查：" + "、".join(audit.get("missing_checks", []) or ["无"])
+            )
+            lines.append(
+                "失败检查：" + "、".join(audit.get("failed_checks", []) or ["无"])
+            )
+            lines.append("证据摘要：")
+            for evidence in (engineering_context.get("evidence") or [])[-20:]:
+                lines.append(
+                    f"- [{evidence.get('kind', 'unknown')}] "
+                    f"{evidence.get('claim', '')} | "
+                    f"{str(evidence.get('excerpt', ''))[:300]}"
+                )
+            lines.append("验证门：")
+            for gate in engineering_context.get("verification") or []:
+                lines.append(
+                    f"- {gate.get('check_type', 'targeted')} | "
+                    f"passed={gate.get('passed')} | {gate.get('command_or_check', '')}"
+                )
+
         lines.append("\n请根据以上结果进行审查，按指定 JSON 格式输出。")
         return "\n".join(lines)
+
+    @staticmethod
+    def _enforce_engineering_audit(
+        result: ReviewResult,
+        engineering_context: dict | None,
+    ) -> ReviewResult:
+        if not engineering_context:
+            return result
+        audit = engineering_context.get("audit") or {}
+        if audit.get("can_complete", False):
+            return result
+        details = [
+            *(audit.get("missing_checks") or []),
+            *(audit.get("failed_checks") or []),
+        ]
+        issue = "确定性工程审计未通过"
+        if details:
+            issue += f"：{'、'.join(dict.fromkeys(details))}"
+        issues = list(dict.fromkeys([*result.issues, issue]))
+        return ReviewResult(
+            passed=False,
+            issues=issues,
+            final_output=result.final_output,
+        )
 
     def _parse_json(self, text: str) -> dict:
         """从文本中提取 JSON"""

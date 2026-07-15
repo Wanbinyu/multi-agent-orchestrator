@@ -34,6 +34,17 @@ EvidenceKind = Literal[
 ]
 HypothesisStatus = Literal["untested", "supported", "refuted", "inconclusive"]
 ReconStatus = Literal["not_started", "in_progress", "partial", "completed"]
+VerificationCheck = Literal[
+    "targeted",
+    "adjacent",
+    "integration",
+    "full",
+    "smoke",
+    "external_mock",
+    "external_live",
+]
+RequirementStatus = Literal["unverified", "satisfied", "failed", "waived"]
+AuditStatus = Literal["not_required", "passed", "blocked", "failed"]
 PlanStatus = Literal["pending", "in_progress", "completed", "failed", "blocked"]
 RunStatus = Literal["running", "completed", "failed", "blocked"]
 
@@ -229,12 +240,41 @@ class VerificationGate(BaseModel):
     expected: str = ""
     actual: str = ""
     passed: bool | None = None
+    check_type: VerificationCheck = "targeted"
+    evidence_ids: list[str] = Field(default_factory=list)
+    required: bool = True
+    created_at: str = Field(default_factory=utc_now)
+
+
+class RequirementCheck(BaseModel):
+    """用户要求、实现证据和验证证据之间的可审计映射。"""
+
+    id: str = Field(default_factory=lambda: f"req-{uuid.uuid4().hex[:8]}")
+    requirement: str = Field(..., min_length=1)
+    implementation_evidence_ids: list[str] = Field(default_factory=list)
+    verification_gate_ids: list[str] = Field(default_factory=list)
+    status: RequirementStatus = "unverified"
+    note: str = ""
+
+
+class CompletionAudit(BaseModel):
+    """完成前的确定性审计结果。"""
+
+    status: AuditStatus = "not_required"
+    requested_status: RunStatus = "running"
+    can_complete: bool = True
+    required_checks: list[VerificationCheck] = Field(default_factory=list)
+    satisfied_checks: list[VerificationCheck] = Field(default_factory=list)
+    missing_checks: list[str] = Field(default_factory=list)
+    failed_checks: list[str] = Field(default_factory=list)
+    summary: str = ""
+    audited_at: str = Field(default_factory=utc_now)
 
 
 class RunJournal(BaseModel):
     """单轮工程运行的可持久化记录。"""
 
-    version: int = 1
+    version: int = 2
     run_id: str
     session_id: str
     objective: str = Field(..., min_length=1)
@@ -250,6 +290,8 @@ class RunJournal(BaseModel):
     decisions: list[str] = Field(default_factory=list)
     files_changed: list[str] = Field(default_factory=list)
     verification: list[VerificationGate] = Field(default_factory=list)
+    requirements: list[RequirementCheck] = Field(default_factory=list)
+    audit: CompletionAudit | None = None
     residual_risks: list[str] = Field(default_factory=list)
     metrics: dict[str, Any] = Field(default_factory=dict)
 
@@ -292,6 +334,29 @@ class RunJournal(BaseModel):
         self.hypotheses.append(hypothesis)
         self.updated_at = utc_now()
         return hypothesis
+
+    def add_verification(self, gate: VerificationGate) -> tuple[VerificationGate, bool]:
+        """按检查类型、命令和实际结果去重验证门。"""
+        fingerprint = (
+            gate.check_type,
+            gate.command_or_check,
+            gate.actual,
+            gate.passed,
+            tuple(gate.evidence_ids),
+        )
+        for existing in self.verification:
+            existing_fingerprint = (
+                existing.check_type,
+                existing.command_or_check,
+                existing.actual,
+                existing.passed,
+                tuple(existing.evidence_ids),
+            )
+            if existing_fingerprint == fingerprint:
+                return existing, False
+        self.verification.append(gate)
+        self.updated_at = utc_now()
+        return gate, True
 
     def evaluate_hypothesis(
         self,
@@ -372,6 +437,16 @@ class RunJournal(BaseModel):
             },
             "reconnaissance": self.reconnaissance.model_dump(),
             "verification_count": len(self.verification),
+            "verification_summary": {
+                "passed": sum(item.passed is True for item in self.verification),
+                "failed": sum(item.passed is False for item in self.verification),
+                "pending": sum(item.passed is None for item in self.verification),
+            },
+            "requirement_counts": {
+                status: sum(item.status == status for item in self.requirements)
+                for status in ("unverified", "satisfied", "failed", "waived")
+            },
+            "audit": self.audit.model_dump() if self.audit else None,
             "files_changed": self.files_changed,
             "residual_risks": self.residual_risks,
             "metrics": self.metrics,
