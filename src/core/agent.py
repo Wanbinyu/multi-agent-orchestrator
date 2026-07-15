@@ -17,6 +17,7 @@ from src.core.engineering import (
     RunJournalStore,
     TaskIntent,
     TaskIntentClassifier,
+    ToolEvidenceRecorder,
 )
 from src.core.memory import MemoryContextBuilder, MemoryStore
 from src.core.session import Session
@@ -41,7 +42,8 @@ from src.tools.worker_tools import execute_tool_call
 TOOL_RULES = """规则：
 - 只能使用上面这种 Markdown 代码块调用工具，不要输出原生 JSON tool_use 或 function_call。
 - 如果用户请求需要读取、写入或执行命令，请直接输出对应的工具代码块。
-- 当用户要求分析、检查或审阅项目时，第一步调用 project_tree 获取精简结构；随后只读取入口、依赖、配置、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls。
+- 当用户要求分析、检查或审阅项目时，先调用 project_tree 获取精简结构，再调用 git_status 检查版本状态；随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
+- 项目判断必须以工具返回的文件、检索、Git 或测试结果为证据；工具没有确认的细节标记为“待确认”，禁止把推测写成事实。
 - 当你说要“查看”、“读取”或“探查”某个文件时，必须在同一轮回复中立即调用 read_file 工具，不能只口头描述而不调用工具。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块（正文代码块不会被保存为文件）。每个文件一次 write_file，path 用有意义的文件名。
 - 如果用户指定了绝对路径（如 G:\\MAO_test\\index.html），直接使用该路径；如果只给了文件夹（如 G:\\MAO_test），请在该文件夹下创建合理的文件名，例如 index.html、login.js、style.css。
@@ -58,7 +60,8 @@ TOOL_RULES = """规则：
 # 原生 tool_use 模式下的规则（工具定义由 tools= 参数提供，无需 Markdown 说明）
 TOOL_RULES_NATIVE = """规则：
 - 你可以通过原生工具调用（tool_use）使用提供的工具完成用户任务。
-- 分析、检查或审阅项目时，第一步调用 project_tree；随后只读取入口、依赖、配置、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls。
+- 分析、检查或审阅项目时，先调用 project_tree，再调用 git_status；随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
+- 项目判断必须以工具返回的文件、检索、Git 或测试结果为证据；未由工具确认的细节标记为“待确认”，禁止把推测写成事实。
 - 当你说要“查看”或“读取”某个文件时，必须立即调用 read_file，不能只口头描述。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块。
 - 如果用户指定了绝对路径，直接使用该路径；如果只给了文件夹，请在该文件夹下创建合理的文件名。
@@ -144,6 +147,7 @@ class Agent:
             session.output_dir
         )
         self.intent_classifier = intent_classifier or TaskIntentClassifier()
+        self.evidence_recorder = ToolEvidenceRecorder()
         self._active_run_journal: RunJournal | None = None
 
     def _start_engineering_run(self, user_input: str) -> RunJournal:
@@ -207,6 +211,29 @@ class Agent:
             "failed",
             residual_risks=[error],
         )
+
+    def _record_tool_evidence(
+        self,
+        journal: RunJournal,
+        tool_name: str,
+        params: dict[str, Any],
+        result: ToolResult,
+        *,
+        cached: bool = False,
+        skipped: bool = False,
+    ) -> bool:
+        """记录真实工具结果；有状态变化时立即原子持久化。"""
+        changed = self.evidence_recorder.record(
+            journal,
+            tool_name,
+            params,
+            result,
+            cached=cached,
+            skipped=skipped,
+        )
+        if changed:
+            self.journal_store.save(journal)
+        return changed
 
     def _provider_type(self) -> str:
         """获取主模型的 provider 类型（anthropic/openai/ollama/llamacpp）"""
@@ -508,6 +535,7 @@ class Agent:
         read_cache: dict[str, ToolResult] | None = None,
         analysis_only: bool = False,
         read_file_keys: set[str] | None = None,
+        run_journal: RunJournal | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """同步执行工具调用（用于 run_turn，approve 模式下视为自动批准）"""
         calls: list[dict[str, Any]] = []
@@ -572,6 +600,10 @@ class Agent:
                     "skipped": True,
                 })
                 outputs.append(self._format_tool_result(tool_name, result))
+                if run_journal is not None:
+                    self._record_tool_evidence(
+                        run_journal, tool_name, params, result, skipped=True
+                    )
                 continue
             if analysis_only and tool_name == "read_file" and cache_key and read_file_keys is not None:
                 read_file_keys.add(cache_key)
@@ -593,6 +625,10 @@ class Agent:
                 "cached": cached,
             })
             outputs.append(self._format_tool_result(tool_name, result))
+            if run_journal is not None:
+                self._record_tool_evidence(
+                    run_journal, tool_name, params, result, cached=cached
+                )
             if files_written is not None:
                 self._record_written_file(tool_name, params, result, files_written)
 
@@ -699,6 +735,7 @@ class Agent:
                 read_cache,
                 analysis_only,
                 read_file_keys,
+                run_journal,
             )
             if not calls:
                 break
@@ -987,6 +1024,19 @@ class Agent:
                     calls.append(call)
                     yield ChatStreamEvent(type="tool_complete", tool_call=call)
                     tool_results_parts.append(self._format_tool_result(tool_name, result))
+                    changed = await asyncio.to_thread(
+                        self._record_tool_evidence,
+                        run_journal,
+                        tool_name,
+                        params,
+                        result,
+                        skipped=True,
+                    )
+                    if changed:
+                        yield ChatStreamEvent(
+                            type="engineering_update",
+                            engineering=run_journal.event_payload(),
+                        )
                     continue
                 if analysis_only and tool_name == "read_file" and cache_key:
                     read_file_keys.add(cache_key)
@@ -1044,6 +1094,19 @@ class Agent:
                 calls.append(call)
                 yield ChatStreamEvent(type="tool_complete", tool_call=call)
                 tool_results_parts.append(self._format_tool_result(tool_name, result))
+                changed = await asyncio.to_thread(
+                    self._record_tool_evidence,
+                    run_journal,
+                    tool_name,
+                    params,
+                    result,
+                    cached=cached,
+                )
+                if changed:
+                    yield ChatStreamEvent(
+                        type="engineering_update",
+                        engineering=run_journal.event_payload(),
+                    )
                 self._record_written_file(tool_name, params, result, files_written)
 
             if not calls:

@@ -43,6 +43,47 @@ def read_file(path: str, base_dir: str = ".") -> ToolResult:
         return ToolResult(success=False, error=str(e))
 
 
+@tool_registry.register(
+    name="git_status",
+    description="只读检查指定项目目录的 Git 分支和工作区状态",
+    params={
+        "path": {
+            "type": "string",
+            "description": "项目目录的相对或绝对路径，默认当前工作目录",
+        }
+    },
+    category="read",
+)
+def git_status(path: str = ".", base_dir: str = ".") -> ToolResult:
+    """用固定参数执行只读 Git 状态检查，不接受任意命令。"""
+    try:
+        target = _resolve_path(path, base_dir)
+        if not target.exists():
+            return ToolResult(success=False, error=f"目录不存在：{path}")
+        if not target.is_dir():
+            return ToolResult(success=False, error=f"不是目录：{path}")
+        result = subprocess.run(
+            ["git", "status", "--short", "--branch"],
+            cwd=str(target),
+            capture_output=True,
+            text=True,
+            timeout=15,
+            shell=False,
+        )
+        output = result.stdout.strip()
+        if result.stderr:
+            output = "\n".join(part for part in (output, result.stderr.strip()) if part)
+        return ToolResult(
+            success=result.returncode == 0,
+            output=output,
+            error=f"退出码：{result.returncode}" if result.returncode != 0 else "",
+        )
+    except subprocess.TimeoutExpired:
+        return ToolResult(success=False, error="Git 状态检查超时（15 秒）")
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
 DEFAULT_ALLOWED_PREFIXES = [
     "pytest",
     "python -m pytest",

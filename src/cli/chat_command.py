@@ -107,6 +107,7 @@ def _summarize_params(params: dict) -> str:
 
 _TOOL_PHASES: dict[str, tuple[str, str]] = {
     "project_tree": ("explore", "探索项目"),
+    "git_status": ("explore", "探索项目"),
     "list_dir": ("explore", "探索项目"),
     "glob_files": ("explore", "探索项目"),
     "read_file": ("explore", "探索项目"),
@@ -130,6 +131,7 @@ def _format_tool_action(tool_name: str, params: dict[str, Any]) -> str:
     labels = {
         "list_dir": "浏览目录",
         "project_tree": "生成项目树",
+        "git_status": "检查 Git 状态",
         "glob_files": "匹配文件",
         "read_file": "读取文件",
         "grep_content": "搜索内容",
@@ -203,6 +205,8 @@ def _summarize_tool_activity(tool_calls: list[dict[str, Any]]) -> list[str]:
             f"浏览 {len(completed_targets['list_dir'])} 个目录，"
             f"读取 {len(completed_targets['read_file'])} 个文件"
         )
+    if counts["git_status"]:
+        lines.append(f"版本：检查 {counts['git_status']} 次 Git 工作区状态")
     search_count = sum(counts[name] for name in ("glob_files", "grep_content", "search_project_files", "search_memory"))
     if search_count:
         lines.append(f"检索：执行 {search_count} 次代码或上下文搜索")
@@ -301,6 +305,9 @@ async def _stream_turn(agent: Agent, user_input: str):
     engineering_kind = ""
     engineering_risk = ""
     engineering_write_state = ""
+    engineering_evidence_count = 0
+    engineering_recon_status = ""
+    engineering_recon_categories = 0
 
     def _start_spinner(message: str):
         nonlocal spinner_task, spinner_message
@@ -364,6 +371,16 @@ async def _stream_turn(agent: Agent, user_input: str):
                     )
                 else:
                     engineering_write_state = "只读"
+                if "evidence_count" in engineering:
+                    engineering_evidence_count = int(engineering.get("evidence_count") or 0)
+                reconnaissance = engineering.get("reconnaissance", {}) or {}
+                if reconnaissance:
+                    engineering_recon_status = str(
+                        reconnaissance.get("status", engineering_recon_status)
+                    )
+                    engineering_recon_categories = len(
+                        reconnaissance.get("observed_categories", []) or []
+                    )
                 _start_spinner("🧠 思考中")
             elif event.type == "permission_request":
                 live.stop()
@@ -539,6 +556,20 @@ async def _stream_turn(agent: Agent, user_input: str):
             f"[dim]工程记录：{engineering_run_id} · "
             f"{engineering_status or 'running'}{intent_suffix}[/dim]"
         )
+        if engineering_evidence_count or engineering_recon_status:
+            recon_labels = {
+                "not_started": "未开始",
+                "in_progress": "侦察中",
+                "partial": "部分覆盖",
+                "completed": "已覆盖",
+            }
+            recon_text = recon_labels.get(
+                engineering_recon_status, engineering_recon_status or "未开始"
+            )
+            console.print(
+                f"[dim]证据：{engineering_evidence_count} 条 · "
+                f"项目侦察：{recon_text}（{engineering_recon_categories}/6）[/dim]"
+            )
 
 
 def _cmd_new(store: SessionStore, title: str = ""):

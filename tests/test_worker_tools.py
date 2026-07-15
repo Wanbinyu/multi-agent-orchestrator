@@ -1,10 +1,11 @@
 """Worker 工具单元测试"""
 import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.tools.worker_tools import read_file, run_command, write_file
+from src.tools.worker_tools import git_status, read_file, run_command, write_file
 
 
 def test_read_file_success(tmp_path):
@@ -26,6 +27,35 @@ def test_read_file_path_traversal(tmp_path):
     result = read_file("../outside.txt", str(tmp_path))
     assert result.success is False
     assert "越界" in result.error
+
+
+def test_git_status_uses_fixed_readonly_command(tmp_path, monkeypatch):
+    completed = MagicMock(returncode=0, stdout="## main\n M README.md\n", stderr="")
+    run = MagicMock(return_value=completed)
+    monkeypatch.setattr("src.tools.worker_tools.subprocess.run", run)
+
+    result = git_status(".", str(tmp_path))
+
+    assert result.success is True
+    assert "## main" in result.output
+    run.assert_called_once_with(
+        ["git", "status", "--short", "--branch"],
+        cwd=str(tmp_path.resolve()),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        shell=False,
+    )
+
+
+def test_git_status_rejects_missing_or_non_directory_path(tmp_path):
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("x", encoding="utf-8")
+
+    assert git_status("missing", str(tmp_path)).success is False
+    result = git_status("file.txt", str(tmp_path))
+    assert result.success is False
+    assert "不是目录" in result.error
 
 
 def test_run_command_allowed(tmp_path):

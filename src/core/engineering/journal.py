@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from src.core.engineering.models import RunJournal, TaskIntent
+from src.core.engineering.models import ProjectReconnaissance, RunJournal, TaskIntent
 from src.models.schemas import ApprovalMode
 
 
@@ -58,6 +58,9 @@ class RunJournalStore:
             session_id=session_id,
             objective=objective,
             intent=resolved_intent,
+            reconnaissance=ProjectReconnaissance(
+                root=resolved_intent.scope[0] if resolved_intent.scope else ""
+            ),
             decisions=[decision],
         )
         self.save(journal)

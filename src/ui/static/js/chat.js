@@ -659,11 +659,24 @@
         riskLabels[intent.risk_level] || intent.risk_level,
         writeState,
       ].filter(Boolean).join(" · ");
+      const recon = run.reconnaissance || {};
+      const reconLabels = {
+        not_started: "未开始",
+        in_progress: "侦察中",
+        partial: "部分覆盖",
+        completed: "已覆盖",
+      };
+      const evidenceCount = Number(run.evidence_count || 0);
+      const observedCount = (recon.observed_categories || []).length;
+      const evidenceDetail = `证据 ${evidenceCount} 条 · 项目侦察 ${
+        reconLabels[recon.status] || recon.status || "未开始"
+      }（${observedCount}/6）`;
       html += `
         <div class="turn-log-item engineering-run ${escapeHtml(run.status || "running")}">
           <div class="turn-log-title">${icon} 工程记录 · ${escapeHtml(labels[run.status] || run.status)}</div>
           <div class="turn-log-detail">${escapeHtml(run.run_id)}</div>
           <div class="turn-log-detail">${escapeHtml(intentDetail)}</div>
+          <div class="turn-log-detail">${escapeHtml(evidenceDetail)}</div>
         </div>
       `;
     });

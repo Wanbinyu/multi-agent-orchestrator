@@ -100,7 +100,15 @@ class _EngineeringEventAgent(_FakeAgent):
         yield ChatStreamEvent(type="delta", delta="完成")
         yield ChatStreamEvent(
             type="engineering_complete",
-            engineering={"run_id": "run-test", "status": "completed"},
+            engineering={
+                "run_id": "run-test",
+                "status": "completed",
+                "evidence_count": 3,
+                "reconnaissance": {
+                    "status": "partial",
+                    "observed_categories": ["structure", "docs"],
+                },
+            },
         )
         yield ChatStreamEvent(type="done", assistant_message="完成")
 
@@ -110,6 +118,8 @@ def test_stream_turn_prints_engineering_run_status(capsys):
     output = capsys.readouterr().out
     assert "工程记录：run-test · completed" in output
     assert "review / medium / 只读" in output
+    assert "证据：3 条" in output
+    assert "项目侦察：部分覆盖（2/6）" in output
 
 
 class _PlainStreamingAgent(_FakeAgent):

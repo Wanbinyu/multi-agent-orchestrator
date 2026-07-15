@@ -8,10 +8,12 @@ from src.core.engineering import (
     Evidence,
     RunJournalStore,
     TaskIntentClassifier,
+    ToolEvidenceRecorder,
     VerificationGate,
     WorkPlan,
     WorkPlanStep,
 )
+from src.tools.tool_result import ToolResult
 
 
 def test_work_plan_enforces_single_active_step_and_transitions():
@@ -102,3 +104,123 @@ def test_unclassified_store_default_stays_readonly_even_in_auto_mode(tmp_path):
     assert journal.intent.kind == "unclassified"
     assert journal.intent.write_authorized is False
     assert journal.intent.policy.allow_project_writes is False
+
+
+def test_tool_evidence_drives_reconnaissance_without_double_counting(tmp_path):
+    store = RunJournalStore(tmp_path / "runs")
+    journal = store.create("session-1", "检查项目", "auto")
+    recorder = ToolEvidenceRecorder()
+
+    observations = [
+        ("project_tree", {"path": "."}, "project tree"),
+        ("git_status", {"path": "."}, "## main"),
+        ("read_file", {"path": "README.md"}, "docs"),
+        ("read_file", {"path": "pyproject.toml"}, "deps"),
+        ("read_file", {"path": "src/main.py"}, "entry"),
+        ("read_file", {"path": "tests/test_main.py"}, "tests"),
+    ]
+    for tool_name, params, output in observations:
+        assert recorder.record(
+            journal, tool_name, params, ToolResult(success=True, output=output)
+        )
+
+    assert journal.reconnaissance.tool_calls == len(observations)
+    assert journal.reconnaissance.status == "completed"
+    assert journal.reconnaissance.missing_categories() == []
+    assert len(journal.reconnaissance.observed_categories) == 6
+    assert len(journal.evidence) == len(observations)
+
+    assert recorder.record(
+        journal,
+        "read_file",
+        {"path": "README.md"},
+        ToolResult(success=True, output="docs"),
+        cached=True,
+    ) is False
+    assert journal.reconnaissance.tool_calls == len(observations)
+    assert len(journal.evidence) == len(observations)
+
+
+def test_skipped_read_is_evidence_but_not_reconnaissance_coverage(tmp_path):
+    store = RunJournalStore(tmp_path / "runs")
+    journal = store.create("session-1", "检查项目", "auto")
+    recorder = ToolEvidenceRecorder()
+
+    changed = recorder.record(
+        journal,
+        "read_file",
+        {"path": "README.md"},
+        ToolResult(success=True, output="达到抽样上限"),
+        skipped=True,
+    )
+
+    assert changed is True
+    assert journal.evidence[0].metadata["skipped"] is True
+    assert journal.reconnaissance.tool_calls == 0
+    assert journal.reconnaissance.files_sampled == []
+    assert journal.reconnaissance.skipped_areas == ["README.md"]
+
+
+def test_reconnaissance_stays_partial_until_all_six_categories_are_observed(tmp_path):
+    journal = RunJournalStore(tmp_path / "runs").create(
+        "session-1", "检查项目", "auto"
+    )
+    recorder = ToolEvidenceRecorder()
+    for tool_name, params in (
+        ("project_tree", {"path": "."}),
+        ("git_status", {"path": "."}),
+        ("read_file", {"path": "README.md"}),
+        ("read_file", {"path": "src/main.py"}),
+    ):
+        recorder.record(
+            journal, tool_name, params, ToolResult(success=True, output="ok")
+        )
+
+    journal.finish("completed")
+
+    assert journal.reconnaissance.status == "partial"
+    assert journal.reconnaissance.missing_categories() == ["dependencies", "tests"]
+
+
+def test_hypothesis_requires_known_direct_evidence(tmp_path):
+    journal = RunJournalStore(tmp_path / "runs").create(
+        "session-1", "诊断故障", "auto"
+    )
+    hypothesis = journal.add_hypothesis("配置文件缺失")
+
+    with pytest.raises(ValueError, match="必须引用直接证据"):
+        journal.evaluate_hypothesis(hypothesis.id, "supported")
+    with pytest.raises(ValueError, match="未知证据"):
+        journal.evaluate_hypothesis(
+            hypothesis.id, "refuted", evidence_ids=["ev-missing"]
+        )
+
+    evidence, _ = journal.add_evidence(
+        Evidence(source="tool:read_file", claim="配置文件存在")
+    )
+    evaluated = journal.evaluate_hypothesis(
+        hypothesis.id, "refuted", evidence_ids=[evidence.id]
+    )
+    assert evaluated.status == "refuted"
+    assert evaluated.contradicting_evidence_ids == [evidence.id]
+
+
+def test_failed_test_evidence_keeps_output_and_error(tmp_path):
+    journal = RunJournalStore(tmp_path / "runs").create(
+        "session-1", "运行测试", "auto"
+    )
+    recorder = ToolEvidenceRecorder()
+
+    recorder.record(
+        journal,
+        "run_command",
+        {"command": "python -m pytest -q"},
+        ToolResult(success=False, output="1 failed", error="退出码：1"),
+    )
+
+    evidence = journal.evidence[0]
+    assert evidence.kind == "test"
+    assert evidence.success is False
+    assert evidence.claim == "测试命令执行失败：python -m pytest -q"
+    assert "1 failed" in evidence.excerpt
+    assert "退出码：1" in evidence.excerpt

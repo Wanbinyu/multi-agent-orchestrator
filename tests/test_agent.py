@@ -110,6 +110,9 @@ def test_auto_explain_task_rejects_model_write_attempt(tmp_path):
     assert result.tool_calls[0]["success"] is False
     assert "仅允许只读工具" in result.tool_calls[0]["error"]
     assert not (tmp_path / "output" / "should-not-exist.txt").exists()
+    journal = RunJournalStore.from_output_dir(session.output_dir).load(result.run_id)
+    assert journal.evidence == []
+    assert journal.reconnaissance.tool_calls == 0
 
 
 def test_auto_change_task_records_write_authorization(tmp_path):
@@ -175,6 +178,10 @@ def test_run_turn_with_read_file_tool(tmp_path):
     assert result.tool_calls[0]["tool"] == "read_file"
     assert result.tool_calls[0]["success"] is True
     assert "Python 是一门优雅的编程语言" in result.assistant_message
+    journal = RunJournalStore.from_output_dir(session.output_dir).load(result.run_id)
+    assert len(journal.evidence) == 1
+    assert journal.evidence[0].tool_name == "read_file"
+    assert journal.reconnaissance.tool_calls == 1
     # 消息历史包含 assistant 原始回复 + tool results user + 最终 assistant
     assert any(m.role == "user" and "[工具 read_file" in m.content for m in session.messages)
 

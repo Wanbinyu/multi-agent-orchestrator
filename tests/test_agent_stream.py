@@ -146,6 +146,15 @@ def test_run_turn_stream_with_tool(tmp_path):
     assert done.input_tokens == 18
     assert done.output_tokens == 9
     assert done.cost_usd == pytest.approx(0.00018)
+    engineering_types = [event.type for event in events if event.type.startswith("engineering_")]
+    assert engineering_types == [
+        "engineering_start",
+        "engineering_update",
+        "engineering_complete",
+    ]
+    update = next(event for event in events if event.type == "engineering_update")
+    assert update.engineering["evidence_count"] == 1
+    assert update.engineering["reconnaissance"]["tool_calls"] == 1
 
 
 def test_run_turn_stream_respects_max_iterations(tmp_path):
@@ -200,6 +209,9 @@ def test_run_turn_stream_reuses_duplicate_read_in_same_turn(tmp_path):
     assert [call["cached"] for call in done.tool_calls] == [False, True]
     starts = [event.tool_call for event in events if event.type == "tool_start"]
     assert [call["cached"] for call in starts] == [False, True]
+    updates = [event for event in events if event.type == "engineering_update"]
+    assert len(updates) == 1
+    assert updates[0].engineering["evidence_count"] == 1
 
 
 def test_analysis_only_turn_enforces_unique_read_file_limit(tmp_path):

@@ -12,6 +12,7 @@ CACHEABLE_READ_TOOLS = frozenset({
     "glob_files",
     "grep_content",
     "read_file",
+    "git_status",
     "search_project_files",
     "search_memory",
 })
