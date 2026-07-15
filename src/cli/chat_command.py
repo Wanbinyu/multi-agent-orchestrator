@@ -295,6 +295,8 @@ async def _stream_turn(agent: Agent, user_input: str):
     activity_counts: Counter[str] = Counter()
     phase_started: set[str] = set()
     phase_detail_counts: Counter[str] = Counter()
+    engineering_run_id = ""
+    engineering_status = ""
 
     def _start_spinner(message: str):
         nonlocal spinner_task, spinner_message
@@ -343,6 +345,11 @@ async def _stream_turn(agent: Agent, user_input: str):
                     _start_spinner("🛠️ 正在调用工具")
                 else:
                     live.update(Markdown(final_content))
+            elif event.type in ("engineering_start", "engineering_update", "engineering_complete"):
+                engineering = event.engineering or {}
+                engineering_run_id = str(engineering.get("run_id", engineering_run_id))
+                engineering_status = str(engineering.get("status", engineering_status))
+                _start_spinner("🧠 思考中")
             elif event.type == "permission_request":
                 live.stop()
                 req = event.permission_request or {}
@@ -503,6 +510,10 @@ async def _stream_turn(agent: Agent, user_input: str):
         f"[dim]{model_line}  |  输入 token: {input_tokens}  输出 token: {output_tokens}  "
         f"成本: ${cost_usd:.6f}[/dim]"
     )
+    if engineering_run_id:
+        console.print(
+            f"[dim]工程记录：{engineering_run_id} · {engineering_status or 'running'}[/dim]"
+        )
 
 
 def _cmd_new(store: SessionStore, title: str = ""):

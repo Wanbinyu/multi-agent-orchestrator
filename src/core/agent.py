@@ -7,11 +7,12 @@ import re
 import threading
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.core.compactor import ContextCompactor
+from src.core.engineering import RunJournal, RunJournalStore
 from src.core.memory import MemoryContextBuilder, MemoryStore
 from src.core.session import Session
 from src.core.token_counter import count_messages_tokens
@@ -113,6 +114,8 @@ class AgentTurnResult(BaseModel):
     input_tokens: int
     output_tokens: int
     cost_usd: float
+    run_id: str = ""
+    engineering: dict[str, Any] = Field(default_factory=dict)
 
 
 class Agent:
@@ -127,6 +130,7 @@ class Agent:
         memory_store: MemoryStore | None = None,
         max_context_tokens: int = 32000,
         compaction_threshold: float = 0.75,
+        journal_store: RunJournalStore | None = None,
     ):
         self.gateway = gateway
         self.session = session
@@ -139,6 +143,59 @@ class Agent:
         self._permission_results: dict[str, bool] = {}
         self._native_tools_cache: list[dict[str, Any]] | None = None
         self._native_tools_computed = False
+        self.journal_store = journal_store or RunJournalStore.from_output_dir(
+            session.output_dir
+        )
+        self._active_run_journal: RunJournal | None = None
+
+    def _start_engineering_run(self, user_input: str) -> RunJournal:
+        journal = self.journal_store.create(
+            self.session.id,
+            user_input,
+            self.approval_mode,
+        )
+        self._active_run_journal = journal
+        return journal
+
+    def _finish_engineering_run(
+        self,
+        journal: RunJournal,
+        status: Literal["completed", "failed", "blocked"],
+        *,
+        files_changed: list[str] | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cost_usd: float = 0.0,
+        residual_risks: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if files_changed:
+            journal.intent.write_authorized = True
+        journal.finish(
+            status,
+            files_changed=files_changed,
+            metrics={
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": cost_usd,
+            },
+            residual_risks=residual_risks,
+        )
+        self.journal_store.save(journal)
+        if self._active_run_journal is journal:
+            self._active_run_journal = None
+        return journal.event_payload()
+
+    def _fail_engineering_run(
+        self, journal: RunJournal, error: str
+    ) -> dict[str, Any]:
+        if journal.status != "running":
+            return journal.event_payload()
+        journal.decisions.append(f"运行异常：{error}")
+        return self._finish_engineering_run(
+            journal,
+            "failed",
+            residual_risks=[error],
+        )
 
     def _provider_type(self) -> str:
         """获取主模型的 provider 类型（anthropic/openai/ollama/llamacpp）"""
@@ -462,7 +519,19 @@ class Agent:
         """执行一轮对话"""
         self._ensure_system_prompt(user_input)
         self.session.add_message("user", user_input)
-        self._maybe_compact_context()
+        run_journal = self._start_engineering_run(user_input)
+
+        try:
+            self._maybe_compact_context()
+            return self._run_turn_impl(user_input, run_journal)
+        except Exception as exc:
+            self._fail_engineering_run(run_journal, str(exc))
+            raise
+
+    def _run_turn_impl(
+        self, user_input: str, run_journal: RunJournal
+    ) -> AgentTurnResult:
+        """已建立 RunJournal 后执行同步工具循环。"""
 
         total_input = 0
         total_output = 0
@@ -556,6 +625,15 @@ class Agent:
         if self.approval_mode == "auto" and not files_written and final_content.strip():
             files_written.append(write_text_file("response.md", final_content, self.session.output_dir))
 
+        engineering = self._finish_engineering_run(
+            run_journal,
+            "completed",
+            files_changed=files_written,
+            input_tokens=total_input,
+            output_tokens=total_output,
+            cost_usd=total_cost,
+        )
+
         return AgentTurnResult(
             session_id=self.session.id,
             user_message=user_input,
@@ -565,6 +643,8 @@ class Agent:
             input_tokens=total_input,
             output_tokens=total_output,
             cost_usd=total_cost,
+            run_id=run_journal.run_id,
+            engineering=engineering,
         )
 
     async def run_turn_stream(
@@ -572,14 +652,56 @@ class Agent:
         user_input: str,
     ) -> AsyncIterator[ChatStreamEvent]:
         """流式执行一轮对话，按 delta/done 事件产出"""
-        billing_before = self.gateway.billing.summary()
         self._ensure_system_prompt(user_input)
         self.session.add_message("user", user_input)
-        await asyncio.to_thread(self._maybe_compact_context)
+        run_journal = await asyncio.to_thread(self._start_engineering_run, user_input)
+        yield ChatStreamEvent(
+            type="engineering_start",
+            engineering=run_journal.event_payload(),
+        )
+
+        try:
+            await asyncio.to_thread(self._maybe_compact_context)
+            async for event in self._run_turn_stream_impl(user_input, run_journal):
+                yield event
+        except Exception as exc:
+            engineering = await asyncio.to_thread(
+                self._fail_engineering_run, run_journal, str(exc)
+            )
+            yield ChatStreamEvent(
+                type="engineering_complete",
+                engineering=engineering,
+            )
+            raise
+
+    async def _run_turn_stream_impl(
+        self,
+        user_input: str,
+        run_journal: RunJournal,
+    ) -> AsyncIterator[ChatStreamEvent]:
+        """已建立 RunJournal 后执行流式工具循环。"""
+        billing_before = self.gateway.billing.summary()
 
         # 自动判断是否需要多模型协作（只读模式下不走协作，避免自动写文件）
         if self.approval_mode != "readonly" and await self._should_collaborate(user_input):
             async for event in self._run_collaboration_stream(user_input, billing_before):
+                if event.type == "done":
+                    run_status = (
+                        "blocked" if "取消" in event.assistant_message else "completed"
+                    )
+                    engineering = await asyncio.to_thread(
+                        self._finish_engineering_run,
+                        run_journal,
+                        run_status,
+                        files_changed=event.files_written,
+                        input_tokens=event.input_tokens,
+                        output_tokens=event.output_tokens,
+                        cost_usd=event.cost_usd,
+                    )
+                    yield ChatStreamEvent(
+                        type="engineering_complete",
+                        engineering=engineering,
+                    )
                 yield event
             return
 
@@ -623,6 +745,19 @@ class Agent:
                 not full_content.strip()
                 and total_output > output_before
             ):
+                engineering = await asyncio.to_thread(
+                    self._finish_engineering_run,
+                    run_journal,
+                    "failed",
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    cost_usd=total_cost,
+                    residual_risks=["模型未返回可解析文本"],
+                )
+                yield ChatStreamEvent(
+                    type="engineering_complete",
+                    engineering=engineering,
+                )
                 yield ChatStreamEvent(
                     type="error",
                     error="模型未返回可解析文本（可能输出了原生工具调用或推理内容），请重试或换一个模型。",
@@ -838,6 +973,20 @@ class Agent:
                     write_text_file, "response.md", final_content, self.session.output_dir
                 )
             )
+
+        engineering = await asyncio.to_thread(
+            self._finish_engineering_run,
+            run_journal,
+            "completed",
+            files_changed=files_written,
+            input_tokens=total_input,
+            output_tokens=total_output,
+            cost_usd=total_cost,
+        )
+        yield ChatStreamEvent(
+            type="engineering_complete",
+            engineering=engineering,
+        )
 
         yield ChatStreamEvent(
             type="done",

@@ -79,6 +79,11 @@ def test_send_message_stream(client):
             for e, d in events
         )
         assert any(e == "delta" and d["delta"] == "收到" for e, d in events)
+        engineering = [d for e, d in events if e.startswith("engineering_")]
+        assert [d["engineering"]["status"] for d in engineering] == [
+            "running",
+            "completed",
+        ]
 
         done = [d for e, d in events if e == "done"][0]
         assert done["assistant_message"] == "收到"
@@ -92,3 +97,33 @@ def test_send_message_stream_not_found(client):
         json={"message": "你好"},
     )
     assert response.status_code == 404
+
+
+def test_failed_stream_persists_messages_and_failed_journal(client, monkeypatch):
+    created = client.post("/api/chat/sessions", json={"title": "failed"}).json()
+    session_id = created["session_id"]
+
+    async def _broken_stream(*_args, **_kwargs):
+        raise RuntimeError("provider unavailable")
+        yield  # pragma: no cover
+
+    chat_router.gateway.chat_with_main_model_stream.side_effect = _broken_stream
+
+    with client.stream(
+        "POST",
+        f"/api/chat/sessions/{session_id}/messages/stream",
+        json={"message": "只分析，不修改文件"},
+    ) as response:
+        events = _parse_sse(response)
+
+    engineering = [d["engineering"] for e, d in events if e.startswith("engineering_")]
+    assert [item["status"] for item in engineering] == ["running", "failed"]
+    assert any(e == "error" and "provider unavailable" in d["error"] for e, d in events)
+
+    saved_session = client.get(f"/api/chat/sessions/{session_id}").json()
+    assert any(
+        message["role"] == "user" and message["content"] == "只分析，不修改文件"
+        for message in saved_session["messages"]
+    )
+    runs = client.get(f"/api/chat/sessions/{session_id}/runs").json()["runs"]
+    assert runs[0]["status"] == "failed"

@@ -287,9 +287,22 @@ CLI / Web 展示精简事件：
 
 ### Phase 7.0：运行状态基础
 
-- `TaskIntent`、`WorkPlan`、`Evidence`、`VerificationGate`、`RunJournal`。
-- YAML 持久化和恢复。
-- CLI/Web 工程事件模型。
+- [x] `TaskIntent`、`WorkPlan`、`Evidence`、`VerificationGate`、`RunJournal`。
+- [x] YAML 原子持久化和恢复，记录位于 `sessions/<session_id>/runs/<run_id>.yaml`。
+- [x] 计划步骤状态转换约束，同一计划最多一个 `in_progress` 步骤。
+- [x] 同步、流式和协作执行统一创建运行记录；成功、受控失败和进程中断状态可区分。
+- [x] CLI 工程记录摘要和 Web “本轮记录”状态视图。
+- [x] SSE `engineering_start` / `engineering_update` / `engineering_complete` 事件。
+- [x] 会话运行记录列表与详情 API。
+
+完成于 2026-07-15。自动任务分类尚未启用：当前使用保守的 `unclassified`、`unassessed`，由 Phase 7.1 接管。
+
+验证结果：
+
+- 定向与全量测试通过：`411 passed`。
+- JavaScript 语法检查、Python 编译检查和 `git diff --check` 通过。
+- 使用 WebUI 和真实 `glm-ark` 配置验证 401 鉴权失败路径：运行记录正确落为 `failed`，刷新后用户消息仍保留，浏览器控制台无警告或错误。
+- 进程被强制中断时记录保留为 `running`，用于后续恢复或审计，不伪装成已完成。
 
 ### Phase 7.1：任务分类与执行策略
 

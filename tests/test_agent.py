@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.core.agent import Agent
+from src.core.engineering import RunJournalStore
 from src.core.session import Session
 from src.models.schemas import ChatResponse
 
@@ -47,6 +48,39 @@ def test_run_turn_no_tools(tmp_path):
     assert len(session.messages) == 3  # system + user + assistant
     assert session.messages[1].role == "user"
     assert session.messages[2].role == "assistant"
+    journal = RunJournalStore.from_output_dir(session.output_dir).load(result.run_id)
+    assert journal.status == "completed"
+    assert result.engineering["run_id"] == result.run_id
+    assert journal.metrics["input_tokens"] == 10
+
+
+def test_run_turn_failure_marks_journal_failed(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = MagicMock()
+    gateway.chat_with_main_model.side_effect = RuntimeError("gateway down")
+    agent = Agent(gateway, session)
+
+    with pytest.raises(RuntimeError, match="gateway down"):
+        agent.run_turn("执行任务")
+
+    journal = RunJournalStore.from_output_dir(session.output_dir).latest()
+    assert journal is not None
+    assert journal.status == "failed"
+    assert journal.residual_risks == ["gateway down"]
+
+
+def test_run_turn_compaction_failure_marks_journal_failed(tmp_path):
+    session = _make_session(tmp_path)
+    agent = Agent(_mock_gateway("unused"), session)
+    agent._maybe_compact_context = MagicMock(side_effect=RuntimeError("compact down"))
+
+    with pytest.raises(RuntimeError, match="compact down"):
+        agent.run_turn("执行任务")
+
+    journal = RunJournalStore.from_output_dir(session.output_dir).latest()
+    assert journal is not None
+    assert journal.status == "failed"
+    assert journal.residual_risks == ["compact down"]
 
 
 def test_run_turn_with_read_file_tool(tmp_path):
@@ -138,4 +172,3 @@ def test_parse_tool_calls_coding_model_special_token():
 def test_strip_toolcall_artifacts():
     content = "前面<|tool_calls_section_start|>中间<|tool_calls_section_end|>后面"
     assert Agent._strip_toolcall_artifacts(content) == "前面中间后面"
-

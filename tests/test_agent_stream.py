@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.core.agent import Agent
+from src.core.engineering import RunJournalStore
 from src.core.session import Session
 from src.models.schemas import ChatStreamEvent, StreamChunk
 
@@ -57,6 +58,40 @@ def test_run_turn_stream_no_tools(tmp_path):
     assert done.cost_usd == pytest.approx(0.0001)
     assert session.messages[-1].role == "assistant"
     assert session.messages[-1].content == "你好！"
+    assert [event.type for event in events if event.type.startswith("engineering_")] == [
+        "engineering_start",
+        "engineering_complete",
+    ]
+    run_id = next(event.engineering["run_id"] for event in events if event.type == "engineering_start")
+    journal = RunJournalStore.from_output_dir(session.output_dir).load(run_id)
+    assert journal.status == "completed"
+    assert journal.metrics["output_tokens"] == 5
+
+
+def test_run_turn_stream_failure_emits_failed_engineering_event(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = MagicMock()
+
+    async def _broken_stream(*_args, **_kwargs):
+        raise RuntimeError("stream down")
+        yield  # pragma: no cover
+
+    gateway.chat_with_main_model_stream.side_effect = _broken_stream
+    agent = Agent(gateway, session)
+    events = []
+
+    async def _run():
+        async for event in agent.run_turn_stream("只分析，不修改文件"):
+            events.append(event)
+
+    with pytest.raises(RuntimeError, match="stream down"):
+        asyncio.run(_run())
+
+    engineering = [event.engineering for event in events if event.type.startswith("engineering_")]
+    assert [item["status"] for item in engineering] == ["running", "failed"]
+    journal = RunJournalStore.from_output_dir(session.output_dir).latest()
+    assert journal is not None
+    assert journal.status == "failed"
 
 
 def test_run_turn_stream_with_tool(tmp_path):

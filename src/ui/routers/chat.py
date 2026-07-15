@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.core.agent import Agent, AgentTurnResult
+from src.core.engineering import RunJournalStore
 from src.core.session import Session, SessionStore
 from src.gateway.client import GatewayClient
 from src.models.schemas import ApprovalMode, ChatStreamEvent
@@ -201,6 +202,39 @@ def get_session(session_id: str) -> dict[str, Any]:
     }
 
 
+@router.get("/api/chat/sessions/{session_id}/runs")
+def list_session_runs(session_id: str) -> dict[str, Any]:
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    journals = RunJournalStore.from_output_dir(session.output_dir).list()
+    return {
+        "runs": [
+            {
+                **journal.event_payload(),
+                "started_at": journal.started_at,
+                "updated_at": journal.updated_at,
+                "completed_at": journal.completed_at,
+            }
+            for journal in journals
+        ]
+    }
+
+
+@router.get("/api/chat/sessions/{session_id}/runs/{run_id}")
+def get_session_run(session_id: str, run_id: str) -> dict[str, Any]:
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    run_store = RunJournalStore.from_output_dir(session.output_dir)
+    try:
+        return run_store.load(run_id).model_dump()
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/api/chat/sessions/{session_id}/messages")
 def send_message(session_id: str, form: SendMessageForm) -> dict[str, Any]:
     try:
@@ -209,8 +243,10 @@ def send_message(session_id: str, form: SendMessageForm) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e))
 
     agent = Agent(gateway, session)
-    result = agent.run_turn(form.message)
-    store.save(session)
+    try:
+        result = agent.run_turn(form.message)
+    finally:
+        store.save(session)
 
     return result.model_dump()
 
@@ -230,11 +266,11 @@ async def send_message_stream(session_id: str, form: SendMessageForm):
         try:
             async for event in agent.run_turn_stream(form.message):
                 yield f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
-            store.save(session)
         except Exception as e:
             ev = ChatStreamEvent(type="error", error=str(e))
             yield f"event: error\ndata: {ev.model_dump_json()}\n\n"
         finally:
+            store.save(session)
             active_agents.pop(session_id, None)
 
     return StreamingResponse(

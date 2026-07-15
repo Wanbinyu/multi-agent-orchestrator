@@ -1044,6 +1044,19 @@ body::before {
   word-break: break-all;
 }
 
+.engineering-run.running {
+  border-color: rgba(56, 189, 248, 0.38);
+}
+
+.engineering-run.completed {
+  border-color: rgba(52, 211, 153, 0.38);
+}
+
+.engineering-run.failed,
+.engineering-run.blocked {
+  border-color: rgba(248, 113, 113, 0.38);
+}
+
 .empty-item {
   color: var(--text-dim);
   font-size: 0.78rem;

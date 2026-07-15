@@ -115,6 +115,9 @@ class ChatStreamEvent(BaseModel):
         "model_failover",
         "tool_start",
         "tool_complete",
+        "engineering_start",
+        "engineering_update",
+        "engineering_complete",
     ]
     delta: str = ""
     input_tokens: int = 0
@@ -138,6 +141,9 @@ class ChatStreamEvent(BaseModel):
 
     # 单次工具执行进度 payload
     tool_call: dict[str, Any] = Field(default_factory=dict)
+
+    # Phase 7 工程运行记录摘要
+    engineering: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskResult(BaseModel):

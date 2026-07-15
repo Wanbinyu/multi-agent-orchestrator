@@ -8,7 +8,7 @@
     rightbarOpen: false,
     rightbarTab: "context",
     projectTreeLoaded: false,
-    turnLog: { toolCalls: [], filesWritten: [] },
+    turnLog: { toolCalls: [], filesWritten: [], engineering: [] },
   };
 
   const els = {
@@ -594,7 +594,7 @@
   }
 
   function clearTurnLog() {
-    state.turnLog = { toolCalls: [], filesWritten: [] };
+    state.turnLog = { toolCalls: [], filesWritten: [], engineering: [] };
     if (!els.turnLog) return;
     els.turnLog.innerHTML = '<div class="empty-item">发送消息后将显示工具调用和文件记录</div>';
   }
@@ -605,14 +605,39 @@
     renderTurnLog();
   }
 
+  function appendEngineeringEvent(engineering) {
+    if (!engineering?.run_id) return;
+    const existing = state.turnLog.engineering.findIndex(
+      (item) => item.run_id === engineering.run_id
+    );
+    if (existing >= 0) state.turnLog.engineering[existing] = engineering;
+    else state.turnLog.engineering.push(engineering);
+    renderTurnLog();
+  }
+
   function renderTurnLog() {
     if (!els.turnLog) return;
-    const { toolCalls, filesWritten } = state.turnLog;
-    if (!toolCalls.length && !filesWritten.length) {
+    const { toolCalls, filesWritten, engineering } = state.turnLog;
+    if (!toolCalls.length && !filesWritten.length && !engineering.length) {
       els.turnLog.innerHTML = '<div class="empty-item">发送消息后将显示工具调用和文件记录</div>';
       return;
     }
     let html = "";
+    engineering.forEach((run) => {
+      const labels = {
+        running: "进行中",
+        completed: "已完成",
+        failed: "失败",
+        blocked: "受阻",
+      };
+      const icon = run.status === "completed" ? "✓" : run.status === "running" ? "●" : "!";
+      html += `
+        <div class="turn-log-item engineering-run ${escapeHtml(run.status || "running")}">
+          <div class="turn-log-title">${icon} 工程记录 · ${escapeHtml(labels[run.status] || run.status)}</div>
+          <div class="turn-log-detail">${escapeHtml(run.run_id)}</div>
+        </div>
+      `;
+    });
     toolCalls.forEach((c) => {
       const status = c.success ? "✅" : "❌";
       const p = c.params || {};
@@ -932,6 +957,13 @@
           contentEl.innerHTML =
             renderMarkdown(textBuffer) + '<span class="streaming-cursor"></span>';
           scrollToBottom();
+        } else if (
+          ev.event === "engineering_start" ||
+          ev.event === "engineering_update" ||
+          ev.event === "engineering_complete"
+        ) {
+          const data = JSON.parse(ev.data);
+          appendEngineeringEvent(data.engineering || {});
         } else if (ev.event === "plan") {
           const data = JSON.parse(ev.data);
           if (!collabPanel) {
@@ -992,6 +1024,14 @@
     const { events, consumed } = parseSSE(buffer);
     for (const ev of events) {
       if (ev.event === "done") doneEvent = JSON.parse(ev.data);
+      else if (
+        ev.event === "engineering_start" ||
+        ev.event === "engineering_update" ||
+        ev.event === "engineering_complete"
+      ) {
+        const data = JSON.parse(ev.data);
+        appendEngineeringEvent(data.engineering || {});
+      }
       else if (ev.event === "error") {
         const data = JSON.parse(ev.data);
         throw new Error(data.error || "流式响应错误");

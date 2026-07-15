@@ -79,3 +79,23 @@ def test_stream_turn_handles_failed_review_without_markup_error(capsys):
     assert "审查结果：未通过" in output
     assert "缺少测试" in output
     assert "请补充测试后再实施" in output
+
+
+class _EngineeringEventAgent(_FakeAgent):
+    async def run_turn_stream(self, _user_input: str):
+        yield ChatStreamEvent(
+            type="engineering_start",
+            engineering={"run_id": "run-test", "status": "running"},
+        )
+        yield ChatStreamEvent(type="delta", delta="完成")
+        yield ChatStreamEvent(
+            type="engineering_complete",
+            engineering={"run_id": "run-test", "status": "completed"},
+        )
+        yield ChatStreamEvent(type="done", assistant_message="完成")
+
+
+def test_stream_turn_prints_engineering_run_status(capsys):
+    asyncio.run(_stream_turn(_EngineeringEventAgent(), "执行任务"))
+    output = capsys.readouterr().out
+    assert "工程记录：run-test · completed" in output

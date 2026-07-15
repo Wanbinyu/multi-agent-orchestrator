@@ -147,6 +147,46 @@ def test_send_message(client):
     assert data["user_message"] == "你好"
     assert data["assistant_message"] == "收到"
     assert data["input_tokens"] == 10
+    assert data["run_id"]
+
+    runs = client.get(f"/api/chat/sessions/{session_id}/runs")
+    detail = client.get(
+        f"/api/chat/sessions/{session_id}/runs/{data['run_id']}"
+    )
+    assert runs.status_code == 200
+    assert runs.json()["runs"][0]["status"] == "completed"
+    assert detail.status_code == 200
+    assert detail.json()["run_id"] == data["run_id"]
+
+
+def test_failed_sync_message_persists_session_and_journal(client):
+    created = client.post("/api/chat/sessions", json={"title": "sync failure"}).json()
+    session_id = created["session_id"]
+    chat_router.gateway.chat_with_main_model.side_effect = RuntimeError("provider unavailable")
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        client.post(
+            f"/api/chat/sessions/{session_id}/messages",
+            json={"message": "检查项目"},
+        )
+
+    saved_session = client.get(f"/api/chat/sessions/{session_id}").json()
+    assert any(
+        message["role"] == "user" and message["content"] == "检查项目"
+        for message in saved_session["messages"]
+    )
+    runs = client.get(f"/api/chat/sessions/{session_id}/runs").json()["runs"]
+    assert runs[0]["status"] == "failed"
+
+
+def test_run_journal_routes_report_missing_records(client):
+    created = client.post("/api/chat/sessions", json={"title": "run"}).json()
+    session_id = created["session_id"]
+    missing_run = client.get(f"/api/chat/sessions/{session_id}/runs/missing")
+    missing_session = client.get("/api/chat/sessions/missing/runs")
+
+    assert missing_run.status_code == 404
+    assert missing_session.status_code == 404
 
 
 def test_send_message_not_found(client):
