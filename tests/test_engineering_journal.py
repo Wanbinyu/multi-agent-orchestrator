@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from src.core.engineering import (
     Evidence,
     RunJournalStore,
+    TaskIntentClassifier,
     VerificationGate,
     WorkPlan,
     WorkPlanStep,
@@ -58,8 +59,11 @@ def test_evidence_and_verification_validate_fields():
 
 def test_run_journal_store_round_trip_and_atomic_write(tmp_path):
     store = RunJournalStore(tmp_path / "runs")
-    journal = store.create("session-1", "修复 CLI", "approve")
+    intent = TaskIntentClassifier().classify("修复 CLI", "approve")
+    journal = store.create("session-1", "修复 CLI", "approve", intent=intent)
     assert store.load(journal.run_id).status == "running"
+    assert journal.intent.kind == "change"
+    assert "任务分类为 change" in journal.decisions[0]
     journal.evidence.append(Evidence(source="file", claim="找到入口", excerpt="main.py"))
     journal.verification.append(
         VerificationGate(requirement="测试通过", command_or_check="pytest", passed=True)
@@ -88,3 +92,13 @@ def test_run_journal_store_rejects_unsafe_id_and_missing_run(tmp_path):
         store.load("../outside")
     with pytest.raises(FileNotFoundError):
         store.load("missing")
+
+
+def test_unclassified_store_default_stays_readonly_even_in_auto_mode(tmp_path):
+    store = RunJournalStore(tmp_path / "runs")
+
+    journal = store.create("session-1", "继续处理", "auto")
+
+    assert journal.intent.kind == "unclassified"
+    assert journal.intent.write_authorized is False
+    assert journal.intent.policy.allow_project_writes is False

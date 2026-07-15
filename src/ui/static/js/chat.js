@@ -631,10 +631,39 @@
         blocked: "受阻",
       };
       const icon = run.status === "completed" ? "✓" : run.status === "running" ? "●" : "!";
+      const intent = run.intent || {};
+      const policy = intent.policy || {};
+      const kindLabels = {
+        unclassified: "未分类",
+        answer: "问答",
+        explain: "解释",
+        diagnose: "诊断",
+        change: "修改",
+        build: "构建",
+        review: "审查",
+        plan: "方案",
+        monitor: "监控",
+      };
+      const riskLabels = {
+        unassessed: "风险未评估",
+        low: "低风险",
+        medium: "中风险",
+        high: "高风险",
+        external: "外部状态",
+      };
+      const writeState = policy.allow_project_writes
+        ? (intent.write_authorized ? "写入已授权" : "写入需批准")
+        : "只读";
+      const intentDetail = [
+        kindLabels[intent.kind] || intent.kind,
+        riskLabels[intent.risk_level] || intent.risk_level,
+        writeState,
+      ].filter(Boolean).join(" · ");
       html += `
         <div class="turn-log-item engineering-run ${escapeHtml(run.status || "running")}">
           <div class="turn-log-title">${icon} 工程记录 · ${escapeHtml(labels[run.status] || run.status)}</div>
           <div class="turn-log-detail">${escapeHtml(run.run_id)}</div>
+          <div class="turn-log-detail">${escapeHtml(intentDetail)}</div>
         </div>
       `;
     });

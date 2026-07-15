@@ -84,6 +84,9 @@ def test_send_message_stream(client):
             "running",
             "completed",
         ]
+        intent = engineering[0]["engineering"]["intent"]
+        assert intent["kind"] == "unclassified"
+        assert intent["policy"]["allow_project_writes"] is False
 
         done = [d for e, d in events if e == "done"][0]
         assert done["assistant_message"] == "收到"
@@ -118,6 +121,7 @@ def test_failed_stream_persists_messages_and_failed_journal(client, monkeypatch)
 
     engineering = [d["engineering"] for e, d in events if e.startswith("engineering_")]
     assert [item["status"] for item in engineering] == ["running", "failed"]
+    assert engineering[0]["intent"]["policy"]["allow_project_writes"] is False
     assert any(e == "error" and "provider unavailable" in d["error"] for e, d in events)
 
     saved_session = client.get(f"/api/chat/sessions/{session_id}").json()

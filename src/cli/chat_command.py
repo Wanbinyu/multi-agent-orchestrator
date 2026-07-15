@@ -298,6 +298,9 @@ async def _stream_turn(agent: Agent, user_input: str):
     phase_detail_counts: Counter[str] = Counter()
     engineering_run_id = ""
     engineering_status = ""
+    engineering_kind = ""
+    engineering_risk = ""
+    engineering_write_state = ""
 
     def _start_spinner(message: str):
         nonlocal spinner_task, spinner_message
@@ -351,6 +354,16 @@ async def _stream_turn(agent: Agent, user_input: str):
                 engineering = event.engineering or {}
                 engineering_run_id = str(engineering.get("run_id", engineering_run_id))
                 engineering_status = str(engineering.get("status", engineering_status))
+                intent = engineering.get("intent", {}) or {}
+                policy = intent.get("policy", {}) or {}
+                engineering_kind = str(intent.get("kind", engineering_kind))
+                engineering_risk = str(intent.get("risk_level", engineering_risk))
+                if policy.get("allow_project_writes"):
+                    engineering_write_state = (
+                        "写入已授权" if intent.get("write_authorized") else "写入需批准"
+                    )
+                else:
+                    engineering_write_state = "只读"
                 _start_spinner("🧠 思考中")
             elif event.type == "permission_request":
                 live.stop()
@@ -516,8 +529,15 @@ async def _stream_turn(agent: Agent, user_input: str):
         f"成本: ${cost_usd:.6f}[/dim]"
     )
     if engineering_run_id:
+        intent_parts = [part for part in (
+            engineering_kind,
+            engineering_risk,
+            engineering_write_state,
+        ) if part]
+        intent_suffix = f" · {' / '.join(intent_parts)}" if intent_parts else ""
         console.print(
-            f"[dim]工程记录：{engineering_run_id} · {engineering_status or 'running'}[/dim]"
+            f"[dim]工程记录：{engineering_run_id} · "
+            f"{engineering_status or 'running'}{intent_suffix}[/dim]"
         )
 
 

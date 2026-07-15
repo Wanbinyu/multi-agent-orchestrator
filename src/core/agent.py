@@ -12,7 +12,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from src.core.compactor import ContextCompactor
-from src.core.engineering import RunJournal, RunJournalStore
+from src.core.engineering import (
+    RunJournal,
+    RunJournalStore,
+    TaskIntent,
+    TaskIntentClassifier,
+)
 from src.core.memory import MemoryContextBuilder, MemoryStore
 from src.core.session import Session
 from src.core.token_counter import count_messages_tokens
@@ -90,17 +95,8 @@ _COLLABORATION_KEYWORDS = (
     "立项", "多步骤实现", "多页面",
 )
 
-_ANALYSIS_ONLY_KEYWORDS = (
-    "只做方案", "先做方案", "仅做方案", "只给方案",
-    "只分析", "仅分析", "不要修改", "不修改文件", "只读分析",
-)
-
 _ANALYSIS_READ_FILE_LIMIT = 12
 _ANALYSIS_FINAL_CHAR_LIMIT = 6000
-
-
-def _is_analysis_only_request(user_input: str) -> bool:
-    return any(keyword in user_input for keyword in _ANALYSIS_ONLY_KEYWORDS)
 
 
 class AgentTurnResult(BaseModel):
@@ -131,6 +127,7 @@ class Agent:
         max_context_tokens: int = 32000,
         compaction_threshold: float = 0.75,
         journal_store: RunJournalStore | None = None,
+        intent_classifier: TaskIntentClassifier | None = None,
     ):
         self.gateway = gateway
         self.session = session
@@ -146,13 +143,27 @@ class Agent:
         self.journal_store = journal_store or RunJournalStore.from_output_dir(
             session.output_dir
         )
+        self.intent_classifier = intent_classifier or TaskIntentClassifier()
         self._active_run_journal: RunJournal | None = None
 
     def _start_engineering_run(self, user_input: str) -> RunJournal:
+        previous_intent = None
+        try:
+            previous = self.journal_store.latest()
+            if previous is not None:
+                previous_intent = previous.intent
+        except Exception:
+            pass
+        intent = self.intent_classifier.classify(
+            user_input,
+            self.approval_mode,
+            previous_intent=previous_intent,
+        )
         journal = self.journal_store.create(
             self.session.id,
             user_input,
             self.approval_mode,
+            intent=intent,
         )
         self._active_run_journal = journal
         return journal
@@ -168,7 +179,7 @@ class Agent:
         cost_usd: float = 0.0,
         residual_risks: list[str] | None = None,
     ) -> dict[str, Any]:
-        if files_changed:
+        if files_changed and journal.intent.policy.allow_project_writes:
             journal.intent.write_authorized = True
         journal.finish(
             status,
@@ -336,13 +347,39 @@ class Agent:
             return True
         return False
 
-    def _build_system_prompt(self, user_input: str = "") -> str:
+    @staticmethod
+    def _task_policy_prompt(intent: TaskIntent) -> str:
+        access = (
+            "允许按会话权限模式申请项目写入"
+            if intent.policy.allow_project_writes
+            else "仅允许只读工具，禁止项目写入和命令执行"
+        )
+        authorization = (
+            "已授权"
+            if intent.write_authorized
+            else "未授权；如任务允许写入，仍须遵循 approve/readonly 边界"
+        )
+        return (
+            "【本轮任务策略】\n"
+            f"- 类型：{intent.kind}；风险：{intent.risk_level}；{access}。\n"
+            f"- 写入授权：{authorization}；验证深度：{intent.policy.verification_depth}；"
+            f"需要计划：{'是' if intent.policy.requires_plan else '否'}。\n"
+            "必须遵守该策略；只读任务即使用户会话处于 auto 模式，也不得调用写入或命令工具。"
+        )
+
+    def _build_system_prompt(
+        self,
+        user_input: str = "",
+        intent: TaskIntent | None = None,
+    ) -> str:
         """构建系统提示，包含工具说明和相关记忆上下文"""
         native = self._should_use_native_tools()
         parts = [
             "你是 Multi-Agent Orchestrator 的会话助手，可以与用户进行多轮对话，并使用本地工具帮助用户完成任务。",
             self._runtime_facts_prompt(),
         ]
+        if intent is not None:
+            parts.append(self._task_policy_prompt(intent))
         if native:
             # 原生模式：工具定义由 tools= 参数提供，系统提示不再列 Markdown 工具块
             parts.append(TOOL_RULES_NATIVE)
@@ -357,9 +394,13 @@ class Agent:
                 parts.append(memory_context)
         return "\n\n".join(parts)
 
-    def _ensure_system_prompt(self, user_input: str = "") -> None:
+    def _ensure_system_prompt(
+        self,
+        user_input: str = "",
+        intent: TaskIntent | None = None,
+    ) -> None:
         """确保消息列表第一条是系统提示"""
-        content = self._build_system_prompt(user_input)
+        content = self._build_system_prompt(user_input, intent)
         if not self.session.messages or self.session.messages[0].role != "system":
             self.session.messages.insert(0, ChatMessage(role="system", content=content))
         else:
@@ -489,6 +530,18 @@ class Agent:
             cache_key = build_read_cache_key(tool_name, params, self.session.output_dir)
             tool_spec = tool_registry.get(tool_name)
             category = tool_spec.category if tool_spec else "unknown"
+            if self.approval_mode == "approve" and category != "read":
+                call = {
+                    "tool": tool_name,
+                    "params": params,
+                    "success": False,
+                    "error": "approve 模式：同步执行无法交互确认，非只读工具已拒绝",
+                }
+                calls.append(call)
+                outputs.append(
+                    f"\n[工具 {tool_name} 被拒绝：请使用流式对话批准，或显式切换 auto]\n"
+                )
+                continue
             if analysis_only and category != "read":
                 call = {
                     "tool": tool_name,
@@ -572,11 +625,11 @@ class Agent:
 
     def run_turn(self, user_input: str) -> AgentTurnResult:
         """执行一轮对话"""
-        self._ensure_system_prompt(user_input)
-        self.session.add_message("user", user_input)
         run_journal = self._start_engineering_run(user_input)
 
         try:
+            self._ensure_system_prompt(user_input, run_journal.intent)
+            self.session.add_message("user", user_input)
             self._maybe_compact_context()
             return self._run_turn_impl(user_input, run_journal)
         except Exception as exc:
@@ -595,7 +648,10 @@ class Agent:
         files_written: list[str] = []
         final_content = ""
         read_cache: dict[str, ToolResult] = {}
-        analysis_only = _is_analysis_only_request(user_input)
+        analysis_only = (
+            not run_journal.intent.policy.allow_project_writes
+            or self.approval_mode == "readonly"
+        )
         read_file_keys: set[str] = set()
 
         iterations = 0
@@ -657,9 +713,9 @@ class Agent:
         if analysis_only and len(final_content) > _ANALYSIS_FINAL_CHAR_LIMIT:
             self.session.add_message(
                 "user",
-                "上一版分析过长。请基于已经获得的证据，重新输出一份不超过 3000 个汉字的完整最终方案。"
-                "必须包含项目结构、关键发现、Java 迁移阶段、风险和验收标准；不要调用任何工具，"
-                "不要在标题、表格或列表中途结束。只输出最终方案。",
+                "上一版答复过长。请基于已经获得的证据，重新输出一份不超过 3000 个汉字的完整答复。"
+                "保留用户要求、关键结论、证据、风险和下一步；不要调用任何工具，"
+                "不要在标题、表格或列表中途结束。只输出最终答复。",
             )
             response = self.gateway.chat_with_main_model(
                 messages=self.session.messages,
@@ -707,8 +763,6 @@ class Agent:
         user_input: str,
     ) -> AsyncIterator[ChatStreamEvent]:
         """流式执行一轮对话，按 delta/done 事件产出"""
-        self._ensure_system_prompt(user_input)
-        self.session.add_message("user", user_input)
         run_journal = await asyncio.to_thread(self._start_engineering_run, user_input)
         yield ChatStreamEvent(
             type="engineering_start",
@@ -716,6 +770,8 @@ class Agent:
         )
 
         try:
+            self._ensure_system_prompt(user_input, run_journal.intent)
+            self.session.add_message("user", user_input)
             await asyncio.to_thread(self._maybe_compact_context)
             async for event in self._run_turn_stream_impl(user_input, run_journal):
                 yield event
@@ -738,7 +794,11 @@ class Agent:
         billing_before = self.gateway.billing.summary()
 
         # 自动判断是否需要多模型协作（只读模式下不走协作，避免自动写文件）
-        if self.approval_mode != "readonly" and await self._should_collaborate(user_input):
+        if (
+            self.approval_mode != "readonly"
+            and run_journal.intent.policy.collaboration_allowed
+            and await self._should_collaborate(user_input, run_journal.intent)
+        ):
             async for event in self._run_collaboration_stream(user_input, billing_before):
                 if event.type == "done":
                     run_status = (
@@ -767,7 +827,10 @@ class Agent:
         files_written: list[str] = []
         final_content = ""
         read_cache: dict[str, ToolResult] = {}
-        analysis_only = _is_analysis_only_request(user_input)
+        analysis_only = (
+            not run_journal.intent.policy.allow_project_writes
+            or self.approval_mode == "readonly"
+        )
         read_file_keys: set[str] = set()
 
         iterations = 0
@@ -996,9 +1059,9 @@ class Agent:
         if analysis_only and len(final_content) > _ANALYSIS_FINAL_CHAR_LIMIT:
             self.session.add_message(
                 "user",
-                "上一版分析过长。请基于已经获得的证据，重新输出一份不超过 3000 个汉字的完整最终方案。"
-                "必须包含项目结构、关键发现、Java 迁移阶段、风险和验收标准；不要调用任何工具，"
-                "不要在标题、表格或列表中途结束。只输出最终方案。",
+                "上一版答复过长。请基于已经获得的证据，重新输出一份不超过 3000 个汉字的完整答复。"
+                "保留用户要求、关键结论、证据、风险和下一步；不要调用任何工具，"
+                "不要在标题、表格或列表中途结束。只输出最终答复。",
             )
             concise_content = ""
             async for chunk in self.gateway.chat_with_main_model_stream(
@@ -1053,10 +1116,18 @@ class Agent:
             cost_usd=total_cost,
         )
 
-    async def _should_collaborate(self, user_input: str) -> bool:
+    async def _should_collaborate(
+        self,
+        user_input: str,
+        intent: TaskIntent | None = None,
+    ) -> bool:
         """是否需要多模型协作：先做关键字预筛，再交 LLM 判断"""
-        # 只读分析/方案任务优先保持单 Agent，避免多 Worker 重复侦察同一项目。
-        if _is_analysis_only_request(user_input):
+        resolved_intent = intent or self.intent_classifier.classify(
+            user_input,
+            self.approval_mode,
+        )
+        # 只读和未分类任务保持单 Agent，避免协作扩大权限或重复侦察。
+        if not resolved_intent.policy.collaboration_allowed:
             return False
         # 关键字预筛：明确的项目/多步骤任务直接走协作
         if any(kw in user_input for kw in _COLLABORATION_KEYWORDS):

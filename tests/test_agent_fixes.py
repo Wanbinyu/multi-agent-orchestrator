@@ -45,8 +45,8 @@ def test_collaboration_keyword_triggers_without_llm(tmp_path):
     gw.chat_with_main_model.assert_not_called()
 
 
-def test_collaboration_no_keyword_falls_back_to_llm(tmp_path):
-    """不含关键字的输入交给 LLM 判断"""
+def test_readonly_intent_skips_collaboration_model_call(tmp_path):
+    """解释类只读意图不额外调用模型判断协作。"""
     gw = MagicMock()
     gw.main_model = "m"
     gw.chat_with_main_model.return_value = ChatResponse(
@@ -56,7 +56,7 @@ def test_collaboration_no_keyword_falls_back_to_llm(tmp_path):
     agent = Agent(gw, _session(tmp_path))
     result = asyncio.run(agent._should_collaborate("解释一下什么是递归"))
     assert result is False
-    gw.chat_with_main_model.assert_called_once()
+    gw.chat_with_main_model.assert_not_called()
 
 
 def test_collaboration_keywords_cover_user_case():

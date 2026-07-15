@@ -30,18 +30,35 @@ class RunJournalStore:
         session_id: str,
         objective: str,
         approval_mode: ApprovalMode,
+        intent: TaskIntent | None = None,
     ) -> RunJournal:
         run_id = (
             datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
             + "-"
             + uuid.uuid4().hex[:6]
         )
+        resolved_intent = intent or TaskIntent()
+        if resolved_intent.kind == "unclassified":
+            decision = (
+                f"Phase 7.1 未能稳定分类；按会话权限模式 {approval_mode} "
+                "和保守只读策略记录边界。"
+            )
+        else:
+            access = (
+                "项目写入已授权"
+                if resolved_intent.write_authorized
+                else "只读或写入尚未授权"
+            )
+            decision = (
+                f"任务分类为 {resolved_intent.kind}（{resolved_intent.classification_source}，"
+                f"置信度 {resolved_intent.confidence:.2f}）；{access}。"
+            )
         journal = RunJournal(
             run_id=run_id,
             session_id=session_id,
             objective=objective,
-            intent=TaskIntent(write_authorized=approval_mode == "auto"),
-            decisions=[f"Phase 7.0 尚未分类；按会话权限模式 {approval_mode} 记录授权边界。"],
+            intent=resolved_intent,
+            decisions=[decision],
         )
         self.save(journal)
         return journal

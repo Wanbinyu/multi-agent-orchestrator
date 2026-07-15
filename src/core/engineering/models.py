@@ -20,12 +20,23 @@ TaskKind = Literal[
     "monitor",
 ]
 RiskLevel = Literal["unassessed", "low", "medium", "high", "external"]
+VerificationDepth = Literal["none", "targeted", "standard", "deep", "continuous"]
+ClassificationSource = Literal["rules", "inherited", "fallback"]
 PlanStatus = Literal["pending", "in_progress", "completed", "failed", "blocked"]
 RunStatus = Literal["running", "completed", "failed", "blocked"]
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class TaskExecutionPolicy(BaseModel):
+    """任务类型对应的执行边界。"""
+
+    allow_project_writes: bool = False
+    requires_plan: bool = False
+    verification_depth: VerificationDepth = "targeted"
+    collaboration_allowed: bool = False
 
 
 class TaskIntent(BaseModel):
@@ -36,6 +47,10 @@ class TaskIntent(BaseModel):
     risk_level: RiskLevel = "unassessed"
     write_authorized: bool = False
     deliverables: list[str] = Field(default_factory=list)
+    policy: TaskExecutionPolicy = Field(default_factory=TaskExecutionPolicy)
+    classification_source: ClassificationSource = "fallback"
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    classification_note: str = ""
 
 
 class WorkPlanStep(BaseModel):

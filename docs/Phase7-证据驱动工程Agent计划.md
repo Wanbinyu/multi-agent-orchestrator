@@ -306,9 +306,22 @@ CLI / Web 展示精简事件：
 
 ### Phase 7.1：任务分类与执行策略
 
-- 支持 answer/explain/diagnose/change/build/review/plan/monitor。
-- 任务类型决定是否允许写入、是否创建计划、验证深度。
-- 分类失败时采用保守策略，不自动扩大修改范围。
+- [x] 支持 answer/explain/diagnose/change/build/review/plan/monitor。
+- [x] 零模型调用的确定性规则分类，避免每轮增加分类 token 和故障点。
+- [x] 任务类型决定项目写入、计划需求、验证深度和协作资格。
+- [x] answer/explain/diagnose/review/plan/monitor 只暴露读工具；change/build 才允许按会话模式申请写入。
+- [x] 问句中的“调整、优化、修复”等词不会单独授予写权限。
+- [x] “继续、执行下一步”等短续接请求继承上一轮意图；没有可靠上一轮时保守只读。
+- [x] 分类失败采用 `unclassified` 中风险只读策略，不自动扩大修改范围。
+- [x] 同步 approve 路径无法交互确认时拒绝非读工具，不再静默当作自动批准。
+- [x] 分类与策略写入 RunJournal，并通过 SSE、CLI 和 Web 本轮记录展示。
+
+完成于 2026-07-15。验证结果：
+
+- 分类、权限、协作、同步/流式、CLI/Web 路由定向测试 `107 passed`。
+- 全量测试 `442 passed, 1 warning`；JavaScript 语法、Python 编译和差异格式检查通过。
+- 真实 Web 请求“审查这句话是否清晰，只分析，不修改文件”显示“审查 · 中风险 · 只读”。
+- 当前 Coding Plan Key 的真实调用仍返回 401；失败 RunJournal 保留正确分类，浏览器控制台无警告或错误。
 
 ### Phase 7.2：证据与假设循环
 

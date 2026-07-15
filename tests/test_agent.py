@@ -95,6 +95,38 @@ def test_run_turn_no_tools(tmp_path):
     assert journal.metrics["input_tokens"] == 10
 
 
+def test_auto_explain_task_rejects_model_write_attempt(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(
+        '```tool:write_file\n{"path": "should-not-exist.txt", "content": "bad"}\n```',
+        "只读解释完成",
+    )
+    agent = Agent(gateway, session, approval_mode="auto")
+
+    result = agent.run_turn("解释一下这段逻辑")
+
+    assert result.engineering["intent"]["kind"] == "explain"
+    assert result.engineering["intent"]["write_authorized"] is False
+    assert result.tool_calls[0]["success"] is False
+    assert "仅允许只读工具" in result.tool_calls[0]["error"]
+    assert not (tmp_path / "output" / "should-not-exist.txt").exists()
+
+
+def test_auto_change_task_records_write_authorization(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(
+        '```tool:write_file\n{"path": "fixed.txt", "content": "ok"}\n```',
+        "修复完成",
+    )
+    agent = Agent(gateway, session, approval_mode="auto")
+
+    result = agent.run_turn("修复这个文件并写入 fixed.txt")
+
+    assert result.engineering["intent"]["kind"] == "change"
+    assert result.engineering["intent"]["write_authorized"] is True
+    assert (tmp_path / "output" / "fixed.txt").exists()
+
+
 def test_run_turn_failure_marks_journal_failed(tmp_path):
     session = _make_session(tmp_path)
     gateway = MagicMock()

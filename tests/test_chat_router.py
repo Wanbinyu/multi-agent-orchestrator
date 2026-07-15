@@ -148,6 +148,8 @@ def test_send_message(client):
     assert data["assistant_message"] == "收到"
     assert data["input_tokens"] == 10
     assert data["run_id"]
+    assert data["engineering"]["intent"]["kind"] == "unclassified"
+    assert data["engineering"]["intent"]["policy"]["allow_project_writes"] is False
 
     runs = client.get(f"/api/chat/sessions/{session_id}/runs")
     detail = client.get(

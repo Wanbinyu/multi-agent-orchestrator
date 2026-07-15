@@ -66,6 +66,23 @@ def test_run_turn_stream_no_tools(tmp_path):
     journal = RunJournalStore.from_output_dir(session.output_dir).load(run_id)
     assert journal.status == "completed"
     assert journal.metrics["output_tokens"] == 5
+    assert journal.intent.kind == "unclassified"
+
+
+def test_stream_start_exposes_classified_readonly_intent(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = MagicMock()
+    gateway.chat_with_main_model_stream.return_value = _async_chunks(
+        StreamChunk(type="delta", content="根因是配置错误"),
+    )
+    agent = Agent(gateway, session, approval_mode="auto")
+
+    events = _collect_events(agent, "为什么会报错，帮我排查原因")
+
+    start = next(event for event in events if event.type == "engineering_start")
+    assert start.engineering["intent"]["kind"] == "diagnose"
+    assert start.engineering["intent"]["policy"]["allow_project_writes"] is False
+    assert start.engineering["intent"]["write_authorized"] is False
 
 
 def test_run_turn_stream_failure_emits_failed_engineering_event(tmp_path):

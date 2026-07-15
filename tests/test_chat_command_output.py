@@ -86,7 +86,16 @@ class _EngineeringEventAgent(_FakeAgent):
     async def run_turn_stream(self, _user_input: str):
         yield ChatStreamEvent(
             type="engineering_start",
-            engineering={"run_id": "run-test", "status": "running"},
+            engineering={
+                "run_id": "run-test",
+                "status": "running",
+                "intent": {
+                    "kind": "review",
+                    "risk_level": "medium",
+                    "write_authorized": False,
+                    "policy": {"allow_project_writes": False},
+                },
+            },
         )
         yield ChatStreamEvent(type="delta", delta="完成")
         yield ChatStreamEvent(
@@ -100,6 +109,7 @@ def test_stream_turn_prints_engineering_run_status(capsys):
     asyncio.run(_stream_turn(_EngineeringEventAgent(), "执行任务"))
     output = capsys.readouterr().out
     assert "工程记录：run-test · completed" in output
+    assert "review / medium / 只读" in output
 
 
 class _PlainStreamingAgent(_FakeAgent):

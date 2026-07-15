@@ -8,7 +8,7 @@ import pytest
 
 from src.core.agent import Agent
 from src.core.session import Session
-from src.models.schemas import ChatStreamEvent, StreamChunk
+from src.models.schemas import ChatResponse, ChatStreamEvent, StreamChunk
 
 
 def _make_session(tmp_path, approval_mode: str = "auto") -> Session:
@@ -166,6 +166,28 @@ def test_approve_does_not_auto_write_response_md(tmp_path):
     done = [e for e in events if e.type == "done"][0]
 
     assert not done.files_written
+
+
+def test_sync_approve_rejects_non_read_tool_without_interactive_confirmation(tmp_path):
+    session = _make_session(tmp_path, approval_mode="approve")
+    gateway = MagicMock()
+    gateway.main_model = None
+    gateway.chat_with_main_model.side_effect = [
+        ChatResponse(
+            content='```tool:write_file\n{"path": "sync.txt", "content": "no"}\n```',
+            model="test",
+            provider="test",
+        ),
+        ChatResponse(content="未写入", model="test", provider="test"),
+    ]
+    agent = Agent(gateway, session)
+
+    result = agent.run_turn("修改并写入 sync.txt")
+
+    assert result.tool_calls[0]["success"] is False
+    assert "同步执行无法交互确认" in result.tool_calls[0]["error"]
+    assert not (tmp_path / "output" / "sync.txt").exists()
+    assert result.engineering["intent"]["write_authorized"] is False
 
 
 async def _collect_events(agent: Agent, text: str) -> list[ChatStreamEvent]:
