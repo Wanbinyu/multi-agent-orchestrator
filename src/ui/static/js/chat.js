@@ -15,11 +15,17 @@
     chatInput: document.getElementById("chat-input"),
     btnSend: document.getElementById("btn-send"),
     btnNewSession: document.getElementById("btn-new-session"),
+    newSessionDialog: document.getElementById("new-session-dialog"),
+    newSessionForm: document.getElementById("new-session-form"),
+    newSessionTitle: document.getElementById("new-session-title"),
+    btnCancelSession: document.getElementById("btn-cancel-session"),
+    btnCancelSessionSecondary: document.getElementById("btn-cancel-session-secondary"),
     chatStatus: document.getElementById("chat-status"),
     modeIndicator: document.getElementById("mode-indicator"),
     chatRightbar: document.getElementById("chat-rightbar"),
     btnToggleRightbar: document.getElementById("btn-toggle-rightbar"),
     btnCloseRightbar: document.getElementById("btn-close-rightbar"),
+    chatBackdrop: document.getElementById("chat-backdrop"),
     ctxSessionId: document.getElementById("ctx-session-id"),
     ctxSessionMode: document.getElementById("ctx-session-mode"),
     ctxSessionCreated: document.getElementById("ctx-session-created"),
@@ -92,6 +98,11 @@
     return isNaN(d.getTime()) ? "" : d.toLocaleString("zh-CN", { hour12: false });
   }
 
+  function sessionDisplayTitle(session) {
+    const title = String(session.title || "").trim();
+    return title && title !== session.id ? title : "未命名会话";
+  }
+
   function renderMarkdown(text) {
     // 简单渲染：把代码块包在 pre/code 中，其余换行转 br
     let html = escapeHtml(text);
@@ -133,7 +144,7 @@
         <li class="session-item ${s.id === state.currentSessionId ? "active" : ""}" data-id="${escapeHtml(
           s.id
         )}">
-          <div class="session-title">${escapeHtml(s.title)}</div>
+          <div class="session-title">${escapeHtml(sessionDisplayTitle(s))}</div>
           <div class="session-meta">${formatTime(s.updated_at)}</div>
         </li>
       `
@@ -145,15 +156,25 @@
     });
   }
 
-  async function createSession() {
-    const title = prompt("会话标题（可选）：");
-    if (title === null) return;
+  function openNewSessionDialog() {
+    if (!els.newSessionDialog) return;
+    els.newSessionTitle.value = "";
+    els.newSessionDialog.showModal();
+    requestAnimationFrame(() => els.newSessionTitle.focus());
+  }
+
+  function closeNewSessionDialog() {
+    els.newSessionDialog?.close();
+  }
+
+  async function createSession(title) {
     const data = await api("/api/chat/sessions", {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title: title.trim() }),
     });
     await loadSessions();
     await loadSession(data.session_id);
+    closeNewSessionDialog();
   }
 
   async function loadSession(sessionId) {
@@ -351,12 +372,18 @@
     }
   }
 
-  function toggleRightbar() {
-    state.rightbarOpen = !state.rightbarOpen;
+  function setRightbarOpen(open) {
+    state.rightbarOpen = open;
     if (els.chatRightbar) {
       els.chatRightbar.classList.toggle("open", state.rightbarOpen);
     }
     document.querySelector(".chat-layout")?.classList.toggle("rightbar-collapsed", !state.rightbarOpen);
+    els.chatBackdrop?.classList.toggle("open", state.rightbarOpen);
+    els.btnToggleRightbar?.setAttribute("aria-expanded", String(state.rightbarOpen));
+  }
+
+  function toggleRightbar() {
+    setRightbarOpen(!state.rightbarOpen);
   }
 
   function clearTurnLog() {
@@ -733,6 +760,17 @@
             messageEl.appendChild(card);
             scrollToBottom();
           }
+        } else if (ev.event === "model_failover") {
+          const data = JSON.parse(ev.data);
+          const failover = data.failover || {};
+          const fromModel = failover.from_model || "?";
+          const toModel = failover.to_model || "?";
+          const reason = failover.reason || "";
+          const notice = document.createElement("div");
+          notice.className = "failover-notice";
+          notice.textContent = `⚠ 模型 ${fromModel} 连接失效（${reason}），已自动切换到 ${toModel}`;
+          messageEl.appendChild(notice);
+          scrollToBottom();
         } else if (ev.event === "done") {
           doneEvent = JSON.parse(ev.data);
         } else if (ev.event === "error") {
@@ -808,7 +846,8 @@
   // 事件绑定
   els.btnSend.addEventListener("click", sendMessage);
   els.btnToggleRightbar?.addEventListener("click", toggleRightbar);
-  els.btnCloseRightbar?.addEventListener("click", toggleRightbar);
+  els.btnCloseRightbar?.addEventListener("click", () => setRightbarOpen(false));
+  els.chatBackdrop?.addEventListener("click", () => setRightbarOpen(false));
   els.formAddMemory?.addEventListener("submit", addMemoryFromForm);
   els.memorySearch?.addEventListener("input", (e) => searchMemoryFromInput(e.target.value));
   els.btnRefreshMemories?.addEventListener("click", () => loadMemories());
@@ -825,10 +864,27 @@
       setMode(nextMode);
     }
   });
-  els.btnNewSession.addEventListener("click", createSession);
+  els.btnNewSession.addEventListener("click", openNewSessionDialog);
+  els.btnCancelSession?.addEventListener("click", closeNewSessionDialog);
+  els.btnCancelSessionSecondary?.addEventListener("click", closeNewSessionDialog);
+  els.newSessionForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = els.newSessionTitle.value.trim();
+    if (!title) return;
+    const submitButton = els.newSessionForm.querySelector('[type="submit"]');
+    submitButton.disabled = true;
+    try {
+      await createSession(title);
+    } catch (err) {
+      showStatus(err.message, true);
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
 
   // 初始化
   updateModeIndicator();
+  setRightbarOpen(false);
   loadSessions().then(() => {
     if (state.sessions.length > 0) {
       loadSession(state.sessions[0].id);

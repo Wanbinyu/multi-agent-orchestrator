@@ -95,9 +95,9 @@ models:
 
 为降低未来重构成本，MAO 建立了扩展点机制。当前只建**当前需要的**，其余等用到再建。
 
-### 1. ToolSource 协议（MCP 槽位）
+### 1. ToolSource 协议与 MCP 实现
 
-`src/tools/tool_sources.py` 定义 `ToolSource` 协议与 `MCPToolSource` 占位：
+`src/tools/registry.py` 定义 `ToolSource` 协议；`src/tools/mcp_adapter.py` 已实现 `MCPToolSource`：
 
 ```python
 @runtime_checkable
@@ -111,7 +111,7 @@ class ToolSource(Protocol):
 - `execute()` 优先本地工具，未命中再查外部源；
 - 本地同名工具优先。
 
-**未来接入 MCP**（Phase 6.4）：实现 `MCPToolSource`（当前 `raise NotImplementedError` 占位），调用 MCP SDK 的 `tools/list` 与 `tools/call`，`tool_registry.add_source(MCPToolSource(cfg))` 即可，**不改 registry 骨架**。
+Phase 6.4 已完成 MCP 接入：支持 stdio / SSE、懒连接、同步/异步桥接和配置加载。安装可选 `mcp` 包并配置 `config/mcp.yaml` 后，由 `load_extensions()` 自动注册，**不改 registry 骨架**。
 
 ### 2. ProviderConfig.extra（Provider 专属参数）
 
@@ -121,9 +121,7 @@ class ToolSource(Protocol):
 
 以下扩展点**尚未建文件**，等用到再建（避免死代码）：
 - `EmbeddingProvider`（向量记忆检索）
-- `HookRegistry`（工具调用前后拦截）
 - `SubagentSpawner`（子 Agent 并行）
-- `NativeToolAdapter`（原生 tool_use 适配）
 
 每个届时按 ToolSource 同样的"协议 + 注册点 + 占位"模式建立。
 
@@ -134,7 +132,9 @@ class ToolSource(Protocol):
 - `src/gateway/local_provider.py` - OllamaProvider / LocalLlamaCppProvider
 - `src/gateway/provider.py` - `create_provider()` 支持 `ollama` / `llamacpp` 类型
 - `src/models/schemas.py` - `ProviderConfig.type` 扩展、`extra` 字段、`ModelConfig.max_context_tokens`
-- `src/tools/tool_sources.py` - ToolSource 协议 + MCPToolSource 占位
+- `src/tools/tool_sources.py` - MCPToolSource 兼容导出
+- `src/tools/mcp_adapter.py` - MCP stdio / SSE 实现
+- `src/core/hooks.py` - 工具调用前后拦截
 - `src/tools/registry.py` - `add_source()` + 外部源发现/执行
 - `config/providers.yaml.example` - Ollama / llamacpp 配置示例
 - `tests/test_local_provider.py` / `tests/test_tool_sources.py` - 测试

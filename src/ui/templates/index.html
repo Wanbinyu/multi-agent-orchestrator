@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MAO - 模型连接配置</title>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260715-ui6">
 </head>
 <body>
   <header class="app-header">
-    <h1>Multi-Agent Orchestrator — 模型连接配置</h1>
+    <h1><span class="app-brand">MAO</span><span class="page-title">模型连接配置</span></h1>
     <p class="subtitle">添加 Provider → 测试连接 → 选择主模型</p>
   </header>
 
@@ -38,59 +38,83 @@
 
     <section class="detail-panel">
       <form id="provider-form" class="provider-form">
-        <h2 id="form-title">添加 Provider</h2>
-
-        <label>
-          <span>预设模板</span>
-          <select id="preset-select" name="preset_key"></select>
-        </label>
-
-        <div class="form-row">
-          <label>
-            <span>Provider 名称 *</span>
-            <input id="provider-name" name="provider_name" type="text" placeholder="如 kimi" required>
-          </label>
-          <label>
-            <span>显示名称 *</span>
-            <input id="display-name" name="display_name" type="text" placeholder="如 Kimi 转发" required>
-          </label>
+        <div class="form-heading">
+          <h2 id="form-title">添加 Provider</h2>
+          <p>配置服务连接、认证信息和可用模型。</p>
         </div>
 
-        <label>
-          <span>Base URL *</span>
-          <input id="base-url" name="base_url" type="url" placeholder="https://api.example.com/v1" required>
-        </label>
+        <section class="form-section" aria-labelledby="connection-section-title">
+          <div class="form-section-heading">
+            <h3 id="connection-section-title">服务连接</h3>
+            <span>选择模板后可继续调整实际连接参数</span>
+          </div>
 
-        <label>
-          <span>API Key *</span>
-          <input id="api-key" name="api_key" type="password" placeholder="sk-..." required>
-          <small>仅保存到本地 .env，不会被记录到日志。</small>
-        </label>
+          <label>
+            <span>预设模板</span>
+            <select id="preset-select" name="preset_key"></select>
+          </label>
 
-        <label>
-          <span>超时时间（秒）</span>
-          <input id="timeout" name="timeout" type="number" min="5" value="120" required>
-        </label>
+          <div class="form-row">
+            <label>
+              <span>Provider 名称 *</span>
+              <input id="provider-name" name="provider_name" type="text" placeholder="如 kimi" required>
+            </label>
+            <label>
+              <span>显示名称 *</span>
+              <input id="display-name" name="display_name" type="text" placeholder="如 Kimi 转发" required>
+            </label>
+          </div>
 
-        <div class="models-section">
+          <label>
+            <span>Base URL *</span>
+            <input id="base-url" name="base_url" type="url" placeholder="https://api.example.com/v1" required>
+          </label>
+        </section>
+
+        <section class="form-section" aria-labelledby="runtime-section-title">
+          <div class="form-section-heading">
+            <h3 id="runtime-section-title">认证与运行</h3>
+            <span>密钥仅保存在本机环境文件中</span>
+          </div>
+
+          <div class="form-row form-row-runtime">
+            <label>
+              <span>API Key *</span>
+              <input id="api-key" name="api_key" type="password" placeholder="sk-..." required>
+              <small>不会被记录到日志或会话文件。</small>
+            </label>
+
+            <label>
+              <span>超时时间（秒）</span>
+              <input id="timeout" name="timeout" type="number" min="5" value="120" required>
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section models-section" aria-labelledby="models-section-title">
           <div class="models-header">
-            <h3>模型映射</h3>
+            <div class="form-section-heading">
+              <h3 id="models-section-title">模型映射</h3>
+              <span>逻辑别名用于 MAO 内部调用</span>
+            </div>
             <button id="btn-add-model" class="btn" type="button">➕ 添加模型</button>
           </div>
-          <table class="model-table">
-            <thead>
-              <tr>
-                <th>逻辑别名</th>
-                <th>上游 model_id</th>
-                <th>输入价格 / 1M</th>
-                <th>输出价格 / 1M</th>
-                <th>能力标签</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="model-rows"></tbody>
-          </table>
-        </div>
+          <div class="model-table-wrap" tabindex="0" aria-label="模型映射表，可横向滚动">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th>逻辑别名</th>
+                  <th>上游 model_id</th>
+                  <th>输入价格 / 1M</th>
+                  <th>输出价格 / 1M</th>
+                  <th>能力标签</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="model-rows"></tbody>
+            </table>
+          </div>
+        </section>
 
         <label class="checkbox-row">
           <input id="set-as-main" name="set_as_main" type="checkbox">
@@ -108,7 +132,7 @@
     </section>
   </main>
 
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v=20260715-ui6"></script>
 
   <footer class="app-footer">
     Multi-Agent Orchestrator · 本地运行 · API Key 仅保存在本地 .env

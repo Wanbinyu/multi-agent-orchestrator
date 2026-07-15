@@ -81,6 +81,12 @@ def test_run_turn_stream_with_tool(tmp_path):
     events = _collect_events(agent, "总结 hello.txt")
 
     done = [e for e in events if e.type == "done"][0]
+    tool_start = [e for e in events if e.type == "tool_start"]
+    tool_complete = [e for e in events if e.type == "tool_complete"]
+    assert len(tool_start) == 1
+    assert tool_start[0].tool_call["tool"] == "read_file"
+    assert len(tool_complete) == 1
+    assert tool_complete[0].tool_call["success"] is True
     assert done.tool_calls
     assert done.tool_calls[0]["tool"] == "read_file"
     assert done.tool_calls[0]["success"] is True

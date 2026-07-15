@@ -1,7 +1,7 @@
-"""edit_file / glob_files / grep_content 工具测试"""
+"""edit_file / glob_files / grep_content / list_dir 工具测试"""
 from __future__ import annotations
 
-from src.tools.search_tools import glob_files, grep_content
+from src.tools.search_tools import glob_files, grep_content, list_dir
 from src.tools.worker_tools import edit_file, write_file
 
 
@@ -122,5 +122,66 @@ def test_grep_content_empty_pattern(tmp_path):
 def test_new_tools_registered():
     from src.tools.registry import tool_registry
 
-    for name in ("edit_file", "glob_files", "grep_content"):
+    for name in ("edit_file", "glob_files", "grep_content", "list_dir"):
         assert name in tool_registry.list_tools()
+
+
+# ---------- list_dir ----------
+
+
+def test_list_dir_lists_entries(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    (tmp_path / "sub").mkdir()
+    result = list_dir(".", base_dir=str(tmp_path))
+    assert result.success is True
+    assert "a.txt" in result.output
+    assert "sub/" in result.output  # 目录带斜杠
+
+
+def test_list_dir_absolute_path(tmp_path):
+    (tmp_path / "hello.txt").write_text("x")
+    result = list_dir(str(tmp_path))  # 绝对路径
+    assert result.success is True
+    assert "hello.txt" in result.output
+
+
+def test_list_dir_not_exist(tmp_path):
+    result = list_dir("nope", base_dir=str(tmp_path))
+    assert result.success is False
+    assert "不存在" in result.error
+
+
+def test_list_dir_not_a_directory(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    result = list_dir("a.txt", base_dir=str(tmp_path))
+    assert result.success is False
+    assert "不是目录" in result.error
+
+
+def test_list_dir_empty(tmp_path):
+    result = list_dir(".", base_dir=str(tmp_path))
+    assert result.success is True
+    assert "为空" in result.output
+
+
+# ---------- glob_files 绝对路径支持 ----------
+
+
+def test_glob_files_with_absolute_path_root(tmp_path):
+    (tmp_path / "a.py").write_text("x")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "b.py").write_text("x")
+    # 用绝对路径作为搜索根
+    result = glob_files("**/*.py", path=str(tmp_path))
+    assert result.success is True
+    assert "a.py" in result.output
+    assert "b.py" in result.output
+
+
+def test_glob_files_path_param_backward_compat(tmp_path):
+    # 不传 path 时，行为与之前一致（用 base_dir）
+    (tmp_path / "a.py").write_text("x")
+    result = glob_files("*.py", base_dir=str(tmp_path))
+    assert result.success is True
+    assert "a.py" in result.output

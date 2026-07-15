@@ -24,7 +24,7 @@ from src.models.schemas import (
     StreamChunk,
     TaskResult,
 )
-from src.tools.file_tools import write_output_files, write_text_file
+from src.tools.file_tools import write_text_file
 from src.tools.registry import tool_registry
 from src.tools.tool_result import ToolResult
 from src.tools.worker_tools import execute_tool_call
@@ -34,14 +34,14 @@ from src.tools.worker_tools import execute_tool_call
 TOOL_RULES = """规则：
 - 只能使用上面这种 Markdown 代码块调用工具，不要输出原生 JSON tool_use 或 function_call。
 - 如果用户请求需要读取、写入或执行命令，请直接输出对应的工具代码块。
-- 当你说要“查看”、“读取”或“探查”某个文件/项目时，必须在同一轮回复中立即调用 read_file 或 search_project_files 工具，不能只口头描述而不调用工具。
-- 当用户明确要求你生成、创建或编写文件/页面/代码时，你必须调用 write_file 工具输出文件，不能只用文字解释或只写 markdown 摘要。
+- 当你要查看或探查某个目录/项目结构时，必须立即调用 list_dir 或 glob_files 工具，不要用 run_command 跑 dir/ls（Windows 下会失败）。
+- 当你说要“查看”、“读取”或“探查”某个文件时，必须在同一轮回复中立即调用 read_file 工具，不能只口头描述而不调用工具。
+- 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块（正文代码块不会被保存为文件）。每个文件一次 write_file，path 用有意义的文件名。
 - 如果用户指定了绝对路径（如 G:\\MAO_test\\index.html），直接使用该路径；如果只给了文件夹（如 G:\\MAO_test），请在该文件夹下创建合理的文件名，例如 index.html、login.js、style.css。
-- read_file 也支持绝对路径，例如：
-```tool:read_file
-{"path": "G:\\\\MAO_test\\\\index.html"}
-```
+- read_file / list_dir / glob_files / grep_content 都支持绝对路径。
 - 需要查询网络信息时，使用 web_search 搜索或 fetch_url 抓取具体网页。
+- 对于多步骤或项目类任务（如“做一个项目/系统/前后端应用”）：先用文字简要输出方案（要创建哪些文件、技术选型、目录结构），再逐步用 write_file 实现，不要急于写代码。
+- 工具调用结束后必须给用户一份完整的最终答复，说明检查了什么、关键发现、建议或下一步，以及实际写入的文件；禁止以工具调用作为最后输出。
 - 如果不需要工具，直接回复用户即可，不要编造工具调用。
 """
 
@@ -49,10 +49,14 @@ TOOL_RULES = """规则：
 # 原生 tool_use 模式下的规则（工具定义由 tools= 参数提供，无需 Markdown 说明）
 TOOL_RULES_NATIVE = """规则：
 - 你可以通过原生工具调用（tool_use）使用提供的工具完成用户任务。
-- 当你说要“查看”、“读取”或“探查”某个文件/项目时，必须立即调用相应工具，不能只口头描述。
-- 当用户明确要求你生成、创建或编写文件/页面/代码时，你必须调用 write_file 工具输出文件，不能只用文字解释。
+- 探查目录/项目结构时调用 list_dir 或 glob_files，不要用 run_command 跑 dir/ls。
+- 当你说要“查看”或“读取”某个文件时，必须立即调用 read_file，不能只口头描述。
+- 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块。
 - 如果用户指定了绝对路径，直接使用该路径；如果只给了文件夹，请在该文件夹下创建合理的文件名。
+- read_file / list_dir / glob_files / grep_content 都支持绝对路径。
 - 需要查询网络信息时，使用 web_search 或 fetch_url。
+- 对于多步骤或项目类任务：先用文字简要输出方案（要创建哪些文件、技术选型、目录结构），再逐步用 write_file 实现。
+- 工具调用结束后必须给用户一份完整的最终答复，说明检查了什么、关键发现、建议或下一步，以及实际写入的文件；禁止以工具调用作为最后输出。
 - 如果不需要工具，直接回复用户即可。
 """
 
@@ -68,6 +72,17 @@ COLLABORATION_DECISION_PROMPT = """你是任务复杂度判断器。请判断用
 - 如果请求涉及“开发一个功能/系统/页面/API/前后端/多步骤实现”，回答 true。
 - 如果只是闲聊、简单问答、解释概念、读取或修改单个文件，回答 false。
 """
+
+
+# 明确的项目/多步骤任务关键字：命中则直接走协作，不依赖 LLM 判断（避免漏判）
+_COLLABORATION_KEYWORDS = (
+    "做一个项目", "做一个系统", "做一个应用", "做一个网站",
+    "做一个前后端", "做一个全栈", "做一个完整",
+    "开发一个项目", "开发一个系统", "开发一个应用", "开发一个网站",
+    "实现一个项目", "实现一个系统", "实现一个应用",
+    "前后端交互", "前后端项目", "全栈项目", "综合起来做", "综合做一个",
+    "立项", "多步骤实现", "多页面",
+)
 
 
 class AgentTurnResult(BaseModel):
@@ -287,6 +302,25 @@ class Agent:
             if path and path not in files_written:
                 files_written.append(path)
 
+    @staticmethod
+    def _handle_stream_chunk(chunk: StreamChunk) -> ChatStreamEvent | None:
+        """把 Gateway 的 StreamChunk 转成 ChatStreamEvent；返回 None 表示不对外发事件"""
+        if chunk.type == "delta":
+            return ChatStreamEvent(type="delta", delta=chunk.content or "")
+        if chunk.type == "usage":
+            return None
+        if chunk.type == "failover":
+            return ChatStreamEvent(
+                type="model_failover",
+                delta=f"⚠ 模型 {chunk.from_model} 连接失效，已切换到 {chunk.to_model}",
+                failover={
+                    "from_model": chunk.from_model or "",
+                    "to_model": chunk.to_model or "",
+                    "reason": chunk.reason or "",
+                },
+            )
+        return None
+
     def _execute_tool_calls(
         self, content: str, files_written: list[str] | None = None
     ) -> tuple[str, list[dict[str, Any]]]:
@@ -410,9 +444,8 @@ class Agent:
             )
             iterations += 1
 
-        # 把最终回复中的代码块保存到会话输出目录
-        auto_written = write_output_files(final_content, self.session.output_dir)
-        files_written.extend(f for f in auto_written if f not in files_written)
+        # 不再自动抽取代码块为 generated_N 文件（易产出无意义文件名）；
+        # 模型应通过 write_file 显式写文件。仅当本轮未写任何文件时，兜底保存回复为 response.md。
         if self.approval_mode == "auto" and not files_written and final_content.strip():
             files_written.append(write_text_file("response.md", final_content, self.session.output_dir))
 
@@ -462,10 +495,12 @@ class Agent:
                 temperature=0.2,
                 **self._native_kwargs(),
             ):
-                if chunk.type == "delta":
-                    full_content += chunk.content or ""
-                    yield ChatStreamEvent(type="delta", delta=chunk.content or "")
-                elif chunk.type == "usage":
+                event = self._handle_stream_chunk(chunk)
+                if event is not None:
+                    if event.type == "delta":
+                        full_content += chunk.content or ""
+                    yield event
+                if chunk.type == "usage":
                     total_input += chunk.input_tokens
                     total_output += chunk.output_tokens
                     total_cost += chunk.cost_usd
@@ -500,10 +535,12 @@ class Agent:
                     temperature=0.2,
                     **self._native_kwargs(),
                 ):
-                    if chunk.type == "delta":
-                        full_content += chunk.content or ""
-                        yield ChatStreamEvent(type="delta", delta=chunk.content or "")
-                    elif chunk.type == "usage":
+                    event = self._handle_stream_chunk(chunk)
+                    if event is not None:
+                        if event.type == "delta":
+                            full_content += chunk.content or ""
+                        yield event
+                    if chunk.type == "usage":
                         total_input += chunk.input_tokens
                         total_output += chunk.output_tokens
                         total_cost += chunk.cost_usd
@@ -529,6 +566,7 @@ class Agent:
                         "error": f"参数解析失败：{parse_error}",
                     }
                     calls.append(call)
+                    yield ChatStreamEvent(type="tool_complete", tool_call=call)
                     tool_results_parts.append(
                         f"\n[工具 {tool_name} 参数解析失败：{parse_error}]\n"
                     )
@@ -542,6 +580,7 @@ class Agent:
                         "error": "只读模式：操作被拒绝",
                     }
                     calls.append(call)
+                    yield ChatStreamEvent(type="tool_complete", tool_call=call)
                     tool_results_parts.append(
                         f"\n[工具 {tool_name} 被拒绝：当前为只读模式]\n"
                     )
@@ -567,9 +606,14 @@ class Agent:
                             "error": "用户拒绝执行",
                         }
                         calls.append(call)
+                        yield ChatStreamEvent(type="tool_complete", tool_call=call)
                         tool_results_parts.append(f"\n[工具 {tool_name} 被用户拒绝]\n")
                         continue
 
+                yield ChatStreamEvent(
+                    type="tool_start",
+                    tool_call={"tool": tool_name, "params": params},
+                )
                 result = await asyncio.to_thread(
                     execute_tool_call, tool_name, params, self.session.output_dir
                 )
@@ -581,6 +625,7 @@ class Agent:
                     "error": result.error,
                 }
                 calls.append(call)
+                yield ChatStreamEvent(type="tool_complete", tool_call=call)
                 tool_results_parts.append(self._format_tool_result(tool_name, result))
                 self._record_written_file(tool_name, params, result, files_written)
 
@@ -594,18 +639,13 @@ class Agent:
             )
             iterations += 1
 
-        # 仅在 auto 模式下自动落盘；approve/readonly 模式下不自动写 response.md
-        if self.approval_mode == "auto":
-            auto_written = await asyncio.to_thread(
-                write_output_files, final_content, self.session.output_dir
-            )
-            files_written.extend(f for f in auto_written if f not in files_written)
-            if not files_written and final_content.strip():
-                files_written.append(
-                    await asyncio.to_thread(
-                        write_text_file, "response.md", final_content, self.session.output_dir
-                    )
+        # 不再自动抽取代码块为 generated_N 文件；仅当本轮未写任何文件时兜底保存回复为 response.md
+        if self.approval_mode == "auto" and not files_written and final_content.strip():
+            files_written.append(
+                await asyncio.to_thread(
+                    write_text_file, "response.md", final_content, self.session.output_dir
                 )
+            )
 
         yield ChatStreamEvent(
             type="done",
@@ -618,7 +658,11 @@ class Agent:
         )
 
     async def _should_collaborate(self, user_input: str) -> bool:
-        """让主模型判断是否需要多模型协作"""
+        """是否需要多模型协作：先做关键字预筛，再交 LLM 判断"""
+        # 关键字预筛：明确的项目/多步骤任务直接走协作
+        if any(kw in user_input for kw in _COLLABORATION_KEYWORDS):
+            return True
+
         messages = [
             ChatMessage(role="system", content=COLLABORATION_DECISION_PROMPT),
             ChatMessage(role="user", content=user_input),
@@ -800,18 +844,13 @@ class Agent:
         for r in results:
             all_files.extend(r.files_written)
 
-        # 6. 把 Reviewer 最终输出中的代码块也落盘到会话输出目录
-        if self.approval_mode == "auto" and review.final_output:
-            final_files = await asyncio.to_thread(
-                write_output_files, review.final_output, self.session.output_dir
-            )
-            all_files.extend(f for f in final_files if f not in all_files)
-            if not final_files and review.final_output.strip():
-                all_files.append(
-                    await asyncio.to_thread(
-                        write_text_file, "response.md", review.final_output, self.session.output_dir
-                    )
+        # 6. 仅当协作未产出文件时，兜底保存 Reviewer 最终输出为 response.md
+        if self.approval_mode == "auto" and not all_files and review.final_output.strip():
+            all_files.append(
+                await asyncio.to_thread(
+                    write_text_file, "response.md", review.final_output, self.session.output_dir
                 )
+            )
 
         yield ChatStreamEvent(
             type="done",

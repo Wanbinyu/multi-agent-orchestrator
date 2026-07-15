@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +17,7 @@ from src.models.schemas import (
     Task,
     TaskPlan,
     TaskResult,
+    ModelConfig,
 )
 
 
@@ -190,6 +192,76 @@ def test_collaboration_stream_handles_task_failure(tmp_path):
 
     review = [e for e in events if e.type == "review_complete"][0]
     assert review.review["passed"] is False
+
+
+def test_collaboration_real_worker_lists_reads_and_writes_file(tmp_path):
+    """贯穿 Agent/Dispatcher/Worker，证明目录工具结果会回填并显式写文件。"""
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(collaborate=True)
+    gateway.resolve_model.return_value = "glm-ark"
+    gateway.get_model_config.return_value = ModelConfig(
+        provider="ark", model_id="ark-code-latest", capabilities=[]
+    )
+    project_dir = tmp_path / "external-project"
+    project_dir.mkdir()
+    (project_dir / "seed.txt").write_text("seed", encoding="utf-8")
+
+    def _worker_chat(*args, **kwargs):
+        messages = kwargs["messages"]
+        worker_calls = gateway.chat.call_count
+        if worker_calls == 1:
+            return ChatResponse(
+                content=(
+                    '```tool:list_dir\n'
+                    f'{{"path":{json.dumps(str(project_dir))}}}\n```'
+                ),
+                model="glm-ark", provider="ark",
+            )
+        if worker_calls == 2:
+            assert "seed.txt" in messages[-1].content
+            return ChatResponse(
+                content=(
+                    '```tool:write_file\n'
+                    '{"path":"result.txt","content":"built from seed"}\n```'
+                ),
+                model="glm-ark", provider="ark",
+            )
+        return ChatResponse(content="任务完成。", model="glm-ark", provider="ark")
+
+    gateway.chat.side_effect = _worker_chat
+    agent = Agent(gateway, session, approval_mode="auto")
+    task = Task(
+        id="t1",
+        type="frontend_dev",
+        title="读取并实现",
+        input=f"检查 {project_dir} 并创建结果文件",
+        assigned_model="glm-ark",
+    )
+    plan = TaskPlan(summary="项目实现", tasks=[task])
+    worker_config = {
+        "frontend_dev": {
+            "name": "前端",
+            "default_model": "glm-ark",
+            "system_prompt": "完成实现任务",
+            "tools": ["write_file", "read_file"],
+        }
+    }
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
+         patch("src.core.reviewer.Reviewer") as MockReviewer, \
+         patch("src.core.worker.load_workers_config", return_value=worker_config):
+        MockOrchestrator.return_value.plan.return_value = plan
+        MockReviewer.return_value.review.return_value = ReviewResult(
+            passed=True, issues=[], final_output="项目已完成。"
+        )
+        events = _collect_events(agent, "开发一个项目并检查外部目录")
+
+    done = [event for event in events if event.type == "done"][0]
+    output_file = tmp_path / "output" / "frontend_dev_t1" / "result.txt"
+    assert output_file.read_text(encoding="utf-8") == "built from seed"
+    assert str(output_file.resolve()) in done.files_written
+    assert not list((tmp_path / "output").rglob("generated_*"))
+    assert gateway.chat.call_count == 3
 
 
 def _async_chunks(*events: ChatStreamEvent):

@@ -93,7 +93,9 @@ def test_run_turn_writes_code_blocks(tmp_path):
     result = agent.run_turn("写段代码")
 
     assert result.files_written
-    assert any("generated" in f for f in result.files_written)
+    # 新行为：不再自动抽取正文代码块为 generated_N 文件，仅兜底保存 response.md
+    assert any("response.md" in f for f in result.files_written)
+    assert not any("generated" in f for f in result.files_written)
 
 
 def test_run_turn_costs_are_summed(tmp_path):

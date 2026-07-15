@@ -189,18 +189,18 @@
   function addModelRow(model = null) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><input type="text" class="model-alias" value="${escapeHtml(
+      <td data-label="逻辑别名"><input type="text" class="model-alias" value="${escapeHtml(
         model?.alias || ""
       )}" placeholder="glm-ark" required></td>
-      <td><input type="text" class="model-id" value="${escapeHtml(
+      <td data-label="上游 model_id"><input type="text" class="model-id" value="${escapeHtml(
         model?.model_id || ""
       )}" placeholder="上游真实 model_id" required></td>
-      <td><input type="number" class="model-input-price" value="${model?.input_price_per_1m ?? 0}" min="0" step="0.01"></td>
-      <td><input type="number" class="model-output-price" value="${model?.output_price_per_1m ?? 0}" min="0" step="0.01"></td>
-      <td><input type="text" class="model-caps" value="${escapeHtml(
+      <td data-label="输入价格 / 1M"><input type="number" class="model-input-price" value="${model?.input_price_per_1m ?? 0}" min="0" step="0.01"></td>
+      <td data-label="输出价格 / 1M"><input type="number" class="model-output-price" value="${model?.output_price_per_1m ?? 0}" min="0" step="0.01"></td>
+      <td data-label="能力标签"><input type="text" class="model-caps" value="${escapeHtml(
         (model?.capabilities || []).join(", ")
       )}" placeholder="coding, tool_use"></td>
-      <td><button type="button" class="btn btn-danger btn-sm btn-remove-model">删除</button></td>
+      <td class="model-row-actions"><button type="button" class="btn btn-danger btn-sm btn-remove-model">删除</button></td>
     `;
     tr.querySelector(".btn-remove-model").addEventListener("click", () => tr.remove());
     els.modelRows.appendChild(tr);

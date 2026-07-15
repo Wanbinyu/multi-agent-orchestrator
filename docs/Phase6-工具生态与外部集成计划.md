@@ -13,8 +13,16 @@ Phase 5（长期记忆与项目上下文）已 100% 完成。下一步将进入 
 | URL 抓取 `fetch_url` | ✅ 已完成 |
 | Agent / Worker / Provider 改为注册表驱动 | ✅ 已完成 |
 | CLI / Web 工具展示通用化 | ✅ 已完成 |
+| 流式重试去重 | ✅ 已完成 |
+| 自动模型故障切换 | ✅ 已完成 |
+| 协作 Worker 多轮工具循环 | ✅ 已完成 |
+| 明确文件产出（禁止 generated_N） | ✅ 已完成 |
+| Claude 风格 `/` 命令动态补全 | ✅ 已完成 |
+| CLI 工具循环最终回答可见性 | ⏳ Phase 6.6 P0 |
+| 项目树工具与 `/tree` 命令 | ⏳ Phase 6.6 P1 |
+| Web 项目文件树 | ⏳ Phase 6.6 P2 |
 | 代码执行沙箱 | ⏳ 计划中 |
-| MCP 适配器 | ⏳ 计划中 |
+| MCP 适配器（stdio / SSE） | ✅ 已完成，依赖可选 |
 | UI 工具配置面板 | ⏳ 计划中 |
 
 ## Goal
@@ -27,7 +35,7 @@ Phase 5（长期记忆与项目上下文）已 100% 完成。下一步将进入 
    - URL 抓取（获取网页内容并转换为 Markdown）✅
 3. **可选增强**（后续迭代）：
    - 代码执行沙箱
-   - MCP 适配器，接入外部工具服务器
+   - 更多 MCP Server 预设与真实环境验证
    - IDE 插件 / VS Code 扩展
 4. **UI 配置**（后续迭代）：在连接配置页增加外部工具 API Key / MCP 服务器设置。
 
@@ -42,7 +50,7 @@ Phase 5（长期记忆与项目上下文）已 100% 完成。下一步将进入 
 - `execute(name, params, base_dir, allowed_prefixes)` 统一执行，自动注入 `base_dir` / `allowed_prefixes`，异常兜底为 `ToolResult(success=False)`。
 - 工具按 `category` 分类：`read` / `write` / `execute` / `external` / `unsafe`。
 
-内置工具在 `src/tools/worker_tools.py` 导入时自动注册：`read_file`、`write_file`、`run_command`、`search_project_files`、`search_memory`、`web_search`、`fetch_url`。
+内置工具在 `src/tools/worker_tools.py` 导入时自动注册，共 12 个：`read_file`、`write_file`、`edit_file`、`run_command`、`list_dir`、`glob_files`、`grep_content`、`search_project_files`、`search_memory`、`web_search`、`fetch_url`、`word_count`。
 
 ### 网页工具 `src/tools/web_tools.py`
 
@@ -60,6 +68,34 @@ Phase 5（长期记忆与项目上下文）已 100% 完成。下一步将进入 
 - `src/cli/chat_command.py`：工具调用展示新增 `WebSearch` / `Fetch`，并对未知工具通用兜底；`/tools` 命令从注册表动态生成。
 - `src/ui/static/js/chat.js`：权限卡片与本轮记录对任意工具通用展示。
 - `config/workers.yaml`：为 `architect` / `frontend_dev` / `backend_dev` / `tester` 授予 `web_search` / `fetch_url`。
+
+### 流式重试去重
+
+- **问题**：`GatewayClient.chat_stream()` 在流式过程中发生异常时会从头重试，导致已输出的内容被重复发送，用户看到重叠/重复的回答。
+- **修复**：只有在**尚未产出任何 chunk** 时才允许重试；一旦开始输出，异常直接报错，不再重试。
+- **文件**：`src/gateway/client.py`
+
+### 自动模型故障切换
+
+- **问题**：主模型配额耗尽或连接失败时，请求直接失败，不会自动使用备用模型。
+- **实现**：
+  - `ModelConfig` 新增 `fallback_models`、`failover_enabled`、`failover_cooldown_seconds`。
+  - `providers.yaml` 支持全局 `default_failover_chain`。
+  - `GatewayClient.chat()` / `chat_stream()` 递归展开回退链，支持 `A -> B -> C` 并自动去环。
+  - 错误分类：认证/请求参数错误直接暴露；模型不可用与 429 才切换；连接错误允许重试后切换。
+  - 健康冷却：优先读取 `Retry-After`，也能解析 `5-hour` 等错误时间窗口。
+  - 切换时通过 `StreamChunk(type="failover")` / `ChatStreamEvent(type="model_failover")` 通知 CLI 和 Web。
+- **CLI 诊断**：`/test-models` 通过 Provider 正式鉴权路径发送最小请求，失败模型立即进入冷却；命令会提示少量 token 消耗。
+- **文件**：`src/gateway/client.py`、`src/models/schemas.py`、`config/providers.yaml`、`src/core/agent.py`、`src/cli/chat_command.py`、`src/ui/static/js/chat.js`、`src/ui/static/css/style.css`
+
+### 协作 Worker 稳定性收口
+
+- Worker 支持最多 5 轮工具循环，目录/文件读取结果会回填给模型继续工作。
+- 旧配置只要已经授予读取能力，就自动补齐 `list_dir` / `glob_files` / `grep_content` / `read_file`。
+- Worker 仅能调用配置授权的工具，Markdown 和原生 `tool_use` 使用同一工具白名单。
+- 原生模式不再同时注入 Markdown 工具指令，避免协议冲突。
+- Agent / Worker / Reviewer 不再从正文代码块生成 `generated_N` 项目文件。
+- 模型只贴代码块时先要求其改用 `write_file`；仍不执行则保留到 `content.txt` 并把任务标记失败，避免伪成功和内容丢失。
 
 ## 原则
 
@@ -87,13 +123,19 @@ Phase 5（长期记忆与项目上下文）已 100% 完成。下一步将进入 
 
 ## 验证
 
-- 单元测试：`tests/test_registry.py`、`tests/test_web_tools.py`（网络全部 mock）。
-- 全量回归：`python -m pytest -q` 通过 `237 passed`。
+- 单元测试：`tests/test_registry.py`、`tests/test_web_tools.py`（网络全部 mock）、`tests/test_gateway_failover.py`。
+- 全量回归：`python -m pytest -q` 通过 `374 passed`。
 - CLI：`python run.py chat` 输入“搜索 Claude Code 的最新功能”，Agent 调用 `web_search` 并总结。
 - Web：`/chat` 发送“抓取 https://example.com 并总结”，右侧边栏本轮记录显示 `fetch_url`。
+- 故障切换：主模型 429/连接失败时，CLI/Web 显示黄色提示并自动切换到备用模型。
+- 无付费 mock 演示：`python scripts/demo_failover.py`，输出写入系统临时目录。
 
 ## 不在本次范围
 
 - 大规模 MCP 生态集成（先做适配器框架，具体服务器后续按需添加）。
 - 浏览器自动化 / 复杂爬虫。
 - 打包分发（可执行文件、VS Code 插件等）。
+
+## 下一迭代
+
+Phase 6.6 进入 `docs/Phase6.6-项目结构展示与CLI结果可见性计划.md`：先修复单 Agent 工具循环后最终回答不显示的问题，再实现跨平台 `project_tree`、零 token `/tree` 和 Web 文件树。

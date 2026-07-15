@@ -19,18 +19,52 @@ _MAX_GREP_FILE_SIZE = 500_000
 
 
 @tool_registry.register(
-    name="glob_files",
-    description="按通配符模式列出匹配的文件路径，支持 ** 递归",
+    name="list_dir",
+    description="列出指定目录下的文件和子目录（跨平台，支持绝对路径），用于探查目录结构",
     params={
-        "pattern": {"type": "string", "description": "通配符模式，如 **/*.py 或 src/**/*.ts"},
+        "path": {"type": "string", "description": "目录路径，相对或绝对", "default": "."},
     },
     category="read",
 )
-def glob_files(pattern: str, base_dir: str = ".") -> ToolResult:
+def list_dir(path: str = ".", base_dir: str = ".") -> ToolResult:
+    try:
+        target = _resolve_path(path, base_dir)
+        if not target.exists():
+            return ToolResult(success=False, error=f"目录不存在：{path}")
+        if not target.is_dir():
+            return ToolResult(success=False, error=f"不是目录：{path}")
+
+        entries = []
+        for entry in sorted(target.iterdir()):
+            if entry.is_dir():
+                entries.append(f"📁 {entry.name}/")
+            else:
+                size = entry.stat().st_size
+                entries.append(f"📄 {entry.name} ({size} B)")
+        if not entries:
+            return ToolResult(success=True, output=f"目录为空：{path}")
+        header = f"目录 {target}（{len(entries)} 项）："
+        return ToolResult(success=True, output=header + "\n" + "\n".join(entries))
+    except ValueError as e:
+        return ToolResult(success=False, error=str(e))
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
+@tool_registry.register(
+    name="glob_files",
+    description="按通配符模式列出匹配的文件路径，支持 ** 递归；path 指定搜索根目录（默认当前目录，可用绝对路径）",
+    params={
+        "pattern": {"type": "string", "description": "通配符模式，如 **/*.py 或 src/**/*.ts"},
+        "path": {"type": "string", "description": "搜索根目录，相对或绝对", "default": "."},
+    },
+    category="read",
+)
+def glob_files(pattern: str, path: str = ".", base_dir: str = ".") -> ToolResult:
     if not pattern.strip():
         return ToolResult(success=False, error="pattern 不能为空")
     try:
-        base = _resolve_path(".", base_dir)
+        base = _resolve_path(path, base_dir)
         # Path.glob 支持 ** 递归
         matched = sorted(p for p in base.glob(pattern) if p.is_file())
         if not matched:
@@ -38,7 +72,6 @@ def glob_files(pattern: str, base_dir: str = ".") -> ToolResult:
 
         # 相对路径展示
         lines: list[str] = []
-        truncated = False
         for p in matched[:_MAX_GLOB_RESULTS]:
             try:
                 rel = p.relative_to(base)
@@ -46,10 +79,9 @@ def glob_files(pattern: str, base_dir: str = ".") -> ToolResult:
             except ValueError:
                 lines.append(str(p))
         if len(matched) > _MAX_GLOB_RESULTS:
-            truncated = True
             lines.append(f"...（共 {len(matched)} 个文件，已截断显示前 {_MAX_GLOB_RESULTS} 个）")
 
-        header = f"匹配 {pattern}（{len(matched)} 个文件）："
+        header = f"匹配 {pattern}（{len(matched)} 个文件，根目录 {base}）："
         return ToolResult(success=True, output=header + "\n" + "\n".join(lines))
     except Exception as e:
         return ToolResult(success=False, error=str(e))

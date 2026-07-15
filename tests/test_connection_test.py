@@ -7,6 +7,8 @@ from src.gateway.connection_test import (
     check_openai_compatible_connection,
     check_provider_connection,
 )
+from src.gateway.provider import AnthropicProvider
+from src.models.schemas import ProviderConfig
 
 
 def test_anthropic_connection_success():
@@ -19,6 +21,58 @@ def test_anthropic_connection_success():
         assert result.success is True
         assert result.provider_name == "anthropic"
         assert result.error_message == ""
+
+
+def test_coding_plan_connection_uses_bearer_auth_token():
+    with patch("src.gateway.connection_test.anthropic.Anthropic") as MockClient:
+        MockClient.return_value.messages.create.return_value = MagicMock()
+
+        result = check_anthropic_connection(
+            "coding-token",
+            "https://ark.cn-beijing.volces.com/api/coding",
+            "ark-code-latest",
+        )
+
+    assert result.success is True
+    kwargs = MockClient.call_args.kwargs
+    assert kwargs["auth_token"] == "coding-token"
+    assert "api_key" not in kwargs
+
+
+def test_coding_plan_provider_prefers_configured_token(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "environment-token")
+    provider = AnthropicProvider(
+        "ark",
+        ProviderConfig(
+            name="ark",
+            type="anthropic",
+            base_url="https://ark.cn-beijing.volces.com/api/coding",
+            api_keys=["configured-token"],
+        ),
+    )
+    with patch("src.gateway.provider.anthropic.Anthropic") as MockClient:
+        provider._make_client("configured-token")
+
+    kwargs = MockClient.call_args.kwargs
+    assert kwargs["auth_token"] == "configured-token"
+    assert "api_key" not in kwargs
+
+
+def test_coding_plan_provider_uses_environment_token_when_key_missing(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "environment-token")
+    provider = AnthropicProvider(
+        "ark",
+        ProviderConfig(
+            name="ark",
+            type="anthropic",
+            base_url="https://ark.cn-beijing.volces.com/api/coding",
+            api_keys=[],
+        ),
+    )
+    with patch("src.gateway.provider.anthropic.Anthropic") as MockClient:
+        provider._make_client("")
+
+    assert MockClient.call_args.kwargs["auth_token"] == "environment-token"
 
 
 def test_anthropic_connection_auth_error():

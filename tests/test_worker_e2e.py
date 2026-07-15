@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.core.worker import Worker
-from src.models.schemas import ChatResponse, Task
+from src.models.schemas import ChatResponse, ModelConfig, ProviderConfig, Task
 
 
 def _mock_gateway(response_content: str) -> MagicMock:
@@ -31,7 +31,7 @@ def _sample_workers_config(tools: list[str] | None = None) -> dict:
     }
 
 
-def test_execute_writes_code_blocks_to_disk(tmp_path):
+def test_execute_does_not_generate_files_from_code_blocks(tmp_path):
     gateway = _mock_gateway("""```html
 <input type="text" />
 ```
@@ -51,12 +51,110 @@ body { margin: 0; }
 
     result = worker.execute(task, output_dir=str(output_dir))
 
-    assert result.success is True
+    assert result.success is False
     assert result.task.id == "t1"
     assert result.response is not None
-    assert len(result.files_written) == 2
-    assert (output_dir / "frontend_t1" / "generated_1.html").exists()
-    assert (output_dir / "frontend_t1" / "generated_2.css").exists()
+    assert len(result.files_written) == 1
+    assert (output_dir / "frontend_t1" / "content.txt").exists()
+    assert not list(output_dir.rglob("generated_*"))
+    assert gateway.chat.call_count == 2
+
+
+def test_analysis_worker_code_example_is_preserved_without_false_failure(tmp_path):
+    gateway = _mock_gateway("分析示例：\n```python\nprint(1)\n```")
+    config = {
+        "architect": {
+            "name": "架构师",
+            "default_model": "glm-ark",
+            "system_prompt": "分析系统",
+            "tools": ["write_file", "read_file"],
+        }
+    }
+    worker = Worker(gateway, config)
+    task = Task(
+        id="t1", type="architect", title="分析", input="分析现有架构",
+        assigned_model="glm-ark",
+    )
+
+    result = worker.execute(task, output_dir=str(tmp_path / "out"))
+
+    assert result.success is True
+    assert gateway.chat.call_count == 1
+    assert result.files_written[0].endswith("content.txt")
+
+
+def test_execute_recovers_code_blocks_with_explicit_write_file(tmp_path):
+    gateway = MagicMock()
+    gateway.resolve_model.return_value = "glm-ark"
+    gateway.get_model_config.side_effect = AttributeError
+    gateway.chat.side_effect = [
+        ChatResponse(
+            content="```html\n<h1>hello</h1>\n```",
+            model="glm-ark", provider="ark", input_tokens=2, output_tokens=2,
+        ),
+        ChatResponse(
+            content=(
+                '```tool:write_file\n'
+                '{"path":"index.html","content":"<h1>hello</h1>"}\n```'
+            ),
+            model="glm-ark", provider="ark", input_tokens=3, output_tokens=3,
+        ),
+        ChatResponse(
+            content="index.html 已创建。",
+            model="glm-ark", provider="ark", input_tokens=4, output_tokens=4,
+        ),
+    ]
+    worker = Worker(gateway, _sample_workers_config())
+    task = Task(
+        id="t1", type="frontend", title="页面", input="创建页面",
+        assigned_model="glm-ark",
+    )
+    output_dir = tmp_path / "out"
+
+    result = worker.execute(task, output_dir=str(output_dir))
+
+    assert result.success is True
+    assert (output_dir / "frontend_t1" / "index.html").read_text() == "<h1>hello</h1>"
+    assert not list(output_dir.rglob("generated_*"))
+    assert result.response.input_tokens == 9
+    assert result.response.output_tokens == 9
+
+
+def test_execute_uses_native_tools_without_markdown_prompt_conflict(tmp_path):
+    gateway = MagicMock()
+    gateway.resolve_model.return_value = "glm-ark"
+    gateway.get_model_config.return_value = ModelConfig(
+        provider="ark", model_id="ark-code-latest", capabilities=["tool_use"]
+    )
+    provider = MagicMock()
+    provider.config = ProviderConfig(
+        name="ark", type="anthropic", base_url="https://example.com", api_keys=["k"]
+    )
+    gateway.providers = {"ark": provider}
+    gateway.chat.side_effect = [
+        ChatResponse(
+            content=(
+                '```tool:write_file\n'
+                '{"path":"main.py","content":"print(1)"}\n```'
+            ),
+            model="glm-ark", provider="ark",
+        ),
+        ChatResponse(content="完成", model="glm-ark", provider="ark"),
+    ]
+    worker = Worker(gateway, _sample_workers_config())
+    task = Task(
+        id="t1", type="frontend", title="原生工具", input="创建文件",
+        assigned_model="glm-ark",
+    )
+
+    result = worker.execute(task, output_dir=str(tmp_path / "out"))
+
+    assert result.success is True
+    first_call = gateway.chat.call_args_list[0]
+    assert "tools" in first_call.kwargs
+    prompt = first_call.kwargs["messages"][1].content
+    assert "原生 tool_use" in prompt
+    assert "```tool:" not in prompt
 
 
 def test_execute_unknown_worker_type():
@@ -102,16 +200,34 @@ def test_execute_processes_tool_calls(tmp_path):
     test_file = task_output_dir / "data.txt"
     test_file.write_text("file content", encoding="utf-8")
 
-    response = """读取文件结果：
+    first_response = """读取文件结果：
 ```tool:read_file
 {\"path\": \"data.txt\"}
 ```
-
-```python
-print("ok")
-```
 """
-    gateway = _mock_gateway(response)
+    gateway = MagicMock()
+    gateway.resolve_model.return_value = "glm-ark"
+    gateway.get_model_config.side_effect = AttributeError
+
+    def _chat(*args, **kwargs):
+        messages = kwargs["messages"]
+        if gateway.chat.call_count == 1:
+            return ChatResponse(content=first_response, model="glm-ark", provider="ark")
+        if gateway.chat.call_count == 2:
+            assert "file content" in messages[-1].content
+            return ChatResponse(
+                content=(
+                    '```tool:write_file\n'
+                    '{"path":"result.py","content":"print(\\"ok\\")"}\n```'
+                ),
+                model="glm-ark", provider="ark",
+            )
+        return ChatResponse(
+            content="已根据文件内容创建 result.py。",
+            model="glm-ark", provider="ark",
+        )
+
+    gateway.chat.side_effect = _chat
     worker = Worker(gateway, _sample_workers_config(tools=["write_file", "read_file"]))
     task = Task(
         id="t1",
@@ -124,9 +240,31 @@ print("ok")
     result = worker.execute(task, output_dir=str(output_dir))
 
     assert result.success is True
-    assert "[工具 read_file 执行结果]" in result.content
-    assert "file content" in result.content
+    assert "已根据文件内容" in result.content
     assert len(result.files_written) == 1
+    assert (task_output_dir / "result.py").read_text() == 'print("ok")'
+    assert gateway.chat.call_count == 3
+
+
+def test_execute_rejects_tool_not_granted_to_worker(tmp_path):
+    gateway = _mock_gateway(
+        '```tool:run_command\n{"command":"python --version"}\n```'
+    )
+    worker = Worker(
+        gateway,
+        _sample_workers_config(tools=["write_file"]),
+        max_tool_iterations=1,
+    )
+    task = Task(
+        id="t1", type="frontend", title="权限", input="运行命令",
+        assigned_model="glm-ark",
+    )
+
+    result = worker.execute(task, output_dir=str(tmp_path / "out"))
+
+    assert result.success is True
+    returned_results = gateway.chat.call_args_list[1].kwargs["messages"][-2].content
+    assert "未获授权" in returned_results
 
 
 def test_execute_substitutes_dependency_placeholders(tmp_path):

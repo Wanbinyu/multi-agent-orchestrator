@@ -37,11 +37,15 @@ def check_anthropic_connection(
 
     start = time.time()
     try:
-        client = anthropic.Anthropic(
-            api_key=api_key,
-            base_url=base_url or None,
-            timeout=timeout,
-        )
+        client_kwargs: dict[str, Any] = {
+            "base_url": base_url or None,
+            "timeout": timeout,
+        }
+        if base_url and "volces.com/api/coding" in base_url:
+            client_kwargs["auth_token"] = api_key
+        else:
+            client_kwargs["api_key"] = api_key
+        client = anthropic.Anthropic(**client_kwargs)
         # 使用配置中的模型 ID 或一个常见模型名测试
         response = client.messages.create(
             model=model_id,

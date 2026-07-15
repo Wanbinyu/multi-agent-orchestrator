@@ -66,13 +66,13 @@ class AnthropicProvider(BaseProvider):
         （Authorization: Bearer），用 auth_token；其它 Anthropic 兼容端点
         用默认的 x-api-key。
 
-        对 Coding Plan 端点，优先使用环境变量 ANTHROPIC_AUTH_TOKEN（已验证
-        可用的 Coding Plan Token），配置的 key 作为回退。
+        对 Coding Plan 端点，优先使用配置中的 key；环境变量
+        ANTHROPIC_AUTH_TOKEN 仅作为配置缺失时的回退。
         """
         base_url = self.config.base_url or None
         is_coding_endpoint = bool(base_url) and "volces.com/api/coding" in base_url
         if is_coding_endpoint:
-            token = os.environ.get("ANTHROPIC_AUTH_TOKEN") or api_key
+            token = api_key or os.environ.get("ANTHROPIC_AUTH_TOKEN")
             return anthropic.Anthropic(
                 auth_token=token,
                 base_url=base_url,

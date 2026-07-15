@@ -124,6 +124,7 @@
 | Phase 6.3 原生工具调用 | ✅ 已完成 | tools= 透传 + schema 生成 + native_tools 开关；297 passed；开发者工具指南 + contrib 目录 |
 | Phase 6.4 扩展生态 | ✅ 已完成 | Hooks（pre/post 拦截）+ MCP 适配器（stdio/sse）+ 启动加载器；329 passed |
 | Phase 6.5 子 Agent 并行 | ⏳ 计划中 | 复用 Dispatcher；SubagentSpawner 槽位已预留 |
+| Phase 7 证据驱动工程 Agent | ⏳ 计划中 | 任务分类、证据/假设循环、验证门、完成审计；详见独立计划 |
 
 ---
 

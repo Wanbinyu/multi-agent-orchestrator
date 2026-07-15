@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import Counter, defaultdict
 from typing import Any
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.shortcuts import CompleteStyle
 from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
@@ -24,31 +28,65 @@ from src.gateway.client import GatewayClient
 console = Console()
 
 
-COMMANDS = """
-可用命令：
-  /new [标题]      创建新会话
-  /load <id>       加载已有会话
-  /save            手动保存当前会话
-  /sessions        列出最近会话
-  /plan <需求>     使用 Orchestrator 执行一次性任务计划
-  /memory add <分类> <内容>  添加长期记忆
-  /memory list [分类]        列出长期记忆
-  /memory search <查询>      搜索长期记忆
-  /memory forget <id>        删除长期记忆
-  /memory index              重建项目文件索引
-  /memory summarize          总结当前会话并保存到记忆
-  /mode <模式>     切换权限模式：auto / approve / readonly（也可直接输 /auto、/approve、/readonly）
-  /auto            切换到自动执行模式
-  /approve         切换到每次确认模式
-  /readonly        切换到只读模式
-  /tools           显示可用工具
-  /help            显示此帮助
-  /exit 或 /quit   退出
+SLASH_COMMANDS: list[tuple[str, str, str]] = [
+    ("/new", "/new [标题]", "创建新会话"),
+    ("/load", "/load <id>", "加载已有会话"),
+    ("/save", "/save", "保存当前会话"),
+    ("/sessions", "/sessions", "列出最近会话"),
+    ("/plan", "/plan <需求>", "执行一次性多模型任务计划"),
+    ("/memory add", "/memory add <分类> <内容>", "添加长期记忆"),
+    ("/memory list", "/memory list [分类]", "列出长期记忆"),
+    ("/memory search", "/memory search <查询>", "搜索长期记忆"),
+    ("/memory forget", "/memory forget <id>", "删除长期记忆"),
+    ("/memory index", "/memory index", "重建项目文件索引"),
+    ("/memory summarize", "/memory summarize", "总结当前会话并保存到记忆"),
+    ("/mode", "/mode <auto|approve|readonly>", "切换权限模式"),
+    ("/auto", "/auto", "自动执行工具"),
+    ("/approve", "/approve", "每次执行前确认"),
+    ("/readonly", "/readonly", "只读模式"),
+    ("/tools", "/tools", "显示模型可用工具"),
+    ("/test-models", "/test-models", "测试模型连接（少量 token）"),
+    ("/help", "/help", "显示完整命令帮助"),
+    ("/exit", "/exit", "保存并退出"),
+    ("/quit", "/quit", "保存并退出"),
+]
 
-提示：
-  - Shift+Tab 可快速切换模式
-  - 权限询问时输入 auto/always 可临时切换到自动模式并批准当前请求
-"""
+
+def _build_commands_help() -> str:
+    lines = ["可用命令："]
+    width = max(len(usage) for _, usage, _ in SLASH_COMMANDS)
+    for _, usage, description in SLASH_COMMANDS:
+        lines.append(f"  {usage.ljust(width)}  {description}")
+    lines.extend([
+        "",
+        "提示：",
+        "  - 输入 / 可打开命令列表，继续输入会实时过滤",
+        "  - Shift+Tab 可快速切换权限模式",
+        "  - 权限询问时输入 auto/always 可切换到自动模式并批准当前请求",
+    ])
+    return "\n".join(lines)
+
+
+COMMANDS = _build_commands_help()
+
+
+class SlashCommandCompleter(Completer):
+    """仅在输入以 / 开头时显示命令，并按当前文本前缀实时过滤。"""
+
+    def get_completions(self, document: Document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/") or "\n" in text:
+            return
+
+        normalized = text.lower()
+        for command, usage, description in SLASH_COMMANDS:
+            if command.startswith(normalized):
+                yield Completion(
+                    command,
+                    start_position=-len(text),
+                    display=usage,
+                    display_meta=description,
+                )
 
 
 MODES = ["auto", "approve", "readonly"]
@@ -63,6 +101,107 @@ def _summarize_params(params: dict) -> str:
     if not params:
         return ""
     return ", ".join(f"{k}={v}" for k, v in params.items())
+
+
+_TOOL_PHASES: dict[str, tuple[str, str]] = {
+    "list_dir": ("explore", "探索项目"),
+    "glob_files": ("explore", "探索项目"),
+    "read_file": ("explore", "探索项目"),
+    "grep_content": ("search", "检索代码"),
+    "search_project_files": ("search", "检索代码"),
+    "search_memory": ("search", "检索上下文"),
+    "web_search": ("research", "查询资料"),
+    "fetch_url": ("research", "查询资料"),
+    "write_file": ("change", "生成交付物"),
+    "run_command": ("execute", "执行验证"),
+}
+
+
+def _tool_phase(tool_name: str) -> tuple[str, str]:
+    return _TOOL_PHASES.get(tool_name, ("other", "执行工具"))
+
+
+def _format_tool_action(tool_name: str, params: dict[str, Any]) -> str:
+    """把工具调用转成人类可读的动作描述。"""
+    target = _summarize_params(params)
+    labels = {
+        "list_dir": "浏览目录",
+        "glob_files": "匹配文件",
+        "read_file": "读取文件",
+        "grep_content": "搜索内容",
+        "search_project_files": "搜索项目",
+        "search_memory": "搜索记忆",
+        "web_search": "搜索网页",
+        "fetch_url": "读取网页",
+        "write_file": "写入文件",
+        "run_command": "运行命令",
+    }
+    label = labels.get(tool_name, tool_name)
+    if tool_name == "write_file":
+        lines = len(str(params.get("content", "")).splitlines())
+        suffix = f"（{lines} 行）" if lines else ""
+        return f"{label} {target or '未指定路径'}{suffix}"
+    return f"{label} {target}".rstrip()
+
+
+def _progress_message(counts: Counter[str]) -> str:
+    directories = counts["list_dir"]
+    files = counts["read_file"]
+    searches = sum(counts[name] for name in ("glob_files", "grep_content", "search_project_files"))
+    writes = counts["write_file"]
+    commands = counts["run_command"]
+    if writes:
+        return f"📝 正在整理交付物 · {writes} 个文件"
+    if commands:
+        return f"🧪 正在验证 · {commands} 条命令"
+    parts = []
+    if directories:
+        parts.append(f"{directories} 个目录")
+    if files:
+        parts.append(f"{files} 个文件")
+    if searches:
+        parts.append(f"{searches} 次检索")
+    detail = " / ".join(parts)
+    return f"🔎 正在分析项目{' · ' + detail if detail else ''}"
+
+
+def _summarize_tool_activity(tool_calls: list[dict[str, Any]]) -> list[str]:
+    """生成稳定、紧凑的本轮工作摘要。"""
+    counts: Counter[str] = Counter()
+    unique_targets: dict[str, set[str]] = defaultdict(set)
+    failed: list[dict[str, Any]] = []
+    for call in tool_calls:
+        tool_name = str(call.get("tool", "unknown"))
+        counts[tool_name] += 1
+        unique_targets[tool_name].add(_summarize_params(call.get("params", {}) or {}))
+        if not call.get("success"):
+            failed.append(call)
+
+    lines: list[str] = []
+    if counts["list_dir"] or counts["read_file"]:
+        lines.append(
+            f"探索：浏览 {len(unique_targets['list_dir'])} 个目录，"
+            f"读取 {len(unique_targets['read_file'])} 个文件"
+        )
+    search_count = sum(counts[name] for name in ("glob_files", "grep_content", "search_project_files", "search_memory"))
+    if search_count:
+        lines.append(f"检索：执行 {search_count} 次代码或上下文搜索")
+    if counts["run_command"]:
+        lines.append(f"验证：运行 {counts['run_command']} 条命令")
+    if counts["write_file"]:
+        lines.append(f"变更：写入 {len(unique_targets['write_file'])} 个文件")
+
+    duplicate_count = sum(counts.values()) - sum(len(values) for values in unique_targets.values())
+    if duplicate_count:
+        lines.append(f"折叠：{duplicate_count} 次重复操作未逐条展示")
+    success_count = len(tool_calls) - len(failed)
+    lines.append(f"状态：{success_count} 次成功，{len(failed)} 次失败")
+    for call in failed[:3]:
+        lines.append(
+            f"失败：{_format_tool_action(str(call.get('tool', 'unknown')), call.get('params', {}) or {})}"
+            f" · {call.get('error') or '未知错误'}"
+        )
+    return lines
 
 
 def _mode_color(mode: str) -> str:
@@ -95,9 +234,12 @@ def _make_prompt_session(mode_ref: list[str]) -> PromptSession:
 
     return PromptSession(
         key_bindings=kb,
+        completer=SlashCommandCompleter(),
+        complete_while_typing=True,
+        complete_style=CompleteStyle.COLUMN,
         bottom_toolbar=lambda: HTML(
             f" Mode: <{_mode_color(mode_ref[0])}><b>{mode_ref[0]}</b></{_mode_color(mode_ref[0])}> "
-            f"| Shift+Tab 切换 | /mode &lt;auto|approve|readonly&gt; "
+            f"| Shift+Tab 切换 | 输入 / 查看命令 "
         ),
     )
 
@@ -109,7 +251,7 @@ def _print_welcome(session_id: str, mode: str):
             f"进入 Multi-Agent Orchestrator 对话模式\n"
             f"会话 ID: {session_id}\n"
             f"{mode_line}\n"
-            f"{COMMANDS}",
+            "输入 / 查看命令，输入 /help 查看完整帮助",
             title="MAO Chat",
         )
     )
@@ -126,9 +268,14 @@ async def _stream_turn(agent: Agent, user_input: str):
     is_collaboration = False
     models_used: set[str] = set()
     spinner_task: asyncio.Task | None = None
+    spinner_message = ""
+    activity_counts: Counter[str] = Counter()
+    phase_started: set[str] = set()
+    phase_detail_counts: Counter[str] = Counter()
 
     def _start_spinner(message: str):
-        nonlocal spinner_task
+        nonlocal spinner_task, spinner_message
+        spinner_message = message
         if spinner_task is not None and not spinner_task.done():
             return
 
@@ -139,7 +286,7 @@ async def _stream_turn(agent: Agent, user_input: str):
             while True:
                 elapsed = time.monotonic() - start
                 try:
-                    live.update(Markdown(f"{message} {frames[i % len(frames)]} ({elapsed:.1f}s)"))
+                    live.update(Markdown(f"{spinner_message} {frames[i % len(frames)]} ({elapsed:.1f}s)"))
                 except Exception:
                     break
                 await asyncio.sleep(0.12)
@@ -222,6 +369,38 @@ async def _stream_turn(agent: Agent, user_input: str):
                     console.print("[dim]已拒绝[/dim]")
                 agent.respond_to_permission(req.get("request_id", ""), approved)
                 live.start()
+            elif event.type == "model_failover":
+                failover = event.failover or {}
+                from_model = failover.get("from_model", "?")
+                to_model = failover.get("to_model", "?")
+                reason = failover.get("reason", "")
+                console.print(
+                    f"[bold yellow]⚠ 模型 {from_model} 连接失效（{reason}），已自动切换到 {to_model}[/bold yellow]"
+                )
+            elif event.type == "tool_start":
+                call = event.tool_call or {}
+                tool_name = str(call.get("tool", "unknown"))
+                params = call.get("params", {}) or {}
+                activity_counts[tool_name] += 1
+                phase_key, phase_title = _tool_phase(tool_name)
+                if phase_key not in phase_started:
+                    console.print(f"\n[bold cyan]● {phase_title}[/bold cyan]")
+                    phase_started.add(phase_key)
+                shown = phase_detail_counts[phase_key]
+                if shown < 4:
+                    console.print(f"  [dim]└ {_format_tool_action(tool_name, params)}[/dim]")
+                elif shown == 4:
+                    console.print("  [dim]└ 后续同类操作已折叠，完成后显示统计[/dim]")
+                phase_detail_counts[phase_key] += 1
+                _start_spinner(_progress_message(activity_counts))
+            elif event.type == "tool_complete":
+                call = event.tool_call or {}
+                if not call.get("success"):
+                    action = _format_tool_action(
+                        str(call.get("tool", "unknown")), call.get("params", {}) or {}
+                    )
+                    console.print(f"  [red]× {action}：{call.get('error') or '执行失败'}[/red]")
+                _start_spinner(_progress_message(activity_counts))
             elif event.type == "plan":
                 is_collaboration = True
                 plan = event.plan or {}
@@ -273,47 +452,20 @@ async def _stream_turn(agent: Agent, user_input: str):
     finally:
         live.stop()
 
-    if is_collaboration and final_content:
+    # 纯文本回答已由 Live 渲染；使用过工具时必须重新打印最终答复，
+    # 否则工具代码块触发的 spinner 会遮住模型最后生成的结论。
+    if final_content and (tool_calls or is_collaboration):
         console.print(
-            Panel(Markdown(final_content), title="📝 最终答案", border_style="green")
+            Panel(Markdown(final_content), title="结果", border_style="green")
         )
 
     if tool_calls:
-        console.print("[bold]🔧 工具调用[/bold]")
-        for call in tool_calls:
-            success = bool(call.get("success"))
-            status = "✅" if success else "❌"
-            color = "green" if success else "red"
-            tool_name = call["tool"]
-            params = call.get("params", {})
-
-            if tool_name == "write_file":
-                path = params.get("path", "未知文件")
-                lines = len(params.get("content", "").splitlines())
-                console.print(f"[{color}]● Update({path})  {lines} 行[/{color}]")
-            elif tool_name == "read_file":
-                path = params.get("path", "未知路径")
-                console.print(f"[{color}]● Read({path})[/{color}]")
-            elif tool_name == "run_command":
-                command = params.get("command", "")
-                console.print(f"[{color}]● Run({command})[/{color}]")
-            elif tool_name == "web_search":
-                query = params.get("query", "")
-                console.print(f"[{color}]● WebSearch({query})[/{color}]")
-            elif tool_name == "fetch_url":
-                url = params.get("url", "")
-                console.print(f"[{color}]● Fetch({url})[/{color}]")
-            elif tool_name in ("search_project_files", "search_memory"):
-                query = params.get("query", "")
-                console.print(f"[{color}]● Search({query})[/{color}]")
-            else:
-                # 通用兜底：优先关键字段，否则显示全部参数
-                summary = _summarize_params(params)
-                console.print(f"[{color}]● {tool_name}({summary})[/{color}]")
+        summary_text = Text("\n".join(_summarize_tool_activity(tool_calls)))
+        console.print(Panel(summary_text, title="本轮工作", border_style="cyan"))
 
     if files_written:
         file_text = Text("\n".join(f"✓ {f}" for f in files_written))
-        console.print(Panel(file_text, title="📁 已写入文件", border_style="green"))
+        console.print(Panel(file_text, title="交付文件", border_style="green"))
 
     # 模型归属信息
     main_model = agent.gateway.get_main_model() or "unknown"
@@ -468,6 +620,18 @@ def _cmd_plan(gateway: GatewayClient, request: str, output_dir: str, approval_mo
         if result.success:
             for f in result.files_written:
                 console.print(f"  ✓ {f}")
+
+
+def _cmd_test_models(gateway: GatewayClient):
+    """诊断所有已配置模型的连通性并更新进程内健康状态。"""
+    console.print("[bold]🔍 正在测试所有模型连通性...[/bold]")
+    console.print("[dim]每个模型会发送一个最小请求，可能产生少量 token 消耗。[/dim]")
+    for model_name in gateway.models:
+        result = gateway.test_model(model_name)
+        status = "[green]✅ 正常[/green]" if result.get("success") else "[red]❌ 失败[/red]"
+        detail = result.get("error", "") if not result.get("success") else f"{result.get('response_time_ms', 0):.0f}ms"
+        console.print(f"  {model_name}: {status} {detail}")
+    console.print("[dim]失败模型已进入健康冷却，后续对话会暂时跳过。[/dim]")
 
 
 def _cmd_tools():
@@ -625,6 +789,8 @@ def run_chat_loop(
                         store.save(session)
                 elif cmd == "/tools":
                     _cmd_tools()
+                elif cmd == "/test-models":
+                    _cmd_test_models(gateway)
                 elif cmd == "/help":
                     console.print(COMMANDS)
                 else:

@@ -140,6 +140,8 @@ python run.py chat
 
 常用 REPL 命令：
 
+进入对话后输入 `/` 会显示命令候选和说明，继续输入字母可实时过滤；完整列表可用 `/help` 查看。
+
 | 命令 | 说明 |
 |---|---|
 | `/new [标题]` | 创建新会话 |
@@ -151,7 +153,7 @@ python run.py chat
 
 对话产物保存在 `sessions/<session_id>/output/`。
 
-助手回答会**逐块流式打印**到终端，工具调用与文件写入在回答结束后展示。
+助手回答会**逐块流式打印**到终端。项目分析和工具任务按“探索项目 / 检索代码 / 生成交付物 / 执行验证”分阶段展示；每阶段只展开前 4 项，后续同类操作折叠，并在结束时汇总目录、文件、检索、重复操作和失败数量。使用工具后仍会在控制台显示完整最终答案，不需要再手动打开 `response.md` 才能查看结论。
 
 ### 6. 打开 Web 对话页面
 
@@ -161,8 +163,9 @@ python scripts/run_ui.py
 
 浏览器打开 `http://127.0.0.1:8123/chat`：
 
-- 左侧会话列表，点击可切换历史会话。
-- 右侧消息区支持 **SSE 流式显示**，助手回答逐字出现。
+- 桌面端默认突出主对话区，上下文面板按需展开；移动端会话列表为横向选择条，上下文以抽屉显示。
+- 配置页按“服务连接 / 认证与运行 / 模型映射”分组，移动端模型映射自动切换为纵向卡片。
+- 主消息区支持 **SSE 流式显示**，助手回答逐字出现，并保持输入区在当前视口内。
 - 支持 Markdown、代码块、工具调用结果和生成文件展示。
 - 主模型自动调用 `read_file` / `write_file` / `run_command` 工具。
 - 旧的同步接口 `POST /api/chat/sessions/{id}/messages` 仍然保留；新增流式接口 `POST /api/chat/sessions/{id}/messages/stream`。
@@ -206,13 +209,15 @@ ARK_API_KEY=你的火山方舟 Key
 
 Worker 在执行任务时可以使用以下工具：
 
-- **write_file**：自动提取 Markdown 代码块并保存到 `output/<type>_<id>/`
-- **read_file**：读取已有文件内容，格式 ````tool:read_file\n{"path": "relative/path"}\n````
-- **run_command**：运行白名单内的命令，格式 ````tool:run_command\n{"command": "pytest"}\n````
+- **write_file / edit_file**：使用明确路径创建或精确修改文件
+- **read_file / list_dir / glob_files / grep_content**：读取文件、探查目录和搜索内容，支持绝对路径
+- **run_command**：运行白名单内的命令
+- **web_search / fetch_url**：搜索网页和抓取 URL 内容
+- **search_project_files / search_memory**：检索项目索引与长期记忆
 
-工具调用通过模型输出中的 ```` ```tool:xxx ```` 代码块触发，执行结果会嵌入到最终 content 中。
+工具调用支持原生 `tool_use` 和 ```` ```tool:xxx ```` Markdown 兜底。协作 Worker 会把工具结果返回模型继续执行，最多 5 轮。
 
-如果 Worker 响应中没有 Markdown 代码块，会自动把完整内容保存为 `output/<type>_<id>/content.txt`。
+项目文件必须通过 `write_file` 使用明确文件名创建，不再从正文代码块生成 `generated_N`。普通文本结果仍兜底保存为 `output/<type>_<id>/content.txt`。
 
 ## 当前支持的模型
 
@@ -232,7 +237,9 @@ Worker 在执行任务时可以使用以下工具：
 - [x] 总指挥模型运行时动态切换
 - [x] 多模型并发执行
 - [x] 任务依赖 DAG 调度与失败级联
-- [x] Worker 工具调用（read_file / run_command）
+- [x] Worker 多轮工具调用与工具权限校验
+- [x] 多层模型故障切换、健康冷却和 CLI/Web 通知
+- [x] Hooks、MCP stdio/SSE 适配器与本地 LLM Provider
 - [x] 代码块自动保存到 output 目录
 - [x] Provider 连接向导与连通性测试
 - [x] 模型别名与 Provider `model_map`

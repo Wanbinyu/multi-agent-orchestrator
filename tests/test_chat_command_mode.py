@@ -4,8 +4,18 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.document import Document
 
-from src.cli.chat_command import _set_mode
+from src.cli.chat_command import (
+    COMMANDS,
+    SlashCommandCompleter,
+    _cmd_test_models,
+    _format_tool_action,
+    _print_welcome,
+    _set_mode,
+    _summarize_tool_activity,
+)
 from src.core.session import Session
 
 
@@ -57,3 +67,83 @@ def test_set_mode_cycle_logic():
         next_mode = MODES[(idx + 1) % len(MODES)]
         _set_mode(session, agent, mode_ref, next_mode)
         assert mode_ref[0] == expected
+
+
+def test_cmd_test_models_checks_every_model_and_warns_about_cost(capsys):
+    gateway = MagicMock()
+    gateway.models = {"main": MagicMock(), "fallback": MagicMock()}
+    gateway.test_model.side_effect = [
+        {"success": True, "response_time_ms": 12.0, "error": ""},
+        {"success": False, "response_time_ms": 4.0, "error": "429 quota"},
+    ]
+
+    _cmd_test_models(gateway)
+
+    assert [call.args[0] for call in gateway.test_model.call_args_list] == [
+        "main", "fallback",
+    ]
+    output = capsys.readouterr().out
+    assert "少量 token" in output
+    assert "健康冷却" in output
+
+
+def _complete(text: str):
+    completer = SlashCommandCompleter()
+    return list(completer.get_completions(Document(text), CompleteEvent()))
+
+
+def test_slash_command_completion_opens_on_slash():
+    names = {item.text for item in _complete("/")}
+    assert "/new" in names
+    assert "/memory search" in names
+    assert "/tools" in names
+    assert "/exit" in names
+
+
+def test_slash_command_completion_filters_as_user_types():
+    names = {item.text for item in _complete("/memory s")}
+    assert names == {"/memory search", "/memory summarize"}
+
+    names = {item.text for item in _complete("/tes")}
+    assert names == {"/test-models"}
+
+
+def test_slash_command_completion_ignores_normal_text_and_arguments():
+    assert _complete("检查项目") == []
+    assert _complete("/new 项目会话") == []
+
+
+def test_help_remains_available_but_welcome_is_compact(capsys):
+    assert "/memory add" in COMMANDS
+    assert "输入 / 可打开命令列表" in COMMANDS
+
+    _print_welcome("session-1", "approve")
+    output = capsys.readouterr().out
+    assert "输入 / 查看命令" in output
+    assert "/memory add" not in output
+
+
+def test_tool_action_and_summary_are_human_readable_and_compact():
+    assert _format_tool_action("read_file", {"path": "G:/demo/README.md"}) == (
+        "读取文件 G:/demo/README.md"
+    )
+    calls = [
+        {"tool": "list_dir", "params": {"path": "G:/demo"}, "success": True},
+        {"tool": "read_file", "params": {"path": "G:/demo/a.py"}, "success": True},
+        {"tool": "read_file", "params": {"path": "G:/demo/a.py"}, "success": True},
+        {
+            "tool": "write_file",
+            "params": {"path": "G:/demo/plan.md", "content": "one\ntwo"},
+            "success": False,
+            "error": "只读模式",
+        },
+    ]
+
+    summary = "\n".join(_summarize_tool_activity(calls))
+
+    assert "浏览 1 个目录" in summary
+    assert "读取 1 个文件" in summary
+    assert "1 次重复操作" in summary
+    assert "2 次成功，1 次失败" not in summary
+    assert "3 次成功，1 次失败" in summary
+    assert "只读模式" in summary

@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MAO - 对话</title>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260715-ui6">
 </head>
 <body>
   <header class="app-header">
-    <h1>Multi-Agent Orchestrator — 对话模式</h1>
+    <h1><span class="app-brand">MAO</span><span class="page-title">对话模式</span></h1>
     <p class="subtitle">与主模型持续对话，支持读文件、写文件、执行命令</p>
   </header>
 
@@ -17,7 +17,7 @@
     <a href="/chat" class="nav-link active">💬 对话</a>
   </nav>
 
-  <main class="chat-layout">
+  <main class="chat-layout rightbar-collapsed">
     <aside class="chat-sidebar">
       <div class="sidebar-header">
         <h2>会话列表</h2>
@@ -29,7 +29,7 @@
     <section class="chat-main">
       <div class="chat-main-header">
         <span id="mode-indicator" class="mode-indicator" title="Shift+Tab 切换">approve</span>
-        <button id="btn-toggle-rightbar" class="btn btn-secondary btn-sm" type="button">📋 上下文</button>
+        <button id="btn-toggle-rightbar" class="btn btn-secondary btn-sm" type="button" aria-controls="chat-rightbar" aria-expanded="false">📋 上下文</button>
       </div>
       <div id="chat-messages" class="chat-messages"></div>
 
@@ -107,6 +107,23 @@
     </aside>
   </main>
 
-  <script src="/static/js/chat.js"></script>
+  <button id="chat-backdrop" class="chat-backdrop" type="button" aria-label="关闭上下文面板"></button>
+
+  <dialog id="new-session-dialog" class="app-dialog">
+    <form id="new-session-form" class="dialog-form">
+      <div class="dialog-heading">
+        <h2>新建会话</h2>
+        <button id="btn-cancel-session" class="btn btn-icon" type="button" aria-label="关闭">✕</button>
+      </div>
+      <label for="new-session-title">会话标题</label>
+      <input id="new-session-title" type="text" maxlength="80" placeholder="例如：检查 G:\MAO_test" required>
+      <div class="dialog-actions">
+        <button id="btn-cancel-session-secondary" class="btn btn-secondary" type="button">取消</button>
+        <button class="btn btn-primary" type="submit">创建会话</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/js/chat.js?v=20260715-ui6"></script>
 </body>
 </html>

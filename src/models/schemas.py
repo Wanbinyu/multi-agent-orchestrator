@@ -43,6 +43,9 @@ class ModelConfig(BaseModel):
     capabilities: list[str] = Field(default_factory=list, description="模型能力标签，如 tool_use/coding/reasoning/vision")
     max_context_tokens: int = Field(default=0, description="上下文窗口大小；0 表示使用默认值")
     native_tools: bool | None = Field(default=None, description="是否启用原生 tool_use；None=按 capabilities 自动判断")
+    fallback_models: list[str] = Field(default_factory=list, description="主模型失败后的回退模型链")
+    failover_enabled: bool = Field(default=True, description="是否允许自动故障切换")
+    failover_cooldown_seconds: int = Field(default=60, description="模型标记为不健康后的冷却时间（秒）")
 
 
 class WorkerConfig(BaseModel):
@@ -85,11 +88,15 @@ class ChatResponse(BaseModel):
 class StreamChunk(BaseModel):
     """流式输出内部块（Provider -> Gateway -> Agent）"""
 
-    type: Literal["delta", "usage"]
+    type: Literal["delta", "usage", "failover"]
     content: str | None = None  # delta 文本
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    # 故障切换信息
+    from_model: str | None = None
+    to_model: str | None = None
+    reason: str | None = None
 
 
 class ChatStreamEvent(BaseModel):
@@ -105,6 +112,9 @@ class ChatStreamEvent(BaseModel):
         "task_complete",
         "review_complete",
         "permission_request",
+        "model_failover",
+        "tool_start",
+        "tool_complete",
     ]
     delta: str = ""
     input_tokens: int = 0
@@ -122,6 +132,12 @@ class ChatStreamEvent(BaseModel):
 
     # 权限确认请求 payload
     permission_request: dict[str, Any] = Field(default_factory=dict)
+
+    # 模型故障切换 payload
+    failover: dict[str, Any] = Field(default_factory=dict)
+
+    # 单次工具执行进度 payload
+    tool_call: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskResult(BaseModel):

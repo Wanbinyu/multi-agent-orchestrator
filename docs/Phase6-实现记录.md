@@ -158,3 +158,84 @@
 - `src/ui/app.py` - lifespan 启动时 `load_extensions()`。
 
 **结果**：329 passed。
+
+---
+
+## Phase 6.5 - 故障转移与协作稳定性收口 ✅
+
+**背景**：真实项目任务暴露出目录探查失败、正文代码被保存为 `generated_N`、协作漏判和 429 后无法完整回退等问题。断电后对未提交工作区进行完整性审计，并按真实配置形状补齐实现与测试。
+
+### Gateway
+
+- fallback 按每个模型的 `fallback_models` 递归展开并去环，支持 `glm-ark -> kimi-for-coding -> glm-chat`。
+- 认证错误、请求参数错误、模型不可用、配额和连接错误分开处理；`invalid max_tokens` 不再误触发故障切换。
+- 配额冷却优先读取 `Retry-After`，并解析 `5-hour` / minutes / seconds 时间窗口。
+- 冷却中的主模型被跳过时也发送 failover 事件。
+- `/test-models` 走 Provider 正式调用路径，统一 Coding Plan Bearer 鉴权，失败/成功会更新或清除健康状态；命令明确提示少量 token 消耗。
+
+### Agent / Worker / 文件产出
+
+- 新增跨平台 `list_dir`；`glob_files` 增加独立 `path` 搜索根目录参数。
+- 项目类关键字先行触发协作，减少复杂任务漏判。
+- Worker 增加最多 5 轮工具循环，工具结果回填模型后继续执行。
+- 旧 Worker 配置已授予读取能力时，自动补齐 `list_dir` / `glob_files` / `grep_content` / `read_file`。
+- Worker 严格校验工具授权，原生 `tool_use` 与 Markdown 模式共用白名单。
+- 原生模式不再注入 Markdown 工具说明，避免双协议冲突。
+- Agent / Worker / Reviewer 不再把正文代码块自动保存为 `generated_N`。
+- 需要文件但只返回代码块时，Worker 会要求模型改用 `write_file`；再次失败则保存 `content.txt` 并将任务标记失败。
+- CLI 启动页改为简洁提示；输入 `/` 显示命令候选和说明，继续输入按前缀实时过滤，`/help` 保留完整列表。
+
+### 验证
+
+- 新增或扩展：`tests/test_gateway_failover.py`、`tests/test_connection_test.py`、`tests/test_worker.py`、`tests/test_worker_e2e.py`、`tests/test_chat_router_stream.py`、`tests/test_chat_command_mode.py`、`tests/test_agent_fixes.py`、`tests/test_search_tools.py`。
+- `python -m compileall -q src tests scripts` 通过。
+- `python scripts/demo_failover.py` mock 演示通过，使用系统临时目录，不写用户会话。
+- 全量回归：**374 passed**（仅保留 FastAPI/Starlette 测试客户端弃用警告）。
+
+详细根因与剩余限制见 `docs/故障修复与稳定性收口记录.md`。
+
+---
+
+## Phase 6.6 P0 - CLI 结果可见性与过程反馈 ✅
+
+**背景**：真实项目分析任务读取数十个文件后，CLI 只打印原始 `Read(...)` 调用清单和 `response.md` 路径。模型已经生成最终方案，但工具 spinner 覆盖了最后一轮内容，非协作分支没有重新渲染 `assistant_message`。
+
+### 事件协议与 Agent
+
+- `ChatStreamEvent` 新增 `tool_start`、`tool_complete` 和通用 `tool_call` payload。
+- Agent 在实际执行工具前后发送结构化进度事件；拒绝、参数解析失败和执行失败均进入完成事件。
+- Markdown 与原生 `tool_use` 最终都归一到相同的 CLI 事件和汇总路径。
+- Agent 规则明确要求工具结束后输出检查范围、关键发现、建议/下一步和交付文件，禁止以工具调用作为最后输出。
+
+### CLI 展示
+
+- 工具过程按“探索项目 / 检索代码 / 查询资料 / 生成交付物 / 执行验证”组织。
+- 每阶段只展开前 4 项，后续同类操作折叠，避免几十行 `Read(...)` 刷屏。
+- spinner 实时显示已分析的目录、文件、检索、命令或写入数量。
+- “本轮工作”面板汇总唯一目录/文件、重复操作、成功数、失败数及前三个失败原因。
+- 修复单 Agent 使用工具后最终答案不显示的问题；固定展示最终答案和交付文件。
+- 旧的 `Update(未知文件) 0 行` 通用兜底不再作为最终汇总形式。
+
+### WebUI 同期优化
+
+- 顶部标题和导航压缩为应用工作台结构，桌面对话区在 1280px 视口下由约 572px 扩大到约 964px。
+- 上下文默认折叠；中等宽度和移动端改为带遮罩的抽屉。
+- 移动端聊天使用 `100dvh` 剩余空间，会话列表横向滚动，输入区保持可见。
+- 配置页取消双层滚动，字段按服务连接、认证运行、模型映射分组。
+- 移动端模型表转换为纵向卡片，390px 视口无横向溢出。
+- 新建会话使用应用内对话框；历史空标题显示为“未命名会话”。
+- 静态 CSS/JS 增加版本参数，避免升级后继续命中旧缓存。
+
+### 验证
+
+- 新增 `tests/test_chat_command_output.py`，扩展 `tests/test_agent_stream.py` 和 `tests/test_chat_command_mode.py`。
+- JavaScript 语法、Python 编译和 `git diff --check` 通过。
+- WebUI 在 `1280x720`、`390x844` 下完成配置页、聊天页、上下文抽屉和新建会话交互验收，控制台无错误。
+- 全量回归：**376 passed**（仅保留 FastAPI/Starlette 测试客户端弃用警告）。
+
+### 未完成
+
+- `project_tree` 工具与零 token `/tree` 命令。
+- 项目审查固定输出精简目录树。
+- Web 可折叠项目文件树。
+- 单轮只读工具缓存和项目索引复用；当前过程汇总会报告重复读取，但不会减少其 token 消耗。
