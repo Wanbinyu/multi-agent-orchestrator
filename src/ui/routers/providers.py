@@ -25,6 +25,13 @@ class ModelEntry(BaseModel):
     input_price_per_1m: float = 0.0
     output_price_per_1m: float = 0.0
     capabilities: list[str] = Field(default_factory=list)
+    context_window_tokens: int = Field(default=0, ge=0, le=2_000_000)
+    max_output_tokens: int = Field(default=4096, ge=1, le=262_144)
+    context_safety_ratio: float = Field(default=0.08, ge=0.0, le=0.5)
+    compaction_threshold: float = Field(default=0.75, ge=0.25, le=0.95)
+    context_window_source: str = "unverified"
+    context_window_verified_at: str = ""
+    dynamic_model_alias: bool = False
 
 
 class ProviderForm(BaseModel):

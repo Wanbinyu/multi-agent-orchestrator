@@ -38,6 +38,12 @@ class TestPages:
         assert res.status_code == 200
         assert res.json() == {"status": "ok"}
 
+    def test_web_app_loads_dotenv_before_chat_router(self):
+        source = Path("src/ui/app.py").read_text(encoding="utf-8")
+        assert source.index("load_dotenv()") < source.index(
+            "from src.ui.routers import chat"
+        )
+
 
 class TestPresets:
     def test_list_presets(self, client):
@@ -83,6 +89,11 @@ class TestProviderCrud:
                     "input_price_per_1m": 5.0,
                     "output_price_per_1m": 15.0,
                     "capabilities": ["coding"],
+                    "context_window_tokens": 128000,
+                    "max_output_tokens": 8192,
+                    "context_safety_ratio": 0.1,
+                    "compaction_threshold": 0.7,
+                    "context_window_source": "user_config",
                 }
             ],
             "set_as_main": True,
@@ -100,7 +111,28 @@ class TestProviderCrud:
         cfg = res.json()
         assert cfg["providers"]["openai-main"]["api_keys"] == ["${...}"]
         assert cfg["models"]["gpt-4o"]["provider"] == "openai-main"
+        assert cfg["models"]["gpt-4o"]["context_window_tokens"] == 128000
+        assert cfg["models"]["gpt-4o"]["max_output_tokens"] == 8192
+        assert cfg["models"]["gpt-4o"]["compaction_threshold"] == 0.7
         assert cfg["main_model"] == "gpt-4o"
+
+    def test_rejects_invalid_context_budget_fields(self, client):
+        payload = {
+            "preset_key": "openai",
+            "provider_name": "bad-budget",
+            "display_name": "Bad Budget",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "k",
+            "models": [{
+                "alias": "x",
+                "model_id": "x",
+                "context_window_tokens": 32000,
+                "max_output_tokens": 4096,
+                "context_safety_ratio": 0.8,
+            }],
+        }
+        res = client.post("/api/config/providers", json=payload)
+        assert res.status_code == 422
 
     def test_validation_rejects_bad_url(self, client):
         payload = {

@@ -29,12 +29,31 @@ from src.core.session import SessionStore
 from src.core.worker import Worker, load_workers_config
 from src.gateway.client import GatewayClient
 from src.tools.file_tools import write_text_file
+from src.version import __version__
 
 # 加载 .env 文件
 load_dotenv()
 
-app = typer.Typer(help="多模型 Agent 编排工具 CLI")
+app = typer.Typer(
+    help="多模型 Agent 编排工具 CLI",
+    invoke_without_command=True,
+    no_args_is_help=True,
+)
 console = Console()
+
+
+@app.callback()
+def app_callback(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        help="显示版本并退出",
+        is_eager=True,
+    ),
+) -> None:
+    if version:
+        typer.echo(f"MAO {__version__}")
+        raise typer.Exit()
 
 
 @app.command()
@@ -198,8 +217,11 @@ def _maybe_insert_run_subcommand(argv: list[str]) -> list[str]:
     return argv
 
 
-if __name__ == "__main__":
-    import sys
-
+def main() -> None:
+    """Console-script and source checkout entry point."""
     sys.argv = _maybe_insert_run_subcommand(sys.argv)
     app()
+
+
+if __name__ == "__main__":
+    main()

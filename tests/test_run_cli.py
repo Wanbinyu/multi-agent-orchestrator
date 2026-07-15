@@ -11,6 +11,12 @@ from src.models.schemas import ChatResponse, ReviewResult, Task, TaskPlan, TaskR
 runner = CliRunner()
 
 
+def test_version_option():
+    result = runner.invoke(run.app, ["--version"])
+    assert result.exit_code == 0
+    assert "MAO 0.1.0b1" in result.output
+
+
 def test_run_help_shows_all_options():
     result = runner.invoke(run.app, ["run", "--help"])
     assert result.exit_code == 0

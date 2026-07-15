@@ -57,7 +57,11 @@ models:
     input_price_per_1m: 0.5
     output_price_per_1m: 0.5
     capabilities: [tool_use, coding, reasoning]
-    max_context_tokens: 131072   # 上下文窗口，用于自动压缩触发
+    context_window_tokens: 0     # 未验证时保持 0；MAO 使用 32K 保守预算
+    max_output_tokens: 4096
+    context_safety_ratio: 0.08
+    compaction_threshold: 0.75
+    context_window_source: unverified
 
   claude-sonnet-5:
     provider: anthropic
@@ -65,7 +69,9 @@ models:
     input_price_per_1m: 3.0
     output_price_per_1m: 15.0
     capabilities: [tool_use, coding, reasoning, vision]
-    max_context_tokens: 200000
+    context_window_tokens: 0
+    max_output_tokens: 4096
+    context_window_source: unverified
 
   # 本地模型（不计费）
   qwen-local:
@@ -74,7 +80,9 @@ models:
     input_price_per_1m: 0.0
     output_price_per_1m: 0.0
     capabilities: [coding]
-    max_context_tokens: 32768
+    context_window_tokens: 32768
+    max_output_tokens: 4096
+    context_window_source: local_runtime_config
 
   qwen-llamacpp:
     provider: llamacpp
@@ -82,4 +90,6 @@ models:
     input_price_per_1m: 0.0
     output_price_per_1m: 0.0
     capabilities: [coding]
-    max_context_tokens: 4096
+    context_window_tokens: 4096
+    max_output_tokens: 1024
+    context_window_source: local_runtime_config

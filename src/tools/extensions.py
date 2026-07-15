@@ -49,4 +49,10 @@ def load_extensions(config_dir: str = "config") -> dict[str, int]:
 def reset_load_flag() -> None:
     """重置加载标记（供测试使用）"""
     global _loaded
+    tool_registry.shutdown_sources()
     _loaded = False
+
+
+def shutdown_extensions() -> None:
+    """Close MCP/background resources and allow a clean later reload."""
+    reset_load_flag()

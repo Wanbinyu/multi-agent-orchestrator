@@ -202,6 +202,16 @@ def get_session(session_id: str) -> dict[str, Any]:
     }
 
 
+@router.get("/api/chat/sessions/{session_id}/context")
+def get_session_context(session_id: str) -> dict[str, Any]:
+    """Return the deterministic local context budget without calling a model."""
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Agent(gateway, session).get_context_status()
+
+
 @router.get("/api/chat/sessions/{session_id}/runs")
 def list_session_runs(session_id: str) -> dict[str, Any]:
     try:

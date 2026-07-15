@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from src.models.schemas import ChatResponse
+from src.models.schemas import ChatResponse, ModelConfig
 from src.ui.app import app
 from src.ui.routers import chat as chat_router
 
@@ -26,6 +26,12 @@ def client(tmp_path, monkeypatch):
         input_tokens=10,
         output_tokens=5,
         cost_usd=0.0001,
+    )
+    mock_gateway.main_model = "glm"
+    mock_gateway.get_model_config.return_value = ModelConfig(
+        provider="ark",
+        model_id="ark-code-latest",
+        dynamic_model_alias=True,
     )
     monkeypatch.setattr(chat_router, "gateway", mock_gateway)
 
@@ -131,6 +137,20 @@ def test_create_and_list_sessions(client):
 def test_get_session_not_found(client):
     r = client.get("/api/chat/sessions/nonexistent")
     assert r.status_code == 404
+
+
+def test_context_status_is_local_and_explainable(client):
+    session_id = client.post("/api/chat/sessions", json={"title": "context"}).json()["session_id"]
+    response = client.get(f"/api/chat/sessions/{session_id}/context")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["model_alias"] == "glm"
+    assert data["context_window_tokens"] == 0
+    assert data["context_window_source"] == "unverified_default"
+    assert data["input_budget_tokens"] == 32000 - 4096 - 512
+    assert any("动态模型别名" in warning for warning in data["warnings"])
+    chat_router.gateway.chat_with_main_model.assert_not_called()
 
 
 def test_send_message(client):

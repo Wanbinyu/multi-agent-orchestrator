@@ -1,11 +1,58 @@
-# 多模型 Agent 编排工具 —— CLI MVP
+# MAO - Evidence-Driven Multi-Model Engineering Agent
 
-一个**总工模型 + 多外部模型并发协作**的命令行原型工具。目标：解决所有问题都用好用且贵的模型导致token消耗过快的问题，总工用贵模型，其他的分工可以连接便宜但是听话的模型。并且现在很多模型的优势并不相同，未来差异可能更大（也可能更小），如果模型差异化更大那就可以让每个擅长不同工作和方向的模型相互配合，发挥它们各自最大的作用。
-主要目的就是为了省token。
+[![CI](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB)
+![Status](https://img.shields.io/badge/status-v0.1.0--beta.1-f59e0b)
 
-A **Chief Engineer Model + Multi-External Model Concurrent Collaboration** command-line prototype tool. **Goal**: Solve the problem of excessive token consumption caused by using only good but expensive models for all tasks. The Chief Engineer uses the expensive model, while other divisions can connect to cheaper but obedient models. Moreover, different models currently have distinct advantages, and future differences may become even greater (or smaller). If model differentiation increases further, each model can be assigned to tasks and directions it excels at, maximizing their individual strengths.
+MAO 面向需要接入多个模型服务的开发者：它在 CLI 和 WebUI 中执行工程任务，并用明确的读写边界、工具证据、验证门和有界 Worker 协作约束模型行为。核心目标不是单纯增加并发，而是在选择不同模型能力与成本的同时，让使用者知道系统做了什么、为什么能结束、还有哪些风险。
 
-**Primary purpose**: Save tokens.
+当前版本为 `v0.1.0-beta.1` 发布候选。它适合在可信本机和可审查项目中试用，不是 Claude Code、Codex 或容器沙箱的完整替代品。
+
+![MAO WebUI 对话与上下文预算](docs/assets/webui-chat-context.png)
+
+## 五分钟快速开始
+
+要求 Python 3.11 或 3.12。建议在独立虚拟环境中安装：
+
+```bash
+git clone https://github.com/Wanbinyu/multi-agent-orchestrator.git
+cd multi-agent-orchestrator
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
+python -m pip install -e .
+```
+
+启动本地配置与聊天界面：
+
+```bash
+mao-ui
+```
+
+浏览器打开 `http://127.0.0.1:8123`。添加 Provider、测试连接、选择主模型后进入“对话”。密钥只写入本地 `.env`，不要提交该文件。也可以使用 CLI：
+
+```bash
+mao agent-setup
+mao chat
+```
+
+尚未配置付费 Provider 时，可以先运行全部离线测试和长会话基准：
+
+```bash
+python -m pip install -e ".[test]"
+python -m pytest -q
+python -m scripts.context_benchmark
+```
+
+## 已知限制与安全边界
+
+- MAO 尚无容器级沙箱；命令以当前进程权限在本机执行。默认推荐 `approve`，不信任的项目使用 `readonly`。
+- Provider 的鉴权、流式和原生工具兼容性不同；动态模型别名可能不暴露准确模型版本或硬上下文窗口。
+- 未验证模型使用 32K 保守安全预算。该数字是 MAO 的本地保护值，不代表上游物理上限。
+- 自动 CI 不调用真实付费模型；真实 Provider、多模型协作和摘要质量仍需人工烟雾验收。
+- MCP Server 与 Hooks 是以 MAO 进程权限运行的第三方扩展，启用前必须审查配置和来源。
+
+完整安全边界见 [`SECURITY.md`](SECURITY.md)，Beta 发布状态见 [`docs/开源发布准备计划.md`](docs/开源发布准备计划.md)。
 
 ## 目录结构
 

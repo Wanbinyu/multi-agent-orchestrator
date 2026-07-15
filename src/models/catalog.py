@@ -21,6 +21,11 @@ class ModelCatalogEntry:
         input_price_per_1m: float = 0.0,
         output_price_per_1m: float = 0.0,
         description: str = "",
+        context_window_tokens: int = 0,
+        max_output_tokens: int = 4096,
+        context_window_source: str = "unverified",
+        context_window_verified_at: str = "",
+        dynamic_model_alias: bool = False,
     ):
         self.alias = alias
         self.name = name
@@ -30,6 +35,11 @@ class ModelCatalogEntry:
         self.input_price_per_1m = input_price_per_1m
         self.output_price_per_1m = output_price_per_1m
         self.description = description
+        self.context_window_tokens = context_window_tokens
+        self.max_output_tokens = max_output_tokens
+        self.context_window_source = context_window_source
+        self.context_window_verified_at = context_window_verified_at
+        self.dynamic_model_alias = dynamic_model_alias
 
     def to_model_config(self, provider_name: str) -> dict[str, Any]:
         """生成 providers.yaml 中 models 段的配置"""
@@ -39,6 +49,11 @@ class ModelCatalogEntry:
             "input_price_per_1m": self.input_price_per_1m,
             "output_price_per_1m": self.output_price_per_1m,
             "capabilities": self.capabilities,
+            "context_window_tokens": self.context_window_tokens,
+            "max_output_tokens": self.max_output_tokens,
+            "context_window_source": self.context_window_source,
+            "context_window_verified_at": self.context_window_verified_at,
+            "dynamic_model_alias": self.dynamic_model_alias,
         }
 
 
@@ -54,6 +69,8 @@ BUILTIN_MODELS: dict[str, ModelCatalogEntry] = {
         input_price_per_1m=1.0,
         output_price_per_1m=1.0,
         description="火山方舟 Coding Plan，兼容 Anthropic Messages API",
+        context_window_source="unverified_dynamic_alias",
+        dynamic_model_alias=True,
     ),
     "glm-chat": ModelCatalogEntry(
         alias="glm-chat",
@@ -64,6 +81,8 @@ BUILTIN_MODELS: dict[str, ModelCatalogEntry] = {
         input_price_per_1m=1.0,
         output_price_per_1m=1.0,
         description="火山方舟 Chat，兼容 Anthropic Messages API",
+        context_window_source="unverified_dynamic_alias",
+        dynamic_model_alias=True,
     ),
     "kimi-for-coding": ModelCatalogEntry(
         alias="kimi-for-coding",

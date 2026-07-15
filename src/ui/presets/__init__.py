@@ -82,6 +82,13 @@ def expand_preset_models(preset_key: str) -> list[dict[str, Any]]:
             "input_price_per_1m": data.get("input_price_per_1m", 0.0),
             "output_price_per_1m": data.get("output_price_per_1m", 0.0),
             "capabilities": data.get("capabilities", []),
+            "context_window_tokens": data.get("context_window_tokens", 0),
+            "max_output_tokens": data.get("max_output_tokens", 4096),
+            "context_safety_ratio": data.get("context_safety_ratio", 0.08),
+            "compaction_threshold": data.get("compaction_threshold", 0.75),
+            "context_window_source": data.get("context_window_source", "unverified"),
+            "context_window_verified_at": data.get("context_window_verified_at", ""),
+            "dynamic_model_alias": data.get("dynamic_model_alias", False),
         }
         for alias, data in preset.get("models", {}).items()
     ]

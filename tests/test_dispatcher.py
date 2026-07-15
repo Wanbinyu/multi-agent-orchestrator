@@ -1,5 +1,7 @@
 """Dispatcher 依赖调度单元测试"""
 from unittest.mock import MagicMock
+from contextlib import redirect_stdout
+import io
 import threading
 import time
 
@@ -65,6 +67,20 @@ def test_dispatch_parallel_when_no_dependencies():
     assert all(r.success for r in results)
     worker.execute.assert_any_call(t1, "output", {}, None, None)
     worker.execute.assert_any_call(t2, "output", {}, None, None)
+
+
+def test_default_progress_output_is_safe_on_windows_gbk_console():
+    task = Task(id="t1", type="test", title="编码验收", input="", assigned_model="glm-ark")
+    worker = _mock_worker({"t1": _success_result(task)})
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="gbk", errors="strict")
+
+    with redirect_stdout(stream):
+        results = Dispatcher(worker, max_workers=1).dispatch(TaskPlan(tasks=[task]))
+    stream.flush()
+
+    assert results[0].success is True
+    assert "成功" in raw.getvalue().decode("gbk")
 
 
 def test_dispatch_respects_dependencies():

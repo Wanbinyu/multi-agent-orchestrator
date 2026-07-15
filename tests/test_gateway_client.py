@@ -4,8 +4,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+from src.core.context_budget import ContextBudgetExceeded
 from src.gateway.client import Billing, GatewayClient
-from src.models.schemas import ChatResponse, ModelConfig
+from src.models.schemas import ChatMessage, ChatResponse, ModelConfig
 
 
 def _sample_providers_yaml(main_model: str | None = "glm-ark"):
@@ -110,6 +111,23 @@ def test_chat_returns_response_and_records_billing(tmp_path, monkeypatch):
     assert client.billing.total_cost_usd == 0.001
     assert len(client.billing.calls) == 1
     assert client.billing.calls[0]["task_id"] == "task-1"
+
+
+def test_chat_rejects_oversized_context_before_provider_call(tmp_path, monkeypatch):
+    client, provider = _make_client(tmp_path, monkeypatch)
+    client.models["glm-ark"] = ModelConfig(
+        provider="ark",
+        model_id="ark-code-latest",
+        context_window_tokens=8192,
+        max_output_tokens=4096,
+        context_safety_ratio=0.1,
+    )
+    messages = [ChatMessage(role="user", content="x" * 30_000)]
+
+    with pytest.raises(ContextBudgetExceeded, match="发送前阻止请求"):
+        client.chat(messages, "glm-ark", max_tokens=4096)
+
+    provider.chat.assert_not_called()
 
 
 def test_chat_retries_then_succeeds(tmp_path, monkeypatch):

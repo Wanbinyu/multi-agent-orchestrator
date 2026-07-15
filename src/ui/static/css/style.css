@@ -367,6 +367,7 @@ body::before {
 }
 
 .model-table {
+  min-width: 1180px;
   width: 100%;
   min-width: 760px;
   border-collapse: separate;
@@ -866,6 +867,58 @@ body::before {
   color: var(--text);
   font-size: 0.75rem;
   word-break: break-word;
+}
+
+.context-budget {
+  margin: 0.9rem 0;
+  padding: 0.8rem 0;
+  border-top: 1px solid var(--panel-border);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.context-budget-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.context-budget-head strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.context-budget-track {
+  height: 5px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+  background: rgba(148, 163, 184, 0.16);
+  border-radius: 3px;
+}
+
+.context-budget-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--success);
+  transition: width 0.2s ease;
+}
+
+.context-budget-track span.warning {
+  background: var(--warning);
+}
+
+.context-budget-meta {
+  gap: 0.35rem;
+}
+
+.context-budget-warning {
+  margin-top: 0.65rem;
+  color: var(--warning);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .memory-form {

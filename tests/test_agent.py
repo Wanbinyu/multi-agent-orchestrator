@@ -55,7 +55,10 @@ def test_context_status_and_system_prompt_use_runtime_facts(tmp_path):
     assert status["model_alias"] == "glm-ark"
     assert status["model_id"] == "ark-code-latest"
     assert status["max_context_tokens"] == 131072
-    assert status["compaction_limit_tokens"] == 98304
+    assert status["input_budget_tokens"] == 126464
+    assert status["compaction_limit_tokens"] == 94848
+    assert status["context_window_tokens"] == 0
+    assert status["context_window_source"] == "legacy_max_context_tokens"
     assert status["max_context_source"] == "model_config"
     assert "anthropic 仅表示 API 兼容协议" in prompt
     assert "不得猜测其他模型配置" in prompt
@@ -74,7 +77,9 @@ def test_context_status_uses_agent_default_when_model_has_no_limit(tmp_path):
     status = agent.get_context_status()
 
     assert status["max_context_tokens"] == 32000
-    assert status["compaction_limit_tokens"] == 24000
+    assert status["input_budget_tokens"] == 27392
+    assert status["compaction_limit_tokens"] == 20544
+    assert "32K" in status["warnings"][0]
     assert status["max_context_source"] == "agent_default"
 
 

@@ -68,6 +68,21 @@
           <div class="meta-item"><span>创建</span><span id="ctx-session-created">-</span></div>
           <div class="meta-item"><span>更新</span><span id="ctx-session-updated">-</span></div>
         </div>
+        <div class="context-budget" id="ctx-budget">
+          <div class="context-budget-head">
+            <span>模型预算</span>
+            <strong id="ctx-budget-usage">-</strong>
+          </div>
+          <div class="context-budget-track" aria-hidden="true"><span id="ctx-budget-bar"></span></div>
+          <div class="meta-list context-budget-meta">
+            <div class="meta-item"><span>上游窗口</span><span id="ctx-budget-window">-</span></div>
+            <div class="meta-item"><span>输入预算</span><span id="ctx-budget-input">-</span></div>
+            <div class="meta-item"><span>剩余</span><span id="ctx-budget-remaining">-</span></div>
+            <div class="meta-item"><span>输出预留</span><span id="ctx-budget-output">-</span></div>
+            <div class="meta-item"><span>来源</span><span id="ctx-budget-source">-</span></div>
+          </div>
+          <div id="ctx-budget-warning" class="context-budget-warning hidden"></div>
+        </div>
         <button id="btn-summarize-session" class="btn btn-primary btn-sm btn-block" type="button">📝 总结会话</button>
         <div id="ctx-summarize-status" class="section-status hidden"></div>
         </div>

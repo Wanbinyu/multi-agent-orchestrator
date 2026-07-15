@@ -32,6 +32,14 @@
     ctxSessionMode: document.getElementById("ctx-session-mode"),
     ctxSessionCreated: document.getElementById("ctx-session-created"),
     ctxSessionUpdated: document.getElementById("ctx-session-updated"),
+    ctxBudgetUsage: document.getElementById("ctx-budget-usage"),
+    ctxBudgetBar: document.getElementById("ctx-budget-bar"),
+    ctxBudgetWindow: document.getElementById("ctx-budget-window"),
+    ctxBudgetInput: document.getElementById("ctx-budget-input"),
+    ctxBudgetRemaining: document.getElementById("ctx-budget-remaining"),
+    ctxBudgetOutput: document.getElementById("ctx-budget-output"),
+    ctxBudgetSource: document.getElementById("ctx-budget-source"),
+    ctxBudgetWarning: document.getElementById("ctx-budget-warning"),
     btnSummarizeSession: document.getElementById("btn-summarize-session"),
     ctxSummarizeStatus: document.getElementById("ctx-summarize-status"),
     memoryList: document.getElementById("memory-list"),
@@ -219,9 +227,38 @@
   }
 
   async function loadContextSidebar() {
-    await loadMemories();
-    await loadIndexStatus();
+    await Promise.all([loadContextBudget(), loadMemories(), loadIndexStatus()]);
     clearTurnLog();
+  }
+
+  async function loadContextBudget() {
+    if (!state.currentSessionId || !els.ctxBudgetUsage) return;
+    try {
+      const data = await api(
+        `/api/chat/sessions/${encodeURIComponent(state.currentSessionId)}/context`
+      );
+      const used = Number(data.current_input_tokens ?? data.current_tokens ?? 0);
+      const budget = Number(data.input_budget_tokens || 0);
+      const remaining = Number(data.remaining_input_tokens ?? budget - used);
+      const percent = budget > 0 ? Math.min(100, Math.max(0, (used / budget) * 100)) : 0;
+      els.ctxBudgetUsage.textContent = `${used.toLocaleString()} / ${budget.toLocaleString()}`;
+      els.ctxBudgetBar.style.width = `${percent.toFixed(1)}%`;
+      els.ctxBudgetBar.classList.toggle("warning", percent >= 75);
+      els.ctxBudgetWindow.textContent = data.context_window_tokens
+        ? `${Number(data.context_window_tokens).toLocaleString()} tokens`
+        : "未知";
+      els.ctxBudgetInput.textContent = `${budget.toLocaleString()} tokens`;
+      els.ctxBudgetRemaining.textContent = `${remaining.toLocaleString()} tokens`;
+      els.ctxBudgetOutput.textContent = `${Number(data.output_reserve_tokens || 0).toLocaleString()} tokens`;
+      els.ctxBudgetSource.textContent = data.context_window_source || "unverified";
+      const warnings = data.warnings || [];
+      els.ctxBudgetWarning.textContent = warnings.join("；");
+      els.ctxBudgetWarning.classList.toggle("hidden", warnings.length === 0);
+    } catch (err) {
+      els.ctxBudgetUsage.textContent = "不可用";
+      els.ctxBudgetWarning.textContent = err.message;
+      els.ctxBudgetWarning.classList.remove("hidden");
+    }
   }
 
   async function loadMemories(category = "") {

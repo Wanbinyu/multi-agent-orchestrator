@@ -1,0 +1,19 @@
+{
+  "benchmark": "minimum-offline-long-session",
+  "provider_calls": 0,
+  "messages_before": 39,
+  "messages_after": 8,
+  "tokens_before": 3919,
+  "tokens_after": 796,
+  "compactions": 1,
+  "session_recovered": true,
+  "critical_facts_total": 3,
+  "critical_facts_retained": 3,
+  "critical_fact_retention": 1.0,
+  "passed": true,
+  "elapsed_ms": 168.98,
+  "limitations": [
+    "Uses a deterministic offline summarizer; real model summary quality requires manual smoke testing.",
+    "Covers one compaction and recovery, not the post-beta three-compaction benchmark."
+  ]
+}

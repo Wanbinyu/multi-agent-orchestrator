@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a reproducible MAO defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Include the command or UI flow, with all keys removed.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MAO version
+      placeholder: 0.1.0b1
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, Ubuntu/Linux, macOS, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant sanitized output
+      description: Never include API keys, private prompts, or session contents.
+      render: shell

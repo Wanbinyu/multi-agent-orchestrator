@@ -1,0 +1,36 @@
+{
+  "scenario": "real-two-model-read-only-collaboration",
+  "tasks": [
+    {
+      "id": "glm-read",
+      "model": "glm-ark",
+      "success": true,
+      "attempts": 1,
+      "expected_marker_present": true,
+      "tool_calls": 0,
+      "isolated_artifacts": 1,
+      "project_files_written": 0,
+      "input_tokens": 319,
+      "output_tokens": 183,
+      "cost_usd": 0.0005020000000000001,
+      "error_category": "none"
+    },
+    {
+      "id": "kimi-read",
+      "model": "kimi-for-coding",
+      "success": true,
+      "attempts": 1,
+      "expected_marker_present": true,
+      "tool_calls": 0,
+      "isolated_artifacts": 1,
+      "project_files_written": 0,
+      "input_tokens": 109,
+      "output_tokens": 17,
+      "cost_usd": 0.000126,
+      "error_category": "none"
+    }
+  ],
+  "passed": true,
+  "boundary": "read-only; no project writes",
+  "automated_in_ci": false
+}

@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from src.core.compactor import ContextCompactor
+from src.core.context_budget import ContextBudgetManager
 from src.core.engineering import (
     CompletionAuditor,
     Evidence,
@@ -144,6 +145,9 @@ class Agent:
         self.memory_store = memory_store
         self.max_context_tokens = max_context_tokens
         self.compaction_threshold = compaction_threshold
+        self.context_budget_manager = ContextBudgetManager(
+            default_safe_context_tokens=max_context_tokens
+        )
         self._pending_permissions: dict[str, asyncio.Event] = {}
         self._permission_results: dict[str, bool] = {}
         self._native_tools_cache: list[dict[str, Any]] | None = None
@@ -341,13 +345,19 @@ class Agent:
         return {"tools": tools} if tools else {}
 
     def _get_effective_max_context(self) -> int:
-        """取主模型配置的上下文窗口；未配置则用默认值"""
+        """Return the current model's safe input budget for compaction."""
         main_model = self.gateway.main_model
         if main_model:
             try:
                 cfg = self.gateway.get_model_config(main_model)
-                if cfg.max_context_tokens and cfg.max_context_tokens > 0:
-                    return cfg.max_context_tokens
+                budget = self.context_budget_manager.calculate(
+                    main_model,
+                    cfg,
+                    self.session.messages,
+                    requested_output_tokens=cfg.max_output_tokens,
+                    tools=self._get_native_tools(),
+                )
+                return budget.input_budget_tokens
             except Exception:
                 pass
         return self.max_context_tokens
@@ -360,46 +370,53 @@ class Agent:
 
         provider = ""
         model_id = ""
-        configured_max = 0
+        cfg = None
         if main_model:
             try:
                 cfg = self.gateway.get_model_config(main_model)
                 provider = cfg.provider
                 model_id = cfg.model_id
-                if isinstance(cfg.max_context_tokens, int) and cfg.max_context_tokens > 0:
-                    configured_max = cfg.max_context_tokens
             except Exception:
-                pass
+                cfg = None
 
-        max_context_tokens = configured_max or self.max_context_tokens
-        compaction_limit = (
-            int(max_context_tokens * self.compaction_threshold)
-            if max_context_tokens > 0
-            else 0
+        if cfg is None:
+            cfg = ModelConfig(provider=provider or "unknown", model_id=model_id or "unknown")
+        budget = self.context_budget_manager.calculate(
+            main_model or "unknown",
+            cfg,
+            self.session.messages,
+            requested_output_tokens=cfg.max_output_tokens,
+            tools=self._get_native_tools(),
         )
-        current_tokens = count_messages_tokens(self.session.messages)
-        return {
+        status = budget.to_dict()
+        status.update({
             "model_alias": main_model or "unknown",
             "provider": provider or "unknown",
             "model_id": model_id or "unknown",
-            "max_context_tokens": max_context_tokens,
-            "max_context_source": "model_config" if configured_max else "agent_default",
-            "current_tokens": current_tokens,
-            "compaction_enabled": max_context_tokens > 0,
-            "compaction_threshold": self.compaction_threshold,
-            "compaction_limit_tokens": compaction_limit,
-        }
+            # Compatibility keys for existing CLI/Web consumers.
+            "max_context_tokens": budget.safe_context_tokens,
+            "max_context_source": (
+                "model_config"
+                if cfg.context_window_tokens > 0 or cfg.max_context_tokens > 0
+                else "agent_default"
+            ),
+            "current_tokens": budget.current_input_tokens,
+            "compaction_enabled": budget.input_budget_tokens > 0,
+            "compaction_limit_tokens": budget.compaction_trigger_tokens,
+        })
+        return status
 
     def _runtime_facts_prompt(self) -> str:
         """把稳定的运行参数告诉模型，避免把协议类型误认为模型身份。"""
         status = self.get_context_status()
-        source = "模型配置" if status["max_context_source"] == "model_config" else "Agent 默认值"
+        source = status["context_window_source"]
         enabled = "已启用" if status["compaction_enabled"] else "未启用"
         return (
             "【MAO 运行时事实】\n"
             f"- 当前主模型别名：{status['model_alias']}；Provider：{status['provider']}；"
             f"上游请求模型 ID：{status['model_id']}。\n"
-            f"- MAO 本地上下文预算：{status['max_context_tokens']} tokens（{source}）；"
+            f"- 上游硬窗口：{status['context_window_tokens'] or '未知'} tokens（{source}）；"
+            f"MAO 安全输入预算：{status['input_budget_tokens']} tokens；"
             f"自动压缩：{enabled}；触发阈值约 {status['compaction_limit_tokens']} tokens "
             f"（{status['compaction_threshold']:.0%}）。\n"
             "- Provider 类型 anthropic 仅表示 API 兼容协议，不表示当前模型是 Claude。\n"
@@ -414,7 +431,7 @@ class Agent:
         compactor = ContextCompactor(
             self.gateway,
             max_context_tokens=max_ctx,
-            threshold=self.compaction_threshold,
+            threshold=self.get_context_status()["compaction_threshold"],
         )
         if not compactor.needs_compaction(self.session.messages):
             return False

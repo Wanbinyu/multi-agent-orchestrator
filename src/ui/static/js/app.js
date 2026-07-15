@@ -188,6 +188,9 @@
 
   function addModelRow(model = null) {
     const tr = document.createElement("tr");
+    tr.dataset.contextSource = model?.context_window_source || "unverified";
+    tr.dataset.contextVerifiedAt = model?.context_window_verified_at || "";
+    tr.dataset.dynamicAlias = model?.dynamic_model_alias ? "true" : "false";
     tr.innerHTML = `
       <td data-label="逻辑别名"><input type="text" class="model-alias" value="${escapeHtml(
         model?.alias || ""
@@ -200,6 +203,10 @@
       <td data-label="能力标签"><input type="text" class="model-caps" value="${escapeHtml(
         (model?.capabilities || []).join(", ")
       )}" placeholder="coding, tool_use"></td>
+      <td data-label="上游窗口"><input type="number" class="model-context-window" value="${model?.context_window_tokens ?? 0}" min="0" max="2000000" step="1024" title="0 表示未知，使用 32K 保守预算"></td>
+      <td data-label="输出预留"><input type="number" class="model-max-output" value="${model?.max_output_tokens ?? 4096}" min="1" max="262144" step="256"></td>
+      <td data-label="安全余量"><input type="number" class="model-safety-ratio" value="${Math.round((model?.context_safety_ratio ?? 0.08) * 100)}" min="0" max="50" step="1" title="占上游硬窗口的百分比"></td>
+      <td data-label="压缩阈值"><input type="number" class="model-compaction-threshold" value="${Math.round((model?.compaction_threshold ?? 0.75) * 100)}" min="25" max="95" step="1" title="占安全输入预算的百分比"></td>
       <td class="model-row-actions"><button type="button" class="btn btn-danger btn-sm btn-remove-model">删除</button></td>
     `;
     tr.querySelector(".btn-remove-model").addEventListener("click", () => tr.remove());
@@ -222,9 +229,23 @@
           .value.split(",")
           .map((s) => s.trim())
           .filter(Boolean),
+        context_window_tokens: parseInt(row.querySelector(".model-context-window").value, 10) || 0,
+        max_output_tokens: parseInt(row.querySelector(".model-max-output").value, 10) || 4096,
+        context_safety_ratio: (parseFloat(row.querySelector(".model-safety-ratio").value) || 0) / 100,
+        compaction_threshold: (parseFloat(row.querySelector(".model-compaction-threshold").value) || 75) / 100,
+        context_window_source: modelContextSource(row),
+        context_window_verified_at: row.dataset.contextVerifiedAt || "",
+        dynamic_model_alias: row.dataset.dynamicAlias === "true",
       });
     }
     return models;
+  }
+
+  function modelContextSource(row) {
+    if ((parseInt(row.querySelector(".model-context-window").value, 10) || 0) === 0) {
+      return row.dataset.dynamicAlias === "true" ? "unverified_dynamic_alias" : "unverified";
+    }
+    return row.dataset.contextSource || "user_config";
   }
 
   function editProvider(name) {
@@ -252,6 +273,13 @@
         input_price_per_1m: data.input_price_per_1m,
         output_price_per_1m: data.output_price_per_1m,
         capabilities: data.capabilities || [],
+        context_window_tokens: data.context_window_tokens || 0,
+        max_output_tokens: data.max_output_tokens || 4096,
+        context_safety_ratio: data.context_safety_ratio ?? 0.08,
+        compaction_threshold: data.compaction_threshold ?? 0.75,
+        context_window_source: data.context_window_source || "unverified",
+        context_window_verified_at: data.context_window_verified_at || "",
+        dynamic_model_alias: data.dynamic_model_alias === true,
       }));
     renderModelRowsFromPreset(owned);
     renderProviderList();

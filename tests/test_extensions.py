@@ -50,3 +50,14 @@ def test_load_extensions_mcp_missing_package(tmp_path):
     stats = extensions.load_extensions(str(tmp_path))
     # 源被加入（即使 mcp 未安装，构造时不连接）
     assert stats["mcp_sources"] == 1
+
+
+def test_shutdown_extensions_closes_and_removes_sources():
+    from unittest.mock import MagicMock
+
+    source = MagicMock()
+    source.list_tools.return_value = []
+    tool_registry.add_source(source)
+    extensions.shutdown_extensions()
+    source.shutdown.assert_called_once()
+    assert tool_registry._sources == []

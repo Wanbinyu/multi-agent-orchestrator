@@ -93,7 +93,7 @@ class Dispatcher:
                 payload["acceptance_evidence"] = result.acceptance_evidence
                 progress_callback("task_complete", payload)
             else:
-                status = "✅" if result.success else "❌"
+                status = "成功" if result.success else "失败"
                 print(f"[{status}] {tasks[task_id].type}: {tasks[task_id].title}")
 
         def execute_with_retry(task_id: str, context: dict[str, str]) -> TaskResult:
@@ -265,7 +265,7 @@ class Dispatcher:
                         payload["files_written"] = []
                         progress_callback("task_complete", payload)
                     else:
-                        print(f"[❌] {tasks[task_id].type}: {tasks[task_id].title}")
+                        print(f"[失败] {tasks[task_id].type}: {tasks[task_id].title}")
                         print(f"    错误: {result.error}")
                     queue.append(task_id)
 

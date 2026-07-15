@@ -25,6 +25,9 @@ def test_model_entry_attributes():
     assert entry.provider_type == "anthropic"
     assert entry.default_model_id == "ark-code-latest"
     assert "tool_use" in entry.capabilities
+    assert entry.dynamic_model_alias is True
+    assert entry.context_window_tokens == 0
+    assert "unverified" in entry.context_window_source
 
 
 def test_model_config_conversion():
@@ -33,6 +36,7 @@ def test_model_config_conversion():
     assert cfg["provider"] == "ark"
     assert cfg["model_id"] == "ark-code-latest"
     assert "capabilities" in cfg
+    assert cfg["dynamic_model_alias"] is True
 
 
 def test_provider_templates():

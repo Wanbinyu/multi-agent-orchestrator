@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from src.core.context_budget import ContextBudget, ContextBudgetManager
 from src.gateway.provider import BaseProvider, create_provider
 from src.gateway.router import ModelRouter
 from src.models.schemas import ChatMessage, ChatResponse, ModelConfig, ProviderConfig, StreamChunk
@@ -83,7 +84,46 @@ class GatewayClient:
         self._unhealthy_models: dict[str, float] = {}
         # 最近一次非流式调用发生的故障切换信息
         self.last_failover: dict[str, str] | None = None
+        self.context_budget_manager = ContextBudgetManager()
+        self.last_context_budget: ContextBudget | None = None
         self._load_config(config_path)
+
+    def get_context_budget(
+        self,
+        model_name: str,
+        messages: list[ChatMessage],
+        *,
+        max_tokens: int = 4096,
+        tools: Any = None,
+    ) -> ContextBudget:
+        config = self.get_model_config(model_name)
+        manager = getattr(self, "context_budget_manager", None)
+        if manager is None:
+            manager = ContextBudgetManager()
+            self.context_budget_manager = manager
+        return manager.calculate(
+            model_name,
+            config,
+            messages,
+            requested_output_tokens=max_tokens,
+            tools=tools,
+        )
+
+    def _validate_context_request(
+        self,
+        model_name: str,
+        messages: list[ChatMessage],
+        kwargs: dict[str, Any],
+    ) -> ContextBudget:
+        budget = self.get_context_budget(
+            model_name,
+            messages,
+            max_tokens=kwargs.get("max_tokens", 4096),
+            tools=kwargs.get("tools"),
+        )
+        self.last_context_budget = budget
+        self.context_budget_manager.ensure_fits(budget)
+        return budget
 
     def _load_config(self, config_path: str):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -301,6 +341,8 @@ class GatewayClient:
             if not provider:
                 continue
 
+            self._validate_context_request(current_model, messages, kwargs)
+
             tried_models += 1
             for attempt in range(max_retries + 1):
                 try:
@@ -399,6 +441,8 @@ class GatewayClient:
             provider = self.providers.get(model_config.provider)
             if not provider:
                 continue
+
+            self._validate_context_request(current_model, messages, kwargs)
 
             tried_models += 1
             chunks_yielded = 0

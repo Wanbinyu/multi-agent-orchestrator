@@ -47,7 +47,10 @@ def count_tokens(text: str) -> int:
 
 def count_message_tokens(message: ChatMessage) -> int:
     """估算单条消息的 token 数（含开销）"""
-    return count_tokens(message.content) + _PER_MESSAGE_OVERHEAD
+    content = getattr(message, "content", "")
+    if not isinstance(content, str):
+        content = str(content)
+    return count_tokens(content) + _PER_MESSAGE_OVERHEAD
 
 
 def count_messages_tokens(messages: Iterable[ChatMessage]) -> int:

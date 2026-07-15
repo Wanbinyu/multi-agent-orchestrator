@@ -179,6 +179,13 @@ def save_provider(
             "input_price_per_1m": float(m.get("input_price_per_1m", 0.0)),
             "output_price_per_1m": float(m.get("output_price_per_1m", 0.0)),
             "capabilities": m.get("capabilities", []),
+            "context_window_tokens": int(m.get("context_window_tokens", 0)),
+            "max_output_tokens": int(m.get("max_output_tokens", 4096)),
+            "context_safety_ratio": float(m.get("context_safety_ratio", 0.08)),
+            "compaction_threshold": float(m.get("compaction_threshold", 0.75)),
+            "context_window_source": m.get("context_window_source", "unverified"),
+            "context_window_verified_at": m.get("context_window_verified_at", ""),
+            "dynamic_model_alias": bool(m.get("dynamic_model_alias", False)),
         }
 
     if set_as_main or not cfg.get("main_model"):

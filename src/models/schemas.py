@@ -58,7 +58,47 @@ class ModelConfig(BaseModel):
     input_price_per_1m: float = 0.0
     output_price_per_1m: float = 0.0
     capabilities: list[str] = Field(default_factory=list, description="模型能力标签，如 tool_use/coding/reasoning/vision")
-    max_context_tokens: int = Field(default=0, description="上下文窗口大小；0 表示使用默认值")
+    max_context_tokens: int = Field(
+        default=0,
+        ge=0,
+        description="兼容旧配置的 MAO 安全预算；新配置优先使用 context_window_tokens",
+    )
+    context_window_tokens: int = Field(
+        default=0,
+        ge=0,
+        le=2_000_000,
+        description="上游声明的硬上下文窗口；0 表示未知",
+    )
+    max_output_tokens: int = Field(
+        default=4096,
+        ge=1,
+        le=262_144,
+        description="单次请求最大输出与默认输出预留",
+    )
+    context_safety_ratio: float = Field(
+        default=0.08,
+        ge=0.0,
+        le=0.5,
+        description="为计数误差和 Provider 波动预留的硬窗口比例",
+    )
+    compaction_threshold: float = Field(
+        default=0.75,
+        ge=0.25,
+        le=0.95,
+        description="达到安全输入预算的该比例时开始压缩",
+    )
+    context_window_source: str = Field(
+        default="unverified",
+        description="窗口信息来源；unknown/unverified 不视为官方上限",
+    )
+    context_window_verified_at: str = Field(
+        default="",
+        description="窗口信息最近验证日期，ISO 8601 日期",
+    )
+    dynamic_model_alias: bool = Field(
+        default=False,
+        description="上游 ID 是否为可能动态路由的模型别名",
+    )
     native_tools: bool | None = Field(default=None, description="是否启用原生 tool_use；None=按 capabilities 自动判断")
     fallback_models: list[str] = Field(default_factory=list, description="主模型失败后的回退模型链")
     failover_enabled: bool = Field(default=True, description="是否允许自动故障切换")

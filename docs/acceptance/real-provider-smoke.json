@@ -1,0 +1,17 @@
+{
+  "scenario": "fresh-web-provider-conversation",
+  "executed_at": "2026-07-15T17:41:10+08:00",
+  "platform": "Windows / Python 3.11.9",
+  "model_alias": "glm-ark",
+  "upstream_model_id": "ark-code-latest",
+  "dynamic_model_alias": true,
+  "endpoint": "https://ark.cn-beijing.volces.com/api/coding",
+  "synthetic_prompt": "只回答 OK",
+  "expected_marker_present": true,
+  "input_tokens": 1547,
+  "output_tokens": 4,
+  "cost_usd": 0.001551,
+  "run_status": "completed",
+  "passed": true,
+  "credentials_recorded": false
+}

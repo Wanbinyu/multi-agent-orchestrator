@@ -7,6 +7,11 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from dotenv import load_dotenv
+
+# The Web entry points import this module directly, bypassing run.py. Load local
+# credentials before chat.router constructs its process-wide GatewayClient.
+load_dotenv()
 
 from src.ui.routers import chat, memory, providers
 
@@ -14,10 +19,13 @@ from src.ui.routers import chat, memory, providers
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时加载 Hooks + MCP 工具源"""
-    from src.tools.extensions import load_extensions
+    from src.tools.extensions import load_extensions, shutdown_extensions
 
     load_extensions()
-    yield
+    try:
+        yield
+    finally:
+        shutdown_extensions()
 
 
 app = FastAPI(title="Multi-Agent Orchestrator - 模型连接配置", lifespan=lifespan)

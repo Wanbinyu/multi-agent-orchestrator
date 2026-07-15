@@ -824,16 +824,22 @@ def _set_mode(session, agent, mode_ref: list[str], mode: str) -> bool:
 def _cmd_context(agent: Agent) -> dict[str, Any]:
     """显示本地运行时上下文状态，不调用模型、不消耗 token。"""
     status = agent.get_context_status()
-    max_tokens = status["max_context_tokens"]
+    max_tokens = status.get("input_budget_tokens", status["max_context_tokens"])
     current_tokens = status["current_tokens"]
     usage = (current_tokens / max_tokens * 100) if max_tokens > 0 else 0.0
-    source = "模型配置" if status["max_context_source"] == "model_config" else "Agent 默认值"
+    source = status.get(
+        "context_window_source",
+        "model_config" if status.get("max_context_source") == "model_config" else "unverified_default",
+    )
     compaction = "已启用" if status["compaction_enabled"] else "未启用"
     lines = [
         f"当前模型：{status['model_alias']}",
         f"Provider：{status['provider']}",
         f"上游请求模型：{status['model_id']}",
-        f"上下文估算：{current_tokens:,} / {max_tokens:,} tokens（{usage:.1f}%）",
+        f"上游硬窗口：{status.get('context_window_tokens', 0):,} tokens" if status.get("context_window_tokens") else "上游硬窗口：未知",
+        f"MAO 安全输入预算：{current_tokens:,} / {max_tokens:,} tokens（{usage:.1f}%）",
+        f"输出预留：{status.get('output_reserve_tokens', 0):,} tokens",
+        f"当前可用：{status.get('remaining_input_tokens', max_tokens - current_tokens):,} tokens",
         f"预算来源：{source}",
         (
             f"自动压缩：{compaction}，约 {status['compaction_limit_tokens']:,} tokens "
@@ -841,6 +847,7 @@ def _cmd_context(agent: Agent) -> dict[str, Any]:
         ),
         "说明：anthropic 表示兼容协议，不代表模型是 Claude。",
     ]
+    lines.extend(f"警告：{warning}" for warning in status.get("warnings", []))
     console.print(Panel(Text("\n".join(lines)), title="上下文状态", border_style="cyan"))
     return status
 
@@ -990,6 +997,9 @@ def run_chat_loop(
                 console.print(Text(f"错误：{e}", style="bold red"))
 
     finally:
+        from src.tools.extensions import shutdown_extensions
+
+        shutdown_extensions()
         store.save(session)
         console.print(f"\n[bold]会话已保存：{session.id}[/bold]")
         gateway.print_billing()

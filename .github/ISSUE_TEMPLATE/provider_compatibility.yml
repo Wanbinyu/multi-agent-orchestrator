@@ -1,0 +1,33 @@
+name: Provider compatibility
+description: Report an API, model, streaming, or tool-use compatibility issue
+title: "[Provider]: "
+labels: [provider]
+body:
+  - type: input
+    id: provider
+    attributes:
+      label: Provider and endpoint type
+      placeholder: Volcengine Coding Plan / Anthropic-compatible
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model ID or alias
+      placeholder: ark-code-latest
+    validations:
+      required: true
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Affected capability
+      options: [Authentication, Basic chat, Streaming, Tool use, Context limit, Failover, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Sanitized details and reproduction
+      description: Remove tokens, account IDs, prompts, and personal URLs.
+    validations:
+      required: true

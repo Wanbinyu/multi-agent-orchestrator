@@ -42,6 +42,10 @@ class ToolSource(Protocol):
         """执行该来源的某个工具"""
         ...
 
+    def shutdown(self) -> None:
+        """Release background tasks, processes, and network connections."""
+        ...
+
 
 class ToolRegistry:
     """工具注册表：单例，按名称索引"""
@@ -66,6 +70,17 @@ class ToolRegistry:
         优先级低于本地注册的同名工具。
         """
         self._sources.append(source)
+
+    def shutdown_sources(self) -> None:
+        """Best-effort cleanup for every registered external tool source."""
+        sources, self._sources = self._sources, []
+        for source in sources:
+            shutdown = getattr(source, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    shutdown()
+                except Exception:
+                    pass
 
     def register(
         self,
