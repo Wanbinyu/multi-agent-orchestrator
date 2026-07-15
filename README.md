@@ -77,13 +77,14 @@ pip install -r requirements.txt
 python scripts/run_ui.py
 ```
 
-浏览器会自动打开 `http://127.0.0.1:8000`，界面支持：
+浏览器会自动打开 `http://127.0.0.1:8123`，界面支持：
 
 1. 从 15+ 常用 Provider 预设中选择（Anthropic / OpenAI / DeepSeek / 火山方舟 / Kimi / 智谱 GLM / 自定义等）。
 2. 粘贴 API Key，自动填充 Base URL 与默认模型映射。
 3. 点击`测试连接`，实时查看连通状态。
 4. 启用/禁用任意 Provider；模型池自动过滤只显示启用 Provider 的模型。
 5. 选择主模型并保存。
+6. 在对话页工作区中按需展开项目目录并只读预览文本文件。
 
 配置会同步写入 `config/providers.yaml` 与 `.env`，与 CLI 完全兼容。
 
@@ -258,6 +259,7 @@ Worker 在执行任务时可以使用以下工具：
 - [x] 对话 Agent 工具循环（最多 5 轮）
 - [x] CLI 持续对话 REPL（`python run.py chat`）
 - [x] Web 对话页面（`/chat`）
+- [x] Web 项目文件树：懒加载目录、隐藏文件开关与受限文本预览
 - [x] **流式回答**：Web 与 CLI 均支持逐块输出（SSE）
 - [x] 工具循环场景下多轮流式拼接
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MAO - 对话</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=20260715-ui6">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260715-ui7">
 </head>
 <body>
   <header class="app-header">
@@ -29,7 +29,7 @@
     <section class="chat-main">
       <div class="chat-main-header">
         <span id="mode-indicator" class="mode-indicator" title="Shift+Tab 切换">approve</span>
-        <button id="btn-toggle-rightbar" class="btn btn-secondary btn-sm" type="button" aria-controls="chat-rightbar" aria-expanded="false">📋 上下文</button>
+        <button id="btn-toggle-rightbar" class="btn btn-secondary btn-sm" type="button" aria-controls="chat-rightbar" aria-expanded="false">▤ 工作区</button>
       </div>
       <div id="chat-messages" class="chat-messages"></div>
 
@@ -49,11 +49,18 @@
 
     <aside class="chat-rightbar" id="chat-rightbar">
       <div class="rightbar-header">
-        <h2>上下文 / 记忆</h2>
+        <h2>工作区</h2>
         <button id="btn-close-rightbar" class="btn btn-secondary btn-sm" type="button">✕</button>
       </div>
 
-      <div class="rightbar-section" id="ctx-section-current">
+      <div class="rightbar-tabs" role="tablist" aria-label="工作区视图">
+        <button id="tab-context" class="rightbar-tab active" type="button" role="tab" aria-selected="true" aria-controls="rightbar-context-panel">上下文</button>
+        <button id="tab-files" class="rightbar-tab" type="button" role="tab" aria-selected="false" aria-controls="rightbar-files-panel">文件</button>
+      </div>
+
+      <div id="rightbar-context-panel" class="rightbar-panel" role="tabpanel" aria-labelledby="tab-context">
+
+        <div class="rightbar-section" id="ctx-section-current">
         <h3 class="rightbar-section-title">当前会话</h3>
         <div class="meta-list" id="ctx-current-meta">
           <div class="meta-item"><span>ID</span><code id="ctx-session-id">-</code></div>
@@ -63,9 +70,9 @@
         </div>
         <button id="btn-summarize-session" class="btn btn-primary btn-sm btn-block" type="button">📝 总结会话</button>
         <div id="ctx-summarize-status" class="section-status hidden"></div>
-      </div>
+        </div>
 
-      <div class="rightbar-section" id="ctx-section-memory">
+        <div class="rightbar-section" id="ctx-section-memory">
         <div class="rightbar-section-title">
           <span>长期记忆</span>
           <button id="btn-refresh-memories" class="btn btn-icon" type="button" title="刷新">🔄</button>
@@ -86,9 +93,9 @@
         <ul id="memory-list" class="memory-list">
           <li class="empty-item">暂无记忆</li>
         </ul>
-      </div>
+        </div>
 
-      <div class="rightbar-section" id="ctx-section-index">
+        <div class="rightbar-section" id="ctx-section-index">
         <h3 class="rightbar-section-title">项目索引</h3>
         <div class="index-status" id="ctx-index-status">
           <span class="status-badge" id="ctx-index-badge">未索引</span>
@@ -96,18 +103,45 @@
         </div>
         <button id="btn-rebuild-index" class="btn btn-secondary btn-sm btn-block" type="button">🔄 重建索引</button>
         <div id="ctx-index-msg" class="section-status hidden"></div>
-      </div>
+        </div>
 
-      <div class="rightbar-section" id="ctx-section-turnlog">
+        <div class="rightbar-section" id="ctx-section-turnlog">
         <h3 class="rightbar-section-title">本轮记录</h3>
         <div id="turn-log" class="turn-log">
           <div class="empty-item">发送消息后将显示工具调用和文件记录</div>
         </div>
+        </div>
+      </div>
+
+      <div id="rightbar-files-panel" class="rightbar-panel hidden" role="tabpanel" aria-labelledby="tab-files">
+        <div class="project-browser-toolbar">
+          <input id="project-root-input" class="input-sm" type="text" value="." aria-label="项目根目录" placeholder="项目根目录，例如 G:\MAO_test">
+          <button id="btn-refresh-tree" class="btn btn-icon project-refresh" type="button" title="刷新项目树" aria-label="刷新项目树">↻</button>
+        </div>
+        <label class="project-browser-option">
+          <input id="project-include-hidden" type="checkbox">
+          <span>显示隐藏文件</span>
+        </label>
+        <div id="project-tree-status" class="project-tree-status">未加载项目</div>
+        <div id="project-tree" class="project-tree" role="tree" aria-label="项目文件树">
+          <div class="empty-item">输入项目路径后刷新</div>
+        </div>
+
+        <section id="file-preview" class="file-preview hidden" aria-live="polite">
+          <div class="file-preview-header">
+            <div>
+              <h3 id="file-preview-name">文件预览</h3>
+              <div id="file-preview-meta" class="file-preview-meta"></div>
+            </div>
+            <button id="btn-close-preview" class="btn btn-icon" type="button" title="关闭预览" aria-label="关闭文件预览">✕</button>
+          </div>
+          <code id="file-preview-path" class="file-preview-path"></code>
+          <pre id="file-preview-content" class="file-preview-content"></pre>
+        </section>
       </div>
     </aside>
+    <button id="chat-backdrop" class="chat-backdrop" type="button" aria-label="关闭工作区面板"></button>
   </main>
-
-  <button id="chat-backdrop" class="chat-backdrop" type="button" aria-label="关闭上下文面板"></button>
 
   <dialog id="new-session-dialog" class="app-dialog">
     <form id="new-session-form" class="dialog-form">
@@ -124,6 +158,6 @@
     </form>
   </dialog>
 
-  <script src="/static/js/chat.js?v=20260715-ui6"></script>
+  <script src="/static/js/chat.js?v=20260715-ui7"></script>
 </body>
 </html>

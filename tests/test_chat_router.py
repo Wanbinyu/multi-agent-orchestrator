@@ -36,6 +36,83 @@ def test_chat_page(client):
     r = client.get("/chat")
     assert r.status_code == 200
     assert "对话模式" in r.text
+    assert 'id="tab-files"' in r.text
+    assert 'id="project-tree"' in r.text
+    assert 'id="file-preview"' in r.text
+
+
+def test_project_directory_is_sorted_and_ignores_heavy_directories(client, tmp_path):
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    (project / "node_modules").mkdir()
+    (project / ".hidden").mkdir()
+    (project / "b.txt").write_text("b", encoding="utf-8")
+    (project / "a.txt").write_text("a", encoding="utf-8")
+
+    r = client.post(
+        "/api/chat/project/directory",
+        json={"path": str(project)},
+    )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["path"] == str(project.resolve())
+    assert [entry["name"] for entry in data["entries"]] == ["src", "a.txt", "b.txt"]
+    assert data["entries"][0]["is_dir"] is True
+    assert "node_modules" in data["ignored_directories"]
+
+
+def test_project_directory_can_include_hidden_and_reports_truncation(client, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".env.example").write_text("KEY=value", encoding="utf-8")
+    (project / "a.txt").write_text("a", encoding="utf-8")
+
+    r = client.post(
+        "/api/chat/project/directory",
+        json={"path": str(project), "include_hidden": True, "max_entries": 1},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["entries"][0]["name"] == ".env.example"
+    assert r.json()["truncated"] is True
+    assert r.json()["scan_limit"] == 5000
+
+
+def test_project_file_preview_is_limited_and_rejects_binary(client, tmp_path):
+    text_file = tmp_path / "long.txt"
+    text_file.write_text("abcdefghij" * 20, encoding="utf-8")
+    binary_file = tmp_path / "binary.bin"
+    binary_file.write_bytes(b"abc\x00def")
+
+    preview = client.post(
+        "/api/chat/project/file",
+        json={"path": str(text_file), "max_chars": 100},
+    )
+    binary = client.post(
+        "/api/chat/project/file",
+        json={"path": str(binary_file)},
+    )
+
+    assert preview.status_code == 200
+    assert len(preview.json()["content"]) == 100
+    assert preview.json()["size"] == 200
+    assert preview.json()["truncated"] is True
+    assert binary.status_code == 415
+
+
+def test_project_browser_reports_invalid_targets(client, tmp_path):
+    missing = client.post(
+        "/api/chat/project/directory",
+        json={"path": str(tmp_path / "missing")},
+    )
+    wrong_type = client.post(
+        "/api/chat/project/file",
+        json={"path": str(tmp_path)},
+    )
+
+    assert missing.status_code == 404
+    assert wrong_type.status_code == 400
 
 
 def test_create_and_list_sessions(client):

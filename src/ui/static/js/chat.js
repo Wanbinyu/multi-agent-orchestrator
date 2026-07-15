@@ -6,6 +6,8 @@
     currentSessionId: null,
     isLoading: false,
     rightbarOpen: false,
+    rightbarTab: "context",
+    projectTreeLoaded: false,
     turnLog: { toolCalls: [], filesWritten: [] },
   };
 
@@ -43,6 +45,21 @@
     btnRebuildIndex: document.getElementById("btn-rebuild-index"),
     ctxIndexMsg: document.getElementById("ctx-index-msg"),
     turnLog: document.getElementById("turn-log"),
+    tabContext: document.getElementById("tab-context"),
+    tabFiles: document.getElementById("tab-files"),
+    rightbarContextPanel: document.getElementById("rightbar-context-panel"),
+    rightbarFilesPanel: document.getElementById("rightbar-files-panel"),
+    projectRootInput: document.getElementById("project-root-input"),
+    projectIncludeHidden: document.getElementById("project-include-hidden"),
+    btnRefreshTree: document.getElementById("btn-refresh-tree"),
+    projectTreeStatus: document.getElementById("project-tree-status"),
+    projectTree: document.getElementById("project-tree"),
+    filePreview: document.getElementById("file-preview"),
+    filePreviewName: document.getElementById("file-preview-name"),
+    filePreviewMeta: document.getElementById("file-preview-meta"),
+    filePreviewPath: document.getElementById("file-preview-path"),
+    filePreviewContent: document.getElementById("file-preview-content"),
+    btnClosePreview: document.getElementById("btn-close-preview"),
   };
 
   const MODES = ["auto", "approve", "readonly"];
@@ -384,6 +401,196 @@
 
   function toggleRightbar() {
     setRightbarOpen(!state.rightbarOpen);
+  }
+
+  function setRightbarTab(tab) {
+    const showFiles = tab === "files";
+    state.rightbarTab = showFiles ? "files" : "context";
+    els.tabContext?.classList.toggle("active", !showFiles);
+    els.tabFiles?.classList.toggle("active", showFiles);
+    els.tabContext?.setAttribute("aria-selected", String(!showFiles));
+    els.tabFiles?.setAttribute("aria-selected", String(showFiles));
+    els.rightbarContextPanel?.classList.toggle("hidden", showFiles);
+    els.rightbarFilesPanel?.classList.toggle("hidden", !showFiles);
+    if (showFiles && !state.projectTreeLoaded) loadProjectTree();
+  }
+
+  function setProjectTreeStatus(message, isError = false) {
+    if (!els.projectTreeStatus) return;
+    els.projectTreeStatus.textContent = message;
+    els.projectTreeStatus.classList.toggle("error", isError);
+  }
+
+  function formatBytes(size) {
+    if (size == null || Number.isNaN(Number(size))) return "";
+    const bytes = Number(size);
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function hideFilePreview() {
+    els.filePreview?.classList.add("hidden");
+    els.projectTree?.querySelectorAll(".project-tree-row.selected").forEach((row) => {
+      row.classList.remove("selected");
+    });
+  }
+
+  async function previewProjectFile(entry, row) {
+    if (!els.filePreview || !els.filePreviewContent) return;
+    els.projectTree?.querySelectorAll(".project-tree-row.selected").forEach((item) => {
+      item.classList.remove("selected");
+    });
+    row.classList.add("selected");
+    els.filePreview.classList.remove("hidden");
+    els.filePreviewName.textContent = entry.name;
+    els.filePreviewPath.textContent = entry.path;
+    els.filePreviewMeta.textContent = "正在读取…";
+    els.filePreviewContent.textContent = "";
+    try {
+      const data = await api("/api/chat/project/file", {
+        method: "POST",
+        body: JSON.stringify({ path: entry.path, max_chars: 20000 }),
+      });
+      const suffix = data.truncated ? " · 已截断" : "";
+      els.filePreviewMeta.textContent = `${formatBytes(data.size)} · ${data.encoding}${suffix}`;
+      els.filePreviewPath.textContent = data.path;
+      els.filePreviewContent.textContent = data.content;
+      els.filePreview.scrollIntoView({ block: "nearest" });
+    } catch (err) {
+      els.filePreviewMeta.textContent = "读取失败";
+      els.filePreviewContent.textContent = err.message;
+    }
+  }
+
+  function createProjectTreeNode(entry) {
+    const node = document.createElement("li");
+    node.className = "project-tree-node";
+    node.setAttribute("role", "treeitem");
+
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "project-tree-row";
+    row.title = entry.path;
+
+    const canExpand = entry.is_dir && !entry.is_symlink;
+    const toggle = document.createElement("span");
+    toggle.className = "project-tree-toggle";
+    toggle.textContent = canExpand ? "›" : "";
+    const icon = document.createElement("span");
+    icon.className = "project-tree-icon";
+    icon.textContent = entry.is_dir ? "▰" : "·";
+    const name = document.createElement("span");
+    name.className = "project-tree-name";
+    name.textContent = entry.name + (entry.is_symlink ? " →" : "");
+    const size = document.createElement("span");
+    size.className = "project-tree-size";
+    size.textContent = entry.is_dir ? "" : formatBytes(entry.size);
+    row.append(toggle, icon, name, size);
+    node.appendChild(row);
+
+    if (canExpand) {
+      row.setAttribute("aria-expanded", "false");
+      row.addEventListener("click", async () => {
+        let children = node.querySelector(":scope > .project-tree-children");
+        const isExpanded = row.getAttribute("aria-expanded") === "true";
+        if (children) {
+          row.setAttribute("aria-expanded", String(!isExpanded));
+          toggle.textContent = isExpanded ? "›" : "⌄";
+          children.classList.toggle("hidden", isExpanded);
+          return;
+        }
+
+        row.disabled = true;
+        toggle.textContent = "…";
+        try {
+          const data = await api("/api/chat/project/directory", {
+            method: "POST",
+            body: JSON.stringify({
+              path: entry.path,
+              include_hidden: Boolean(els.projectIncludeHidden?.checked),
+            }),
+          });
+          children = renderProjectTreeEntries(data.entries || [], data.truncated, false);
+          children.classList.add("project-tree-children");
+          node.appendChild(children);
+          row.setAttribute("aria-expanded", "true");
+          toggle.textContent = "⌄";
+        } catch (err) {
+          children = document.createElement("ul");
+          children.className = "project-tree-children";
+          const error = document.createElement("li");
+          error.className = "project-tree-message error";
+          error.textContent = err.message;
+          children.appendChild(error);
+          node.appendChild(children);
+          toggle.textContent = "!";
+        } finally {
+          row.disabled = false;
+        }
+      });
+    } else if (!entry.is_dir) {
+      row.addEventListener("click", () => previewProjectFile(entry, row));
+    } else {
+      row.disabled = true;
+    }
+    return node;
+  }
+
+  function renderProjectTreeEntries(entries, truncated = false, isRoot = true) {
+    const list = document.createElement("ul");
+    list.className = `project-tree-list${isRoot ? " project-tree-root" : ""}`;
+    list.setAttribute("role", "group");
+    entries.forEach((entry) => list.appendChild(createProjectTreeNode(entry)));
+    if (!entries.length) {
+      const empty = document.createElement("li");
+      empty.className = "project-tree-message";
+      empty.textContent = "目录为空";
+      list.appendChild(empty);
+    }
+    if (truncated) {
+      const notice = document.createElement("li");
+      notice.className = "project-tree-message";
+      notice.textContent = "目录项过多，已截断";
+      list.appendChild(notice);
+    }
+    return list;
+  }
+
+  async function loadProjectTree() {
+    if (!els.projectTree || !els.projectRootInput || !els.btnRefreshTree) return;
+    const path = els.projectRootInput.value.trim() || ".";
+    els.btnRefreshTree.disabled = true;
+    hideFilePreview();
+    setProjectTreeStatus("正在加载…");
+    els.projectTree.innerHTML = '<div class="empty-item">正在读取目录…</div>';
+    try {
+      const data = await api("/api/chat/project/directory", {
+        method: "POST",
+        body: JSON.stringify({
+          path,
+          include_hidden: Boolean(els.projectIncludeHidden?.checked),
+        }),
+      });
+      els.projectRootInput.value = data.path;
+      try {
+        localStorage.setItem("mao.projectRoot", data.path);
+      } catch (_) {
+        // 浏览器禁用本地存储时仍可正常使用文件树。
+      }
+      els.projectTree.replaceChildren(
+        renderProjectTreeEntries(data.entries || [], data.truncated, true)
+      );
+      const truncated = data.truncated ? " · 已截断" : "";
+      setProjectTreeStatus(`${data.entries.length} 项${truncated}`);
+      state.projectTreeLoaded = true;
+    } catch (err) {
+      els.projectTree.innerHTML = `<div class="empty-item error-text">${escapeHtml(err.message)}</div>`;
+      setProjectTreeStatus(err.message, true);
+      state.projectTreeLoaded = false;
+    } finally {
+      els.btnRefreshTree.disabled = false;
+    }
   }
 
   function clearTurnLog() {
@@ -847,6 +1054,17 @@
   els.btnSend.addEventListener("click", sendMessage);
   els.btnToggleRightbar?.addEventListener("click", toggleRightbar);
   els.btnCloseRightbar?.addEventListener("click", () => setRightbarOpen(false));
+  els.tabContext?.addEventListener("click", () => setRightbarTab("context"));
+  els.tabFiles?.addEventListener("click", () => setRightbarTab("files"));
+  els.btnRefreshTree?.addEventListener("click", loadProjectTree);
+  els.projectIncludeHidden?.addEventListener("change", loadProjectTree);
+  els.projectRootInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      loadProjectTree();
+    }
+  });
+  els.btnClosePreview?.addEventListener("click", hideFilePreview);
   els.chatBackdrop?.addEventListener("click", () => setRightbarOpen(false));
   els.formAddMemory?.addEventListener("submit", addMemoryFromForm);
   els.memorySearch?.addEventListener("input", (e) => searchMemoryFromInput(e.target.value));
@@ -885,6 +1103,13 @@
   // 初始化
   updateModeIndicator();
   setRightbarOpen(false);
+  setRightbarTab("context");
+  try {
+    const savedProjectRoot = localStorage.getItem("mao.projectRoot");
+    if (savedProjectRoot && els.projectRootInput) els.projectRootInput.value = savedProjectRoot;
+  } catch (_) {
+    // 本地存储不可用时使用默认目录。
+  }
   loadSessions().then(() => {
     if (state.sessions.length > 0) {
       loadSession(state.sessions[0].id);

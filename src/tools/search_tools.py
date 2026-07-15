@@ -16,7 +16,7 @@ from src.tools.tool_result import ToolResult
 _MAX_GLOB_RESULTS = 200
 _MAX_GREP_RESULTS = 50
 _MAX_GREP_FILE_SIZE = 500_000
-_TREE_IGNORED_DIRS = {
+PROJECT_TREE_IGNORED_DIRS = frozenset({
     ".git",
     ".pytest_cache",
     ".mypy_cache",
@@ -27,7 +27,7 @@ _TREE_IGNORED_DIRS = {
     "venv",
     "dist",
     "build",
-}
+})
 
 
 @tool_registry.register(
@@ -71,7 +71,7 @@ def project_tree(
     def visible_entries(directory: Path) -> list[Path]:
         entries = []
         for entry in directory.iterdir():
-            if entry.is_dir() and entry.name in _TREE_IGNORED_DIRS:
+            if entry.is_dir() and entry.name in PROJECT_TREE_IGNORED_DIRS:
                 continue
             if not include_hidden and entry.name.startswith("."):
                 continue
