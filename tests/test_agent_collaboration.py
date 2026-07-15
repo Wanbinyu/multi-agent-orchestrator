@@ -167,6 +167,7 @@ def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
     )
     assert engineering["status"] == "blocked"
     assert engineering["audit"]["missing_checks"] == [
+        "实现证据",
         "针对性验证",
         "集成测试",
         "全量回归",
@@ -177,6 +178,107 @@ def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
     # 最终答案应被追加到会话历史
     assert session.messages[-1].role == "assistant"
     assert session.messages[-1].content == done.assistant_message
+
+
+def test_collaboration_worker_tool_trace_can_satisfy_deep_completion_audit(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(collaborate=True)
+    agent = Agent(gateway, session, approval_mode="auto")
+    implementation = Task(
+        id="impl", type="backend_dev", title="实现", input="", assigned_model="glm-ark"
+    )
+    testing = Task(
+        id="test", type="tester", title="验证", input="", assigned_model="glm-ark",
+        depends_on=["impl"], execution_mode="verify",
+    )
+    plan = TaskPlan(summary="完整实现", tasks=[implementation, testing])
+    write_calls = [
+        {
+            "tool": "write_file",
+            "params": {"path": "src/login.py"},
+            "success": True,
+            "output": "已写入",
+            "error": "",
+        },
+        {
+            "tool": "write_file",
+            "params": {"path": "README.md"},
+            "success": True,
+            "output": "已写入",
+            "error": "",
+        },
+    ]
+    test_commands = [
+        "pytest tests/test_login.py",
+        "pytest tests/integration/test_login.py",
+        "python -m pytest -q",
+        "pytest tests/smoke/test_login.py",
+    ]
+    test_calls = [
+        {
+            "tool": "run_command",
+            "params": {"command": command},
+            "success": True,
+            "output": "1 passed",
+            "error": "",
+        }
+        for command in test_commands
+    ]
+    results = [
+        TaskResult(
+            task=implementation,
+            success=True,
+            content="implemented",
+            files_written=["src/login.py", "README.md"],
+            tool_calls=write_calls,
+            acceptance_evidence=["实现文件", "使用说明"],
+        ),
+        TaskResult(
+            task=testing,
+            success=True,
+            content="verified",
+            tool_calls=test_calls,
+            acceptance_evidence=["四层验证通过"],
+        ),
+    ]
+
+    def dispatch(_plan, output_dir, progress_callback=None, memory_context=None):
+        for result in results:
+            if progress_callback:
+                progress_callback("task_complete", {
+                    "id": result.task.id,
+                    "type": result.task.type,
+                    "title": result.task.title,
+                    "assigned_model": result.task.assigned_model,
+                    "success": result.success,
+                    "files_written": result.files_written,
+                    "content": result.content,
+                    "tool_calls": result.tool_calls,
+                    "attempts": result.attempts,
+                    "retry_errors": [],
+                    "acceptance_evidence": result.acceptance_evidence,
+                })
+        return results
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
+         patch("src.core.dispatcher.Dispatcher") as MockDispatcher, \
+         patch("src.core.reviewer.Reviewer") as MockReviewer:
+        MockOrchestrator.return_value.plan.return_value = plan
+        MockDispatcher.return_value.dispatch.side_effect = dispatch
+        MockReviewer.return_value.review.return_value = ReviewResult(
+            passed=True, issues=[], final_output="实现与验证完成"
+        )
+        events = _collect_events(agent, "实现一个完整登录功能")
+
+    engineering = next(
+        event.engineering for event in events if event.type == "engineering_complete"
+    )
+    done = next(event for event in events if event.type == "done")
+    assert engineering["status"] == "completed"
+    assert engineering["audit"]["status"] == "passed"
+    assert engineering["verification_count"] == 4
+    assert engineering["requirement_counts"]["satisfied"] == 6
+    assert done.assistant_message == "实现与验证完成"
 
 
 def test_collaboration_stream_handles_task_failure(tmp_path):

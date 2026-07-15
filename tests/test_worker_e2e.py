@@ -118,6 +118,10 @@ def test_execute_recovers_code_blocks_with_explicit_write_file(tmp_path):
     assert not list(output_dir.rglob("generated_*"))
     assert result.response.input_tokens == 9
     assert result.response.output_tokens == 9
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0]["tool"] == "write_file"
+    assert result.tool_calls[0]["task_id"] == "t1"
+    assert any("index.html" in item for item in result.acceptance_evidence)
 
 
 def test_execute_uses_native_tools_without_markdown_prompt_conflict(tmp_path):

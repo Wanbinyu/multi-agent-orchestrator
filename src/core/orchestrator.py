@@ -7,6 +7,8 @@ import re
 import yaml
 
 from src.gateway.client import GatewayClient
+from src.core.collaboration import normalize_task_contract, validate_collaboration_plan
+from src.core.config_paths import resolve_workers_config_path
 from src.models.schemas import ChatMessage, Task, TaskPlan
 
 
@@ -27,6 +29,9 @@ SCENARIO_INSTRUCTIONS: dict[str, str] = {
 3. 每个实现任务的 input 中可以使用 {{architect_task_id.output}} 引用架构文档内容。
 4. 测试/集成任务（tester）必须依赖 frontend_dev 和 backend_dev 完成后执行。
 5. 必须在每个任务的 depends_on 字段中正确填写依赖的任务 id。
+6. 每个写任务必须声明 execution_mode=write；测试任务声明 verify；只读调查声明 read。
+7. 相对路径默认写入隔离任务目录；只有确需修改共享项目时才填写 owned_paths 绝对路径，且并行任务不得重叠。
+8. 对不能安全并行的迁移、集成和共享配置任务设置 parallel_safe=false。
 """,
 }
 
@@ -68,7 +73,7 @@ class Orchestrator:
         self.system_prompt = self.config.get("orchestrator", {}).get("system_prompt", "")
 
     def _load_config(self, path: str) -> dict:
-        with open(path, "r", encoding="utf-8") as f:
+        with resolve_workers_config_path(path).open("r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     def plan(self, user_request: str, memory_context: str | None = None) -> TaskPlan:
@@ -93,7 +98,7 @@ class Orchestrator:
         )
 
         plan_data = self._parse_json(response.content)
-        tasks = [Task(**t) for t in plan_data.get("tasks", [])]
+        tasks = [normalize_task_contract(Task(**t)) for t in plan_data.get("tasks", [])]
 
         # 如果任务没有 assigned_model，补充默认模型
         available_workers = self.config.get("available_workers", {})
@@ -104,7 +109,9 @@ class Orchestrator:
                 )
                 task.assigned_model = self.gateway.resolve_model(default_model)
 
-        return TaskPlan(summary=plan_data.get("summary", ""), tasks=tasks)
+        plan = TaskPlan(summary=plan_data.get("summary", ""), tasks=tasks)
+        validate_collaboration_plan(plan)
+        return plan
 
     def _parse_json(self, text: str) -> dict:
         """从文本中提取 JSON"""

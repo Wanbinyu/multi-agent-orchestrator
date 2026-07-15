@@ -6,6 +6,7 @@ import re
 
 import yaml
 
+from src.core.config_paths import resolve_workers_config_path
 from src.gateway.client import GatewayClient
 from src.models.schemas import ChatMessage, ReviewResult, TaskPlan, TaskResult
 
@@ -32,7 +33,7 @@ class Reviewer:
         self.system_prompt = reviewer_cfg.get("system_prompt", self._default_system_prompt())
 
     def _load_config(self, path: str) -> dict:
-        with open(path, "r", encoding="utf-8") as f:
+        with resolve_workers_config_path(path).open("r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     def _default_system_prompt(self) -> str:

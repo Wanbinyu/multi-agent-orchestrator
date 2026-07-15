@@ -1,6 +1,9 @@
 """Pydantic 数据模型"""
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+TaskExecutionMode = Literal["read", "write", "verify"]
 
 
 class Task(BaseModel):
@@ -13,6 +16,20 @@ class Task(BaseModel):
     acceptance: str = Field(default="", description="验收标准")
     assigned_model: str = Field(..., description="分配的模型名")
     depends_on: list[str] = Field(default_factory=list, description="依赖的任务 id 列表")
+    execution_mode: TaskExecutionMode = Field(
+        default="write", description="只读调查、文件写入或验证任务"
+    )
+    owned_paths: list[str] = Field(
+        default_factory=list,
+        description="允许写入的共享绝对路径；相对写入始终隔离在任务目录",
+    )
+    parallel_safe: bool = Field(default=True, description="是否允许与同层任务并行")
+    max_retries: int = Field(default=1, ge=0, le=3, description="瞬时失败定向重试次数")
+
+    @field_validator("depends_on", "owned_paths")
+    @classmethod
+    def deduplicate_list(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
 
 
 class TaskPlan(BaseModel):
@@ -109,6 +126,7 @@ class ChatStreamEvent(BaseModel):
         "error",
         "plan",
         "task_start",
+        "task_retry",
         "task_complete",
         "review_complete",
         "permission_request",
@@ -154,6 +172,10 @@ class TaskResult(BaseModel):
     response: ChatResponse | None = None
     error: str = ""
     files_written: list[str] = Field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    attempts: int = Field(default=1, ge=1)
+    retry_errors: list[str] = Field(default_factory=list)
+    acceptance_evidence: list[str] = Field(default_factory=list)
 
 
 class ReviewResult(BaseModel):

@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 import yaml
 
+from src.core.collaboration import is_write_path_allowed
+from src.core.config_paths import resolve_workers_config_path
 from src.gateway.client import GatewayClient
 from src.models.schemas import ChatMessage, Task, TaskResult
 from src.tools.file_tools import write_text_file
@@ -48,6 +50,12 @@ class Worker:
 
         system_prompt = worker_cfg.get("system_prompt", "")
         tools = _expand_legacy_read_tools(worker_cfg.get("tools", ["write_file"]))
+        if task.execution_mode == "read":
+            tools = [
+                name
+                for name in tools
+                if (tool_registry.get(name) and tool_registry.get(name).category == "read")
+            ]
         context = context or {}
         try:
             model_name = self.gateway.resolve_model(task.assigned_model)
@@ -75,6 +83,9 @@ class Worker:
 
 验收标准：
 {task_acceptance or "无"}
+
+执行模式：{task.execution_mode}
+共享绝对路径所有权：{", ".join(task.owned_paths) or "无；只允许写入隔离任务目录"}
 """
         if context:
             context_lines = ["\n前置任务输出（供参考）："]
@@ -95,6 +106,7 @@ class Worker:
 - 项目分析文本默认控制在 3000 个汉字以内，必须完整覆盖结构、发现、实施阶段、风险和验收；宁可压缩细节也不能中途结束，证据不足的内容标记为“待确认”。
 - 工具执行结果会返回给你；收到结果后必须继续完成任务，不能停在工具调用。
 - 任务需要创建或修改文件时，必须使用 write_file/edit_file，并使用有意义的文件名。
+- 只能写入当前隔离任务目录，或 owned_paths 明确声明的共享绝对路径；禁止修改其他 Worker 的文件。
 - 禁止只在正文中输出代码块代替写文件；正文代码块不会自动生成项目文件。
 - 不需要创建文件的分析、审查或写作任务可以直接输出最终文本。"""
 
@@ -116,6 +128,7 @@ class Worker:
             recovery_requested = False
             requires_file_output = _task_requires_file_output(task)
             read_cache: dict[str, ToolResult] = {}
+            tool_trace: list[dict[str, Any]] = []
 
             while True:
                 response = self.gateway.chat(
@@ -137,7 +150,11 @@ class Worker:
                     allowed_prefixes=worker_cfg.get("allowed_commands"),
                     allowed_tools=tools,
                     read_cache=read_cache,
+                    task=task,
                 )
+                for tool_result in tool_results:
+                    tool_result["task_id"] = task.id
+                tool_trace.extend(tool_results)
                 _collect_written_files(tool_results, task_output_dir, files_written)
 
                 if tool_results:
@@ -217,6 +234,7 @@ class Worker:
                     error="模型未返回可执行内容或文件",
                     response=aggregate_response,
                     files_written=[],
+                    tool_calls=tool_trace,
                 )
 
             if (
@@ -232,6 +250,8 @@ class Worker:
                     error="模型未按要求使用 write_file 创建项目文件；原始内容已保存在 content.txt",
                     response=aggregate_response,
                     files_written=files_written,
+                    tool_calls=tool_trace,
+                    acceptance_evidence=_acceptance_evidence(files_written, tool_trace),
                 )
 
             return TaskResult(
@@ -240,6 +260,8 @@ class Worker:
                 content=final_content,
                 response=aggregate_response,
                 files_written=files_written,
+                tool_calls=tool_trace,
+                acceptance_evidence=_acceptance_evidence(files_written, tool_trace),
             )
         except Exception as e:
             return TaskResult(
@@ -355,6 +377,7 @@ def process_tool_calls(
     allowed_prefixes: list[str] | None = None,
     allowed_tools: list[str] | None = None,
     read_cache: dict[str, ToolResult] | None = None,
+    task: Task | None = None,
 ) -> tuple[str, list[dict]]:
     """解析并执行工具调用，返回处理后的内容和工具结果列表"""
     pattern = r"```tool:(\w+)\n(.*?)(?:```|<\|tool_calls_section_end\|>|$)"
@@ -383,6 +406,35 @@ def process_tool_calls(
                 "error": f"参数解析失败：{e}",
             })
             return f"\n[工具调用参数解析失败：{e}]\n"
+
+        tool_spec = tool_registry.get(tool_name)
+        category = tool_spec.category if tool_spec else "unknown"
+        if task is not None and task.execution_mode == "read" and category != "read":
+            error = f"只读子任务禁止执行 {category} 工具：{tool_name}"
+            tool_results.append({
+                "tool": tool_name,
+                "params": params,
+                "success": False,
+                "output": "",
+                "error": error,
+                "cached": False,
+            })
+            return f"\n[工具 {tool_name} 被拒绝：{error}]\n"
+        if (
+            task is not None
+            and tool_name in {"write_file", "edit_file"}
+            and not is_write_path_allowed(task, str(params.get("path", "")), base_dir)
+        ):
+            error = f"写入路径不属于子任务 {task.id}：{params.get('path', '')}"
+            tool_results.append({
+                "tool": tool_name,
+                "params": params,
+                "success": False,
+                "output": "",
+                "error": error,
+                "cached": False,
+            })
+            return f"\n[工具 {tool_name} 被拒绝：{error}]\n"
 
         cache_key = build_read_cache_key(tool_name, params, base_dir)
         cached = bool(read_cache is not None and cache_key in read_cache)
@@ -415,8 +467,21 @@ def process_tool_calls(
     return processed, tool_results
 
 
+def _acceptance_evidence(
+    files_written: list[str], tool_trace: list[dict[str, Any]]
+) -> list[str]:
+    evidence = [f"写入文件：{path}" for path in files_written]
+    for call in tool_trace:
+        if call.get("tool") != "run_command" or not call.get("success"):
+            continue
+        command = str((call.get("params") or {}).get("command", ""))
+        output = str(call.get("output", "")).strip().replace("\n", " ")[:200]
+        evidence.append(f"验证命令通过：{command}" + (f" | {output}" if output else ""))
+    return evidence
+
+
 def load_workers_config(path: str = "config/workers.yaml") -> dict:
-    with open(path, "r", encoding="utf-8") as f:
+    with resolve_workers_config_path(path).open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return data.get("available_workers", {})
 

@@ -363,10 +363,26 @@ CLI / Web 展示精简事件：
 
 ### Phase 7.4：多模型工程协作
 
-- 有边界的并行调查和模块分工。
-- Worker 验收标准和文件所有权。
-- 失败步骤定向重试，不重跑整个计划。
-- 完成后触发开源提醒，按 `docs/开源发布准备计划.md` 进入发布验收，不直接公开仓库。
+- [x] 子任务契约包含输入、输出格式、验收标准、执行模式、依赖、文件所有权、并行安全和重试上限。
+- [x] Orchestrator 对重复 ID、无效依赖、依赖环和并行共享路径冲突执行确定性校验。
+- [x] 相对写入隔离在独立任务目录；共享绝对路径必须落在 `owned_paths` 内，越界写入被 Worker 拒绝。
+- [x] `parallel_safe=false` 的任务独占调度；只读任务不与写任务产生所有权冲突。
+- [x] 仅连接、超时、429/5xx 等瞬时失败按单任务定向重试；成功任务和其他分支不重跑。
+- [x] 重试保留所有尝试的工具轨迹、文件、错误和验收证据。
+- [x] Dispatcher 完成事件携带完整 TaskResult，不再丢失 Worker 正文和工具结果。
+- [x] Worker 真实工具轨迹汇总到主 RunJournal Evidence/VerificationGate；仅 `files_written` 文本不能冒充实现证据。
+- [x] 协作 build 只有在实现、文档和 targeted/integration/full/smoke 证据全部满足时才能完成。
+- [x] 新增无密钥 `config/workers.yaml.example`，私有本地配置缺失时安全回退到示例契约。
+- [x] CLI 显示单任务定向重试，Web 协作面板保持任务运行状态。
+
+完成于 2026-07-15。验证结果：
+
+- 协作契约、计划校验、写入隔离、所有权冲突、安全并行、定向重试、证据汇总和 Reviewer 完成审计定向测试通过。
+- 全量测试 `485 passed, 1 warning`；CLI 帮助、JavaScript 语法、Python 编译和差异格式检查通过。
+- 真实 Web SSE 异常路径正确收口，浏览器控制台无错误。
+- 当前 Coding Plan Key 仍返回 401，无法完成付费模型真实协作烟雾；该项转入开源发布 P0，不用 mock 结果替代。
+- pytest 偶发打印 MCP 后台连接任务清理提示但仍以 0 退出；该项转入开源发布 P1。
+- Phase 7.4 完成后已按协议进入开源发布验收，不直接公开仓库或创建 Release。
 
 ### Phase 7.5：CLI/Web 透明度
 

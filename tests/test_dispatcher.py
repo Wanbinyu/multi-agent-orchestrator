@@ -1,5 +1,7 @@
 """Dispatcher 依赖调度单元测试"""
 from unittest.mock import MagicMock
+import threading
+import time
 
 import pytest
 
@@ -147,3 +149,131 @@ def test_dispatch_mixed_dependency_chains():
     calls = worker.execute.call_args_list
     id_order = [call[0][0].id for call in calls]
     assert id_order.index("t2") > id_order.index("t1")
+
+
+def test_dispatch_retries_only_transiently_failed_task():
+    t1 = Task(
+        id="t1", type="a", title="A", input="", assigned_model="glm-ark",
+        max_retries=1,
+    )
+    t2 = Task(id="t2", type="b", title="B", input="", assigned_model="glm-ark")
+    worker = MagicMock(spec=Worker)
+    attempts = {"t1": 0, "t2": 0}
+
+    def execute(task, *_args, **_kwargs):
+        attempts[task.id] += 1
+        if task.id == "t1" and attempts[task.id] == 1:
+            return TaskResult(
+                task=task,
+                success=False,
+                content="",
+                error="connection timeout",
+                tool_calls=[{
+                    "tool": "run_command",
+                    "params": {"command": "pytest tests/test_a.py"},
+                    "success": False,
+                    "output": "1 failed",
+                    "error": "退出码：1",
+                }],
+            )
+        return _success_result(task)
+
+    worker.execute.side_effect = execute
+    events = []
+    results = Dispatcher(worker).dispatch(
+        TaskPlan(tasks=[t1, t2]),
+        progress_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    by_id = {result.task.id: result for result in results}
+    assert attempts == {"t1": 2, "t2": 1}
+    assert by_id["t1"].success is True
+    assert by_id["t1"].attempts == 2
+    assert by_id["t1"].retry_errors == ["connection timeout"]
+    assert by_id["t1"].tool_calls[0]["success"] is False
+    retry = next(payload for event, payload in events if event == "task_retry")
+    assert retry["id"] == "t1"
+    assert retry["attempt"] == 2
+
+
+def test_dispatch_does_not_retry_deterministic_failure():
+    task = Task(
+        id="t1", type="a", title="A", input="", assigned_model="glm-ark",
+        max_retries=3,
+    )
+    worker = _mock_worker({"t1": _failed_result(task)})
+
+    result = Dispatcher(worker).dispatch(TaskPlan(tasks=[task]))[0]
+
+    assert result.success is False
+    assert result.attempts == 1
+    worker.execute.assert_called_once()
+
+
+def test_non_parallel_safe_tasks_execute_exclusively():
+    tasks = [
+        Task(
+            id=f"t{index}", type="a", title=str(index), input="",
+            assigned_model="glm-ark", parallel_safe=False,
+        )
+        for index in range(3)
+    ]
+    worker = MagicMock(spec=Worker)
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def execute(task, *_args, **_kwargs):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.01)
+        with lock:
+            active -= 1
+        return _success_result(task)
+
+    worker.execute.side_effect = execute
+    results = Dispatcher(worker, max_workers=3).dispatch(TaskPlan(tasks=tasks))
+
+    assert all(result.success for result in results)
+    assert max_active == 1
+
+
+def test_dispatch_rejects_parallel_owned_path_conflict_without_running_worker():
+    tasks = [
+        Task(
+            id="a", type="a", title="A", input="", assigned_model="glm-ark",
+            owned_paths=["C:/project/src"],
+        ),
+        Task(
+            id="b", type="b", title="B", input="", assigned_model="glm-ark",
+            owned_paths=["C:/project/src/api"],
+        ),
+    ]
+    worker = MagicMock(spec=Worker)
+    events = []
+
+    results = Dispatcher(worker).dispatch(
+        TaskPlan(tasks=tasks),
+        progress_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    assert all(not result.success for result in results)
+    assert all("计划边界冲突" in result.error for result in results)
+    assert [event for event, _payload in events] == ["task_complete", "task_complete"]
+    worker.execute.assert_not_called()
+
+
+def test_dispatch_rejects_duplicate_task_ids_without_running_worker():
+    tasks = [
+        Task(id="same", type="a", title="A", input="", assigned_model="glm-ark"),
+        Task(id="same", type="b", title="B", input="", assigned_model="glm-ark"),
+    ]
+    worker = MagicMock(spec=Worker)
+
+    results = Dispatcher(worker).dispatch(TaskPlan(tasks=tasks))
+
+    assert len(results) == 2
+    assert all("ID 重复" in result.error for result in results)
+    worker.execute.assert_not_called()

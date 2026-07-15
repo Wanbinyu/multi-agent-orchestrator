@@ -1315,6 +1315,11 @@ class Agent:
                         "type": t.type,
                         "title": t.title,
                         "assigned_model": t.assigned_model,
+                        "execution_mode": t.execution_mode,
+                        "owned_paths": t.owned_paths,
+                        "parallel_safe": t.parallel_safe,
+                        "max_retries": t.max_retries,
+                        "acceptance": t.acceptance,
                     }
                     for t in plan.tasks
                 ],
@@ -1361,6 +1366,7 @@ class Agent:
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue = asyncio.Queue()
         error_info: dict[str, str] | None = None
+        dispatch_results: list[TaskResult] = []
 
         def _progress(event_type: str, payload: dict[str, Any]):
             asyncio.run_coroutine_threadsafe(queue.put((event_type, payload)), loop)
@@ -1371,12 +1377,13 @@ class Agent:
                 workers_config = load_workers_config()
                 worker = Worker(self.gateway, workers_config)
                 dispatcher = Dispatcher(worker, max_workers=4)
-                return dispatcher.dispatch(
+                completed_results = dispatcher.dispatch(
                     plan,
                     output_dir=self.session.output_dir,
                     progress_callback=_progress,
                     memory_context=memory_context,
                 )
+                dispatch_results.extend(completed_results)
             except Exception as exc:  # noqa: BLE001
                 error_info = {"error": str(exc)}
                 _progress("__error__", error_info)
@@ -1386,7 +1393,6 @@ class Agent:
         thread = threading.Thread(target=_dispatch, daemon=True)
         thread.start()
 
-        results: list[TaskResult] = []
         while True:
             event_type, payload = await queue.get()
             if event_type == "__done__":
@@ -1394,21 +1400,9 @@ class Agent:
             if event_type == "__error__":
                 yield ChatStreamEvent(type="error", error=payload.get("error", "未知错误"))
                 return
-            if event_type == "task_complete":
-                task_id = payload["id"]
-                task = next((t for t in plan.tasks if t.id == task_id), None)
-                if task:
-                    results.append(
-                        TaskResult(
-                            task=task,
-                            success=payload.get("success", False),
-                            content=payload.get("content", ""),
-                            error=payload.get("error", ""),
-                            files_written=payload.get("files_written", []),
-                        )
-                    )
             yield ChatStreamEvent(type=event_type, task=payload)
 
+        results = list(dispatch_results)
         evidence_changed = False
         for result in results:
             excerpt = (result.content if result.success else result.error).strip()
@@ -1421,18 +1415,47 @@ class Agent:
                         else f"Worker {result.task.id} 执行失败"
                     ),
                     excerpt=excerpt[:800],
-                    kind="change" if result.files_written else (
-                        "test" if "test" in result.task.type.lower() else "runtime"
-                    ),
+                    kind="runtime",
                     success=result.success,
                     metadata={
                         "task_id": result.task.id,
                         "task_type": result.task.type,
                         "files_written": result.files_written,
+                        "attempts": result.attempts,
+                        "retry_errors": result.retry_errors,
+                        "acceptance_evidence": result.acceptance_evidence,
                     },
                 )
             )
             evidence_changed = evidence_changed or added
+            for call in result.tool_calls:
+                tool_name = str(call.get("tool", "unknown"))
+                params = call.get("params", {}) or {}
+                tool_result = ToolResult(
+                    success=bool(call.get("success", False)),
+                    output=str(call.get("output", "")),
+                    error=str(call.get("error", "")),
+                )
+                changed = self.evidence_recorder.record(
+                    run_journal,
+                    tool_name,
+                    params,
+                    tool_result,
+                    cached=bool(call.get("cached", False)),
+                    source=f"worker:{result.task.id}:tool:{tool_name}",
+                    metadata={
+                        "worker_task_id": result.task.id,
+                        "worker_type": result.task.type,
+                    },
+                )
+                verification_changed = self.verification_tracker.record(
+                    run_journal,
+                    tool_name,
+                    params,
+                    tool_result,
+                    cached=bool(call.get("cached", False)),
+                )
+                evidence_changed = evidence_changed or changed or verification_changed
         self.completion_auditor.audit(run_journal, "completed")
         await asyncio.to_thread(self.journal_store.save, run_journal)
         if evidence_changed or run_journal.audit is not None:

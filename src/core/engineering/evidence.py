@@ -71,12 +71,14 @@ class ToolEvidenceRecorder:
         *,
         cached: bool = False,
         skipped: bool = False,
+        source: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         path = _path(params)
         command = str(params.get("command", ""))
         kind, claim = self._classify(tool_name, path, command, result, skipped)
         evidence = Evidence(
-            source=f"tool:{tool_name}",
+            source=source or f"tool:{tool_name}",
             claim=claim,
             excerpt=_excerpt(result),
             confidence=1.0,
@@ -86,7 +88,7 @@ class ToolEvidenceRecorder:
             command=command,
             success=result.success,
             cached=cached,
-            metadata={"skipped": skipped},
+            metadata={"skipped": skipped, **(metadata or {})},
         )
         _, added = journal.add_evidence(evidence)
         reconnaissance_changed = self._update_reconnaissance(

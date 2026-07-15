@@ -1032,6 +1032,11 @@
           if (collabPanel) {
             updateTaskStatus(collabPanel, data.task?.id, "running");
           }
+        } else if (ev.event === "task_retry") {
+          const data = JSON.parse(ev.data);
+          if (collabPanel) {
+            updateTaskStatus(collabPanel, data.task?.id, "running");
+          }
         } else if (ev.event === "task_complete") {
           const data = JSON.parse(ev.data);
           if (collabPanel) {

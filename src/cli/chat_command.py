@@ -496,6 +496,14 @@ async def _stream_turn(agent: Agent, user_input: str):
                 console.print(
                     f"[dim]▶ [{task.get('type')}] {task.get('title')} 开始执行[/dim]"
                 )
+            elif event.type == "task_retry":
+                task = event.task or {}
+                console.print(
+                    f"[yellow]↻ [{task.get('type')}] {task.get('title')} "
+                    f"定向重试 {task.get('attempt')}/{task.get('max_attempts')}[/yellow]"
+                )
+                if task.get("previous_error"):
+                    console.print(f"  [dim]{task['previous_error']}[/dim]")
             elif event.type == "task_complete":
                 task = event.task or {}
                 status = "✅" if task.get("success") else "❌"

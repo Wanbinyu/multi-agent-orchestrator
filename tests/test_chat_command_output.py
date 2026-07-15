@@ -63,6 +63,17 @@ class _FailedReviewAgent(_FakeAgent):
             plan={"summary": "只读分析", "tasks": []},
         )
         yield ChatStreamEvent(
+            type="task_retry",
+            task={
+                "id": "test",
+                "type": "tester",
+                "title": "运行测试",
+                "attempt": 2,
+                "max_attempts": 2,
+                "previous_error": "connection timeout",
+            },
+        )
+        yield ChatStreamEvent(
             type="review_complete",
             review={"passed": False, "issues": ["缺少测试"]},
         )
@@ -79,6 +90,8 @@ def test_stream_turn_handles_failed_review_without_markup_error(capsys):
     output = capsys.readouterr().out
     assert "审查结果：未通过" in output
     assert "缺少测试" in output
+    assert "定向重试 2/2" in output
+    assert "connection timeout" in output
     assert "请补充测试后再实施" in output
 
 

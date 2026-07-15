@@ -40,6 +40,14 @@ def _success_result(task: Task) -> TaskResult:
             cost_usd=0.0,
         ),
         files_written=[f"output/{task.id}.txt"],
+        tool_calls=[{
+            "tool": "write_file",
+            "params": {"path": f"{task.id}.txt"},
+            "success": True,
+            "output": "ok",
+            "error": "",
+        }],
+        acceptance_evidence=[f"写入文件：output/{task.id}.txt"],
     )
 
 
@@ -72,6 +80,9 @@ def test_dispatch_emits_progress_events():
     t1_complete = next(e[1] for e in complete_events if e[1]["id"] == "t1")
     assert t1_complete["success"] is True
     assert t1_complete["files_written"] == ["output/t1.txt"]
+    assert t1_complete["content"] == "result of t1"
+    assert t1_complete["tool_calls"][0]["tool"] == "write_file"
+    assert t1_complete["acceptance_evidence"]
 
 
 def test_dispatch_emits_failure_progress():

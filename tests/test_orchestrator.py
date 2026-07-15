@@ -63,6 +63,8 @@ def test_plan_returns_task_plan(tmp_path):
     assert plan.tasks[0].id == "t1"
     assert plan.tasks[0].assigned_model == "glm-ark"
     assert plan.tasks[1].assigned_model == "deepseek-chat"
+    assert plan.tasks[0].output_format
+    assert plan.tasks[0].acceptance
 
     gateway.chat.assert_called_once()
     call_kwargs = gateway.chat.call_args.kwargs
@@ -244,3 +246,27 @@ def test_plan_appends_software_instruction(tmp_path):
     assert "base" in system_content
     assert "软件开发任务编排规则" in system_content
     assert "架构/接口文档" in system_content
+    assert "execution_mode=write" in system_content
+    assert "owned_paths" in system_content
+
+
+def test_plan_rejects_parallel_file_ownership_conflict(tmp_path):
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text(_sample_workers_yaml(), encoding="utf-8")
+    plan_data = {
+        "summary": "冲突计划",
+        "tasks": [
+            {
+                "id": "a", "type": "writer", "title": "A", "input": "A",
+                "assigned_model": "glm-ark", "owned_paths": ["C:/project/src"],
+            },
+            {
+                "id": "b", "type": "writer", "title": "B", "input": "B",
+                "assigned_model": "glm-ark", "owned_paths": ["C:/project/src/api"],
+            },
+        ],
+    }
+    gateway = _mock_gateway(json.dumps(plan_data))
+
+    with pytest.raises(ValueError, match="文件所有权冲突"):
+        Orchestrator(gateway, config_path=str(config_path)).plan("写项目")

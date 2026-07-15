@@ -6,6 +6,7 @@ from src.core.worker import (
     build_tool_instructions,
     process_tool_calls,
 )
+from src.models.schemas import Task
 
 
 def test_build_tool_instructions_with_read_and_run():
@@ -85,6 +86,54 @@ def test_process_tool_calls_rejects_ungranted_tool(tmp_path):
     assert results[0]["success"] is False
     assert "未获授权" in results[0]["error"]
     assert "被拒绝" in processed
+
+
+def test_readonly_task_rejects_write_even_when_worker_config_grants_it(tmp_path):
+    task = Task(
+        id="read", type="analyst", title="只读", input="检查",
+        assigned_model="glm-ark", execution_mode="read",
+    )
+    content = '```tool:write_file\n{"path":"bad.txt","content":"bad"}\n```'
+
+    processed, results = process_tool_calls(
+        content,
+        str(tmp_path),
+        allowed_tools=["write_file"],
+        task=task,
+    )
+
+    assert results[0]["success"] is False
+    assert "只读子任务禁止" in results[0]["error"]
+    assert "被拒绝" in processed
+    assert not (tmp_path / "bad.txt").exists()
+
+
+def test_worker_rejects_absolute_write_outside_owned_paths(tmp_path):
+    owned = tmp_path / "owned"
+    outside = tmp_path / "outside.txt"
+    task = Task(
+        id="write", type="backend_dev", title="写入", input="实现",
+        assigned_model="glm-ark", owned_paths=[str(owned)],
+    )
+
+    _processed, denied = process_tool_calls(
+        f'```tool:write_file\n{{"path":{outside.as_posix()!r},"content":"bad"}}\n```'.replace("'", '"'),
+        str(tmp_path / "isolated"),
+        allowed_tools=["write_file"],
+        task=task,
+    )
+    allowed_path = owned / "ok.txt"
+    _processed, allowed = process_tool_calls(
+        f'```tool:write_file\n{{"path":{allowed_path.as_posix()!r},"content":"ok"}}\n```'.replace("'", '"'),
+        str(tmp_path / "isolated"),
+        allowed_tools=["write_file"],
+        task=task,
+    )
+
+    assert denied[0]["success"] is False
+    assert "不属于子任务" in denied[0]["error"]
+    assert allowed[0]["success"] is True
+    assert allowed_path.read_text(encoding="utf-8") == "ok"
 
 
 def test_process_tool_calls_reuses_reads_and_invalidates_after_write(tmp_path):
