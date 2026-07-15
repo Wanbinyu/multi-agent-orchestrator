@@ -8,7 +8,7 @@ import pytest
 from src.core.agent import Agent
 from src.core.engineering import RunJournalStore
 from src.core.session import Session
-from src.models.schemas import ChatResponse
+from src.models.schemas import ChatResponse, ModelConfig
 
 
 def _make_session(tmp_path) -> Session:
@@ -23,6 +23,7 @@ def _make_session(tmp_path) -> Session:
 
 def _mock_gateway(*responses: str) -> MagicMock:
     gateway = MagicMock()
+    gateway.main_model = None
     gateway.chat_with_main_model.side_effect = [
         ChatResponse(
             content=r,
@@ -35,6 +36,46 @@ def _mock_gateway(*responses: str) -> MagicMock:
         for r in responses
     ]
     return gateway
+
+
+def test_context_status_and_system_prompt_use_runtime_facts(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway("unused")
+    gateway.main_model = "glm-ark"
+    gateway.get_model_config.return_value = ModelConfig(
+        provider="volcengineark",
+        model_id="ark-code-latest",
+        max_context_tokens=131072,
+    )
+    agent = Agent(gateway, session)
+
+    status = agent.get_context_status()
+    prompt = agent._build_system_prompt()
+
+    assert status["model_alias"] == "glm-ark"
+    assert status["model_id"] == "ark-code-latest"
+    assert status["max_context_tokens"] == 131072
+    assert status["compaction_limit_tokens"] == 98304
+    assert status["max_context_source"] == "model_config"
+    assert "anthropic 仅表示 API 兼容协议" in prompt
+    assert "不得猜测其他模型配置" in prompt
+
+
+def test_context_status_uses_agent_default_when_model_has_no_limit(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway("unused")
+    gateway.main_model = "glm-ark"
+    gateway.get_model_config.return_value = ModelConfig(
+        provider="volcengineark",
+        model_id="ark-code-latest",
+    )
+    agent = Agent(gateway, session, max_context_tokens=32000)
+
+    status = agent.get_context_status()
+
+    assert status["max_context_tokens"] == 32000
+    assert status["compaction_limit_tokens"] == 24000
+    assert status["max_context_source"] == "agent_default"
 
 
 def test_run_turn_no_tools(tmp_path):

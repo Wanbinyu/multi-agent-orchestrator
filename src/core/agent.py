@@ -263,6 +263,60 @@ class Agent:
                 pass
         return self.max_context_tokens
 
+    def get_context_status(self) -> dict[str, Any]:
+        """返回无需模型推测的上下文预算与压缩状态。"""
+        main_model = getattr(self.gateway, "main_model", None)
+        if not isinstance(main_model, str):
+            main_model = ""
+
+        provider = ""
+        model_id = ""
+        configured_max = 0
+        if main_model:
+            try:
+                cfg = self.gateway.get_model_config(main_model)
+                provider = cfg.provider
+                model_id = cfg.model_id
+                if isinstance(cfg.max_context_tokens, int) and cfg.max_context_tokens > 0:
+                    configured_max = cfg.max_context_tokens
+            except Exception:
+                pass
+
+        max_context_tokens = configured_max or self.max_context_tokens
+        compaction_limit = (
+            int(max_context_tokens * self.compaction_threshold)
+            if max_context_tokens > 0
+            else 0
+        )
+        current_tokens = count_messages_tokens(self.session.messages)
+        return {
+            "model_alias": main_model or "unknown",
+            "provider": provider or "unknown",
+            "model_id": model_id or "unknown",
+            "max_context_tokens": max_context_tokens,
+            "max_context_source": "model_config" if configured_max else "agent_default",
+            "current_tokens": current_tokens,
+            "compaction_enabled": max_context_tokens > 0,
+            "compaction_threshold": self.compaction_threshold,
+            "compaction_limit_tokens": compaction_limit,
+        }
+
+    def _runtime_facts_prompt(self) -> str:
+        """把稳定的运行参数告诉模型，避免把协议类型误认为模型身份。"""
+        status = self.get_context_status()
+        source = "模型配置" if status["max_context_source"] == "model_config" else "Agent 默认值"
+        enabled = "已启用" if status["compaction_enabled"] else "未启用"
+        return (
+            "【MAO 运行时事实】\n"
+            f"- 当前主模型别名：{status['model_alias']}；Provider：{status['provider']}；"
+            f"上游请求模型 ID：{status['model_id']}。\n"
+            f"- MAO 本地上下文预算：{status['max_context_tokens']} tokens（{source}）；"
+            f"自动压缩：{enabled}；触发阈值约 {status['compaction_limit_tokens']} tokens "
+            f"（{status['compaction_threshold']:.0%}）。\n"
+            "- Provider 类型 anthropic 仅表示 API 兼容协议，不表示当前模型是 Claude。\n"
+            "用户询问模型、上下文或自动压缩时，必须依据以上运行时事实回答，不得猜测其他模型配置。"
+        )
+
     def _maybe_compact_context(self) -> bool:
         """超阈值时压缩旧消息，返回是否执行了压缩"""
         max_ctx = self._get_effective_max_context()
@@ -287,6 +341,7 @@ class Agent:
         native = self._should_use_native_tools()
         parts = [
             "你是 Multi-Agent Orchestrator 的会话助手，可以与用户进行多轮对话，并使用本地工具帮助用户完成任务。",
+            self._runtime_facts_prompt(),
         ]
         if native:
             # 原生模式：工具定义由 tools= 参数提供，系统提示不再列 Markdown 工具块

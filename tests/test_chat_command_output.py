@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock
 
+from src.cli import chat_command
 from src.cli.chat_command import _stream_turn
 from src.models.schemas import ChatStreamEvent
 
@@ -99,3 +100,44 @@ def test_stream_turn_prints_engineering_run_status(capsys):
     asyncio.run(_stream_turn(_EngineeringEventAgent(), "执行任务"))
     output = capsys.readouterr().out
     assert "工程记录：run-test · completed" in output
+
+
+class _PlainStreamingAgent(_FakeAgent):
+    async def run_turn_stream(self, _user_input: str):
+        yield ChatStreamEvent(type="delta", delta="关于上下文")
+        yield ChatStreamEvent(type="delta", delta="与自动压缩")
+        yield ChatStreamEvent(
+            type="done",
+            assistant_message="关于上下文与自动压缩",
+            input_tokens=2,
+            output_tokens=4,
+        )
+
+
+def test_plain_stream_uses_transient_bounded_preview_and_prints_final_once(
+    monkeypatch,
+    capsys,
+):
+    created: dict = {}
+
+    class _RecordingLive:
+        def __init__(self, _renderable, **kwargs):
+            created.update(kwargs)
+
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def update(self, _renderable):
+            return None
+
+    monkeypatch.setattr(chat_command, "Live", _RecordingLive)
+
+    asyncio.run(_stream_turn(_PlainStreamingAgent(), "询问上下文"))
+
+    output = capsys.readouterr().out
+    assert created["transient"] is True
+    assert created["vertical_overflow"] == "ellipsis"
+    assert output.count("关于上下文与自动压缩") == 1

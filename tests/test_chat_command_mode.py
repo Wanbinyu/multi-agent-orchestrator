@@ -10,6 +10,7 @@ from prompt_toolkit.document import Document
 from src.cli.chat_command import (
     COMMANDS,
     SlashCommandCompleter,
+    _cmd_context,
     _cmd_test_models,
     _cmd_tree,
     _format_tool_action,
@@ -89,6 +90,30 @@ def test_cmd_test_models_checks_every_model_and_warns_about_cost(capsys):
     assert "健康冷却" in output
 
 
+def test_cmd_context_reports_local_status_without_model_call(capsys):
+    agent = MagicMock()
+    agent.get_context_status.return_value = {
+        "model_alias": "glm-ark",
+        "provider": "volcengineark",
+        "model_id": "ark-code-latest",
+        "max_context_tokens": 32000,
+        "max_context_source": "agent_default",
+        "current_tokens": 8000,
+        "compaction_enabled": True,
+        "compaction_threshold": 0.75,
+        "compaction_limit_tokens": 24000,
+    }
+
+    status = _cmd_context(agent)
+
+    output = capsys.readouterr().out
+    assert status["current_tokens"] == 8000
+    assert "上下文状态" in output
+    assert "8,000 / 32,000 tokens（25.0%）" in output
+    assert "24,000 tokens 触发（75%）" in output
+    assert "不代表模型是 Claude" in output
+
+
 def _complete(text: str):
     completer = SlashCommandCompleter()
     return list(completer.get_completions(Document(text), CompleteEvent()))
@@ -99,6 +124,7 @@ def test_slash_command_completion_opens_on_slash():
     assert "/new" in names
     assert "/memory search" in names
     assert "/tools" in names
+    assert "/context" in names
     assert "/tree" in names
     assert "/exit" in names
 
@@ -118,6 +144,7 @@ def test_slash_command_completion_ignores_normal_text_and_arguments():
 
 def test_help_remains_available_but_welcome_is_compact(capsys):
     assert "/memory add" in COMMANDS
+    assert "/context" in COMMANDS
     assert "输入 / 可打开命令列表" in COMMANDS
 
     _print_welcome("session-1", "approve")

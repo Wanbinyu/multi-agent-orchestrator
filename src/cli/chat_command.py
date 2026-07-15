@@ -33,6 +33,7 @@ SLASH_COMMANDS: list[tuple[str, str, str]] = [
     ("/load", "/load <id>", "加载已有会话"),
     ("/save", "/save", "保存当前会话"),
     ("/sessions", "/sessions", "列出最近会话"),
+    ("/context", "/context", "显示上下文预算与自动压缩状态"),
     ("/tree", "/tree [路径] [深度]", "零 token 显示项目结构"),
     ("/plan", "/plan <需求>", "执行一次性多模型任务计划"),
     ("/memory add", "/memory add <分类> <内容>", "添加长期记忆"),
@@ -330,7 +331,8 @@ async def _stream_turn(agent: Agent, user_input: str):
         Markdown(""),
         console=console,
         refresh_per_second=15,
-        vertical_overflow="visible",
+        vertical_overflow="ellipsis",
+        transient=True,
     )
     live.start()
     _start_spinner("🧠 思考中")
@@ -482,12 +484,15 @@ async def _stream_turn(agent: Agent, user_input: str):
     finally:
         live.stop()
 
-    # 纯文本回答已由 Live 渲染；使用过工具时必须重新打印最终答复，
-    # 否则工具代码块触发的 spinner 会遮住模型最后生成的结论。
-    if final_content and (tool_calls or is_collaboration):
-        console.print(
-            Panel(Markdown(final_content), title="结果", border_style="green")
-        )
+    # Live 只承担临时、有界的流式预览；停止后统一打印一次最终正文，
+    # 避免长内容超出终端高度时把每个累计帧留在滚动记录中。
+    if final_content:
+        if tool_calls or is_collaboration:
+            console.print(
+                Panel(Markdown(final_content), title="结果", border_style="green")
+            )
+        else:
+            console.print(Markdown(final_content))
 
     if tool_calls:
         summary_text = Text("\n".join(_summarize_tool_activity(tool_calls)))
@@ -722,6 +727,30 @@ def _set_mode(session, agent, mode_ref: list[str], mode: str) -> bool:
     return True
 
 
+def _cmd_context(agent: Agent) -> dict[str, Any]:
+    """显示本地运行时上下文状态，不调用模型、不消耗 token。"""
+    status = agent.get_context_status()
+    max_tokens = status["max_context_tokens"]
+    current_tokens = status["current_tokens"]
+    usage = (current_tokens / max_tokens * 100) if max_tokens > 0 else 0.0
+    source = "模型配置" if status["max_context_source"] == "model_config" else "Agent 默认值"
+    compaction = "已启用" if status["compaction_enabled"] else "未启用"
+    lines = [
+        f"当前模型：{status['model_alias']}",
+        f"Provider：{status['provider']}",
+        f"上游请求模型：{status['model_id']}",
+        f"上下文估算：{current_tokens:,} / {max_tokens:,} tokens（{usage:.1f}%）",
+        f"预算来源：{source}",
+        (
+            f"自动压缩：{compaction}，约 {status['compaction_limit_tokens']:,} tokens "
+            f"触发（{status['compaction_threshold']:.0%}）"
+        ),
+        "说明：anthropic 表示兼容协议，不代表模型是 Claude。",
+    ]
+    console.print(Panel(Text("\n".join(lines)), title="上下文状态", border_style="cyan"))
+    return status
+
+
 def run_chat_loop(
     gateway: GatewayClient,
     store: SessionStore,
@@ -792,6 +821,8 @@ def run_chat_loop(
                     console.print(f"[bold green]已保存会话：{session.id}[/bold green]")
                 elif cmd == "/sessions":
                     _cmd_sessions(store)
+                elif cmd == "/context":
+                    _cmd_context(agent)
                 elif cmd == "/tree":
                     _cmd_tree(arg)
                 elif cmd == "/plan":
