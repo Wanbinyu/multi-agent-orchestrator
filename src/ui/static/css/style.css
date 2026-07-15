@@ -1445,6 +1445,7 @@ body::before {
 
 .chat-message {
   display: flex;
+  min-width: 0;
 }
 
 .chat-message.user {
@@ -1453,10 +1454,16 @@ body::before {
 
 .chat-bubble {
   max-width: 80%;
+  min-width: 0;
   padding: 0.85rem 1.1rem;
   border-radius: 8px;
   border: 1px solid var(--panel-border);
   line-height: 1.55;
+}
+
+.chat-message.assistant .chat-bubble {
+  width: min(94%, 100%);
+  max-width: 94%;
 }
 
 .chat-bubble.user {
@@ -1479,6 +1486,35 @@ body::before {
 
 .chat-content {
   font-size: 0.95rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-content table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 0.75rem 0;
+  border-collapse: collapse;
+  overflow-x: auto;
+}
+
+.chat-content th,
+.chat-content td {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--panel-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.chat-content th {
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.chat-content :not(pre) > code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .chat-content pre.code-block {

@@ -129,16 +129,119 @@
   }
 
   function renderMarkdown(text) {
-    // 简单渲染：把代码块包在 pre/code 中，其余换行转 br
-    let html = escapeHtml(text);
-    html = html.replace(
-      /```(\w*)\n([\s\S]*?)```/g,
-      (_, lang, code) =>
-        `<pre class="code-block"><code class="language-${escapeHtml(lang)}">${escapeHtml(code)}</code></pre>`
+    const codeBlocks = [];
+    const source = String(text || "").replace(
+      /```([^\n]*)\n([\s\S]*?)```/g,
+      (_, language, code) => {
+        const index = codeBlocks.length;
+        const safeLanguage = String(language || "")
+          .trim()
+          .replace(/[^a-zA-Z0-9_-]/g, "");
+        codeBlocks.push(
+          `<pre class="code-block"><code class="language-${safeLanguage}">${escapeHtml(code)}</code></pre>`
+        );
+        return `@@MAO_CODE_BLOCK_${index}@@`;
+      }
     );
-    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-    html = html.replace(/\n/g, "<br>");
-    return html;
+    const lines = escapeHtml(source).split("\n");
+    const output = [];
+
+    const renderInline = (value) =>
+      value
+        .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
+    const splitTableRow = (line) =>
+      line
+        .trim()
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map((cell) => cell.trim());
+    const isTableDivider = (line) => {
+      const cells = splitTableRow(line);
+      return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+    };
+
+    for (let i = 0; i < lines.length; ) {
+      const line = lines[i];
+      const codeMatch = line.match(/^@@MAO_CODE_BLOCK_(\d+)@@$/);
+      if (codeMatch) {
+        output.push(codeBlocks[Number(codeMatch[1])] || "");
+        i += 1;
+        continue;
+      }
+      if (!line.trim()) {
+        i += 1;
+        continue;
+      }
+      if (/^\s*---+\s*$/.test(line)) {
+        output.push("<hr>");
+        i += 1;
+        continue;
+      }
+      const heading = line.match(/^(#{1,6})\s+(.+)$/);
+      if (heading) {
+        const level = heading[1].length;
+        output.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+        i += 1;
+        continue;
+      }
+      if (i + 1 < lines.length && line.includes("|") && isTableDivider(lines[i + 1])) {
+        const headers = splitTableRow(line);
+        const rows = [];
+        i += 2;
+        while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+          rows.push(splitTableRow(lines[i]));
+          i += 1;
+        }
+        output.push(
+          `<table><thead><tr>${headers
+            .map((cell) => `<th>${renderInline(cell)}</th>`)
+            .join("")}</tr></thead><tbody>${rows
+            .map(
+              (row) =>
+                `<tr>${headers
+                  .map((_, index) => `<td>${renderInline(row[index] || "")}</td>`)
+                  .join("")}</tr>`
+            )
+            .join("")}</tbody></table>`
+        );
+        continue;
+      }
+      if (/^\s*-\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*-\s+/.test(lines[i])) {
+          items.push(lines[i].replace(/^\s*-\s+/, ""));
+          i += 1;
+        }
+        output.push(`<ul>${items.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ul>`);
+        continue;
+      }
+      if (/^\s*\d+\.\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
+          i += 1;
+        }
+        output.push(`<ol>${items.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ol>`);
+        continue;
+      }
+
+      const paragraph = [line];
+      i += 1;
+      while (
+        i < lines.length &&
+        lines[i].trim() &&
+        !/^(@@MAO_CODE_BLOCK_\d+@@|#{1,6}\s+|\s*---+\s*$|\s*-\s+|\s*\d+\.\s+)/.test(lines[i]) &&
+        !(i + 1 < lines.length && lines[i].includes("|") && isTableDivider(lines[i + 1]))
+      ) {
+        paragraph.push(lines[i]);
+        i += 1;
+      }
+      output.push(`<p>${paragraph.map(renderInline).join("<br>")}</p>`);
+    }
+    return output.join("");
   }
 
   function showStatus(message, isError = false) {
