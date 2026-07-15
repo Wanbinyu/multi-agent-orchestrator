@@ -71,6 +71,22 @@ def test_should_collaborate_false_goes_single_model(tmp_path):
     assert done.assistant_message == "你好"
 
 
+@pytest.mark.parametrize("keyword", ["只做方案", "不要修改"])
+def test_analysis_only_request_skips_collaboration_without_llm_routing(tmp_path, keyword):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(collaborate=True)
+    agent = Agent(gateway, session)
+
+    should_collaborate = asyncio.run(
+        agent._should_collaborate(
+            f"分析 G:\\MAO_test 的项目结构并给出 Java 重构方案，{keyword}。"
+        )
+    )
+
+    assert should_collaborate is False
+    gateway.chat_with_main_model.assert_not_called()
+
+
 def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
     session = _make_session(tmp_path)
     gateway = _mock_gateway(collaborate=True)

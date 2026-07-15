@@ -16,6 +16,116 @@ from src.tools.tool_result import ToolResult
 _MAX_GLOB_RESULTS = 200
 _MAX_GREP_RESULTS = 50
 _MAX_GREP_FILE_SIZE = 500_000
+_TREE_IGNORED_DIRS = {
+    ".git",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+    "dist",
+    "build",
+}
+
+
+@tool_registry.register(
+    name="project_tree",
+    description="生成稳定、受深度和节点数限制的项目目录树；项目分析时优先使用，支持绝对路径",
+    params={
+        "path": {"type": "string", "description": "项目根目录，相对或绝对", "default": "."},
+        "max_depth": {"type": "integer", "description": "最大展开深度", "default": 4},
+        "max_entries": {"type": "integer", "description": "最大节点数量", "default": 300},
+        "include_hidden": {"type": "boolean", "description": "是否显示隐藏文件", "default": False},
+    },
+    category="read",
+)
+def project_tree(
+    path: str = ".",
+    max_depth: int = 4,
+    max_entries: int = 300,
+    include_hidden: bool = False,
+    base_dir: str = ".",
+) -> ToolResult:
+    """生成跨平台项目树，不依赖外部 tree/dir/ls 命令。"""
+    if not 0 <= max_depth <= 20:
+        return ToolResult(success=False, error="max_depth 必须在 0 到 20 之间")
+    if not 1 <= max_entries <= 5000:
+        return ToolResult(success=False, error="max_entries 必须在 1 到 5000 之间")
+
+    try:
+        root = _resolve_path(path, base_dir)
+    except ValueError as exc:
+        return ToolResult(success=False, error=str(exc))
+    if not root.exists():
+        return ToolResult(success=False, error=f"目录不存在：{path}")
+    if not root.is_dir():
+        return ToolResult(success=False, error=f"不是目录：{path}")
+
+    lines = [f"项目结构：{root}"]
+    entry_count = 0
+    depth_truncated = 0
+    entries_truncated = False
+
+    def visible_entries(directory: Path) -> list[Path]:
+        entries = []
+        for entry in directory.iterdir():
+            if entry.is_dir() and entry.name in _TREE_IGNORED_DIRS:
+                continue
+            if not include_hidden and entry.name.startswith("."):
+                continue
+            entries.append(entry)
+        return sorted(
+            entries,
+            key=lambda item: (not item.is_dir(), item.name.casefold(), item.name),
+        )
+
+    def walk(directory: Path, prefix: str, depth: int) -> None:
+        nonlocal entry_count, depth_truncated, entries_truncated
+        if entries_truncated:
+            return
+        try:
+            entries = visible_entries(directory)
+        except OSError as exc:
+            lines.append(f"{prefix}└── [无法访问：{exc}]")
+            return
+
+        for index, entry in enumerate(entries):
+            if entry_count >= max_entries:
+                entries_truncated = True
+                return
+            is_last = index == len(entries) - 1
+            connector = "└── " if is_last else "├── "
+            is_directory = entry.is_dir()
+            suffix = "/" if is_directory else ""
+            if entry.is_symlink():
+                suffix += " -> symlink"
+            lines.append(f"{prefix}{connector}{entry.name}{suffix}")
+            entry_count += 1
+
+            if not is_directory or entry.is_symlink():
+                continue
+            if depth >= max_depth:
+                depth_truncated += 1
+                continue
+            child_prefix = prefix + ("    " if is_last else "│   ")
+            walk(entry, child_prefix, depth + 1)
+            if entries_truncated:
+                return
+
+    if max_depth == 0:
+        depth_truncated = 1
+    else:
+        walk(root, "", 1)
+    if entries_truncated:
+        lines.append(f"...（已达到 {max_entries} 个节点上限，目录树已截断）")
+    if depth_truncated:
+        lines.append(
+            f"...（{depth_truncated} 个目录达到最大深度 {max_depth}，未继续展开）"
+        )
+    lines.append(f"共显示 {entry_count} 个节点")
+    return ToolResult(success=True, output="\n".join(lines))
 
 
 @tool_registry.register(

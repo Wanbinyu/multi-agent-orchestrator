@@ -1,7 +1,7 @@
 """edit_file / glob_files / grep_content / list_dir 工具测试"""
 from __future__ import annotations
 
-from src.tools.search_tools import glob_files, grep_content, list_dir
+from src.tools.search_tools import glob_files, grep_content, list_dir, project_tree
 from src.tools.worker_tools import edit_file, write_file
 
 
@@ -122,7 +122,7 @@ def test_grep_content_empty_pattern(tmp_path):
 def test_new_tools_registered():
     from src.tools.registry import tool_registry
 
-    for name in ("edit_file", "glob_files", "grep_content", "list_dir"):
+    for name in ("edit_file", "glob_files", "grep_content", "list_dir", "project_tree"):
         assert name in tool_registry.list_tools()
 
 
@@ -185,3 +185,65 @@ def test_glob_files_path_param_backward_compat(tmp_path):
     result = glob_files("*.py", base_dir=str(tmp_path))
     assert result.success is True
     assert "a.py" in result.output
+
+
+# ---------- project_tree ----------
+
+
+def test_project_tree_is_stable_and_directories_first(tmp_path):
+    (tmp_path / "z.txt").write_text("z")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "b.py").write_text("b")
+    (tmp_path / "a.txt").write_text("a")
+
+    result = project_tree(str(tmp_path))
+
+    assert result.success is True
+    assert result.output.index("src/") < result.output.index("a.txt")
+    assert result.output.index("a.txt") < result.output.index("z.txt")
+    assert "└── b.py" in result.output
+
+
+def test_project_tree_ignores_heavy_and_hidden_directories(tmp_path):
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "pkg.js").write_text("x")
+    (tmp_path / ".secret").write_text("x")
+    (tmp_path / "visible.txt").write_text("x")
+
+    result = project_tree(str(tmp_path))
+
+    assert result.success is True
+    assert "node_modules" not in result.output
+    assert ".secret" not in result.output
+    assert "visible.txt" in result.output
+
+
+def test_project_tree_can_include_hidden_files(tmp_path):
+    (tmp_path / ".env.example").write_text("KEY=")
+    result = project_tree(str(tmp_path), include_hidden=True)
+    assert result.success is True
+    assert ".env.example" in result.output
+
+
+def test_project_tree_reports_depth_and_entry_truncation(tmp_path):
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+    (nested / "deep.py").write_text("x")
+    for index in range(5):
+        (tmp_path / f"file_{index}.txt").write_text("x")
+
+    depth_result = project_tree(str(tmp_path), max_depth=1)
+    entry_result = project_tree(str(tmp_path), max_entries=2)
+
+    assert "最大深度 1" in depth_result.output
+    assert "deep.py" not in depth_result.output
+    assert "2 个节点上限" in entry_result.output
+
+
+def test_project_tree_validates_input(tmp_path):
+    zero_depth = project_tree(str(tmp_path), max_depth=0)
+    assert zero_depth.success is True
+    assert "共显示 0 个节点" in zero_depth.output
+    assert project_tree(str(tmp_path / "missing")).success is False
+    assert project_tree(str(tmp_path), max_depth=21).success is False
+    assert project_tree(str(tmp_path), max_entries=0).success is False

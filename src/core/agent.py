@@ -25,6 +25,7 @@ from src.models.schemas import (
     TaskResult,
 )
 from src.tools.file_tools import write_text_file
+from src.tools.read_cache import build_read_cache_key, should_invalidate_read_cache
 from src.tools.registry import tool_registry
 from src.tools.tool_result import ToolResult
 from src.tools.worker_tools import execute_tool_call
@@ -34,7 +35,7 @@ from src.tools.worker_tools import execute_tool_call
 TOOL_RULES = """规则：
 - 只能使用上面这种 Markdown 代码块调用工具，不要输出原生 JSON tool_use 或 function_call。
 - 如果用户请求需要读取、写入或执行命令，请直接输出对应的工具代码块。
-- 当你要查看或探查某个目录/项目结构时，必须立即调用 list_dir 或 glob_files 工具，不要用 run_command 跑 dir/ls（Windows 下会失败）。
+- 当用户要求分析、检查或审阅项目时，第一步调用 project_tree 获取精简结构；随后只读取入口、依赖、配置、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls。
 - 当你说要“查看”、“读取”或“探查”某个文件时，必须在同一轮回复中立即调用 read_file 工具，不能只口头描述而不调用工具。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块（正文代码块不会被保存为文件）。每个文件一次 write_file，path 用有意义的文件名。
 - 如果用户指定了绝对路径（如 G:\\MAO_test\\index.html），直接使用该路径；如果只给了文件夹（如 G:\\MAO_test），请在该文件夹下创建合理的文件名，例如 index.html、login.js、style.css。
@@ -42,6 +43,8 @@ TOOL_RULES = """规则：
 - 需要查询网络信息时，使用 web_search 搜索或 fetch_url 抓取具体网页。
 - 对于多步骤或项目类任务（如“做一个项目/系统/前后端应用”）：先用文字简要输出方案（要创建哪些文件、技术选型、目录结构），再逐步用 write_file 实现，不要急于写代码。
 - 工具调用结束后必须给用户一份完整的最终答复，说明检查了什么、关键发现、建议或下一步，以及实际写入的文件；禁止以工具调用作为最后输出。
+- 项目分析的最终答复必须包含“项目结构”章节，并复用 project_tree 的精简结果。
+- 项目分析最终答复默认控制在 3000 个汉字以内；优先完整给出项目结构、关键发现、迁移阶段、风险和验收标准，宁可压缩细节也不能在标题、表格或列表中途结束。证据不足的细节标记为“待确认”，不要继续读取全部文件。
 - 如果不需要工具，直接回复用户即可，不要编造工具调用。
 """
 
@@ -49,7 +52,7 @@ TOOL_RULES = """规则：
 # 原生 tool_use 模式下的规则（工具定义由 tools= 参数提供，无需 Markdown 说明）
 TOOL_RULES_NATIVE = """规则：
 - 你可以通过原生工具调用（tool_use）使用提供的工具完成用户任务。
-- 探查目录/项目结构时调用 list_dir 或 glob_files，不要用 run_command 跑 dir/ls。
+- 分析、检查或审阅项目时，第一步调用 project_tree；随后只读取入口、依赖、配置、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls。
 - 当你说要“查看”或“读取”某个文件时，必须立即调用 read_file，不能只口头描述。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块。
 - 如果用户指定了绝对路径，直接使用该路径；如果只给了文件夹，请在该文件夹下创建合理的文件名。
@@ -57,6 +60,8 @@ TOOL_RULES_NATIVE = """规则：
 - 需要查询网络信息时，使用 web_search 或 fetch_url。
 - 对于多步骤或项目类任务：先用文字简要输出方案（要创建哪些文件、技术选型、目录结构），再逐步用 write_file 实现。
 - 工具调用结束后必须给用户一份完整的最终答复，说明检查了什么、关键发现、建议或下一步，以及实际写入的文件；禁止以工具调用作为最后输出。
+- 项目分析的最终答复必须包含“项目结构”章节，并复用 project_tree 的精简结果。
+- 项目分析最终答复默认控制在 3000 个汉字以内；优先完整给出项目结构、关键发现、迁移阶段、风险和验收标准，宁可压缩细节也不能在标题、表格或列表中途结束。证据不足的细节标记为“待确认”，不要继续读取全部文件。
 - 如果不需要工具，直接回复用户即可。
 """
 
@@ -83,6 +88,18 @@ _COLLABORATION_KEYWORDS = (
     "前后端交互", "前后端项目", "全栈项目", "综合起来做", "综合做一个",
     "立项", "多步骤实现", "多页面",
 )
+
+_ANALYSIS_ONLY_KEYWORDS = (
+    "只做方案", "先做方案", "仅做方案", "只给方案",
+    "只分析", "仅分析", "不要修改", "不修改文件", "只读分析",
+)
+
+_ANALYSIS_READ_FILE_LIMIT = 12
+_ANALYSIS_FINAL_CHAR_LIMIT = 6000
+
+
+def _is_analysis_only_request(user_input: str) -> bool:
+    return any(keyword in user_input for keyword in _ANALYSIS_ONLY_KEYWORDS)
 
 
 class AgentTurnResult(BaseModel):
@@ -162,9 +179,19 @@ class Agent:
             self._native_tools_computed = True
         return self._native_tools_cache
 
-    def _native_kwargs(self) -> dict[str, Any]:
+    def _native_kwargs(self, read_only: bool = False) -> dict[str, Any]:
         """构造传给 gateway 的工具相关 kwargs"""
-        tools = self._get_native_tools()
+        if read_only and self._should_use_native_tools():
+            names = []
+            for name in tool_registry.list_tools():
+                spec = tool_registry.get(name)
+                if spec and spec.category == "read":
+                    names.append(name)
+            ptype = self._provider_type()
+            schema_type = "anthropic" if ptype == "anthropic" else "openai"
+            tools = tool_registry.build_tool_schemas(schema_type, names)
+        else:
+            tools = self._get_native_tools()
         return {"tools": tools} if tools else {}
 
     def _get_effective_max_context(self) -> int:
@@ -322,7 +349,12 @@ class Agent:
         return None
 
     def _execute_tool_calls(
-        self, content: str, files_written: list[str] | None = None
+        self,
+        content: str,
+        files_written: list[str] | None = None,
+        read_cache: dict[str, ToolResult] | None = None,
+        analysis_only: bool = False,
+        read_file_keys: set[str] | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """同步执行工具调用（用于 run_turn，approve 模式下视为自动批准）"""
         calls: list[dict[str, Any]] = []
@@ -342,13 +374,58 @@ class Agent:
                 outputs.append(f"\n[工具 {tool_name} 被拒绝：当前为只读模式]\n")
                 continue
 
-            result = execute_tool_call(tool_name, params, self.session.output_dir)
+            cache_key = build_read_cache_key(tool_name, params, self.session.output_dir)
+            tool_spec = tool_registry.get(tool_name)
+            category = tool_spec.category if tool_spec else "unknown"
+            if analysis_only and category != "read":
+                call = {
+                    "tool": tool_name,
+                    "params": params,
+                    "success": False,
+                    "error": "只做分析/方案：仅允许只读工具",
+                }
+                calls.append(call)
+                outputs.append(f"\n[工具 {tool_name} 被拒绝：只做分析/方案，仅允许只读工具]\n")
+                continue
+            if (
+                analysis_only
+                and tool_name == "read_file"
+                and read_file_keys is not None
+                and (read_cache is None or cache_key not in read_cache)
+                and cache_key not in read_file_keys
+                and len(read_file_keys) >= _ANALYSIS_READ_FILE_LIMIT
+            ):
+                error = f"项目分析抽样已达到 {_ANALYSIS_READ_FILE_LIMIT} 个不同文件上限"
+                result = ToolResult(success=True, output=error)
+                calls.append({
+                    "tool": tool_name,
+                    "params": params,
+                    "success": True,
+                    "output": error,
+                    "error": None,
+                    "cached": False,
+                    "skipped": True,
+                })
+                outputs.append(self._format_tool_result(tool_name, result))
+                continue
+            if analysis_only and tool_name == "read_file" and cache_key and read_file_keys is not None:
+                read_file_keys.add(cache_key)
+            cached = bool(read_cache is not None and cache_key in read_cache)
+            if cached:
+                result = read_cache[cache_key]  # type: ignore[index]
+            else:
+                result = execute_tool_call(tool_name, params, self.session.output_dir)
+                if read_cache is not None and cache_key and result.success:
+                    read_cache[cache_key] = result
+                if read_cache is not None and should_invalidate_read_cache(tool_name):
+                    read_cache.clear()
             calls.append({
                 "tool": tool_name,
                 "params": params,
                 "success": result.success,
                 "output": result.output,
                 "error": result.error,
+                "cached": cached,
             })
             outputs.append(self._format_tool_result(tool_name, result))
             if files_written is not None:
@@ -393,6 +470,9 @@ class Agent:
         tool_calls: list[dict[str, Any]] = []
         files_written: list[str] = []
         final_content = ""
+        read_cache: dict[str, ToolResult] = {}
+        analysis_only = _is_analysis_only_request(user_input)
+        read_file_keys: set[str] = set()
 
         iterations = 0
         while True:
@@ -402,7 +482,7 @@ class Agent:
                 task_id=f"chat-{self.session.id}",
                 max_tokens=4096,
                 temperature=0.2,
-                **self._native_kwargs(),
+                **self._native_kwargs(read_only=analysis_only),
             )
             total_input += response.input_tokens
             total_output += response.output_tokens
@@ -424,7 +504,7 @@ class Agent:
                     task_id=f"chat-{self.session.id}-finalize",
                     max_tokens=4096,
                     temperature=0.2,
-                    **self._native_kwargs(),
+                    **self._native_kwargs(read_only=analysis_only),
                 )
                 total_input += response.input_tokens
                 total_output += response.output_tokens
@@ -433,7 +513,13 @@ class Agent:
                 final_content = response.content
                 break
 
-            tool_results_text, calls = self._execute_tool_calls(response.content, files_written)
+            tool_results_text, calls = self._execute_tool_calls(
+                response.content,
+                files_written,
+                read_cache,
+                analysis_only,
+                read_file_keys,
+            )
             if not calls:
                 break
 
@@ -443,6 +529,27 @@ class Agent:
                 tool_results_text + "\n\n请继续完成用户请求。",
             )
             iterations += 1
+
+        if analysis_only and len(final_content) > _ANALYSIS_FINAL_CHAR_LIMIT:
+            self.session.add_message(
+                "user",
+                "上一版分析过长。请基于已经获得的证据，重新输出一份不超过 3000 个汉字的完整最终方案。"
+                "必须包含项目结构、关键发现、Java 迁移阶段、风险和验收标准；不要调用任何工具，"
+                "不要在标题、表格或列表中途结束。只输出最终方案。",
+            )
+            response = self.gateway.chat_with_main_model(
+                messages=self.session.messages,
+                task_id=f"chat-{self.session.id}-concise",
+                max_tokens=4096,
+                temperature=0.2,
+            )
+            total_input += response.input_tokens
+            total_output += response.output_tokens
+            total_cost += response.cost_usd
+            concise_content = self._strip_toolcall_artifacts(response.content).strip()
+            if concise_content:
+                final_content = concise_content
+                self.session.add_message("assistant", final_content)
 
         # 不再自动抽取代码块为 generated_N 文件（易产出无意义文件名）；
         # 模型应通过 write_file 显式写文件。仅当本轮未写任何文件时，兜底保存回复为 response.md。
@@ -482,6 +589,9 @@ class Agent:
         tool_calls: list[dict[str, Any]] = []
         files_written: list[str] = []
         final_content = ""
+        read_cache: dict[str, ToolResult] = {}
+        analysis_only = _is_analysis_only_request(user_input)
+        read_file_keys: set[str] = set()
 
         iterations = 0
         while True:
@@ -493,7 +603,7 @@ class Agent:
                 task_id=f"chat-{self.session.id}",
                 max_tokens=4096,
                 temperature=0.2,
-                **self._native_kwargs(),
+                **self._native_kwargs(read_only=analysis_only),
             ):
                 event = self._handle_stream_chunk(chunk)
                 if event is not None:
@@ -533,7 +643,7 @@ class Agent:
                     task_id=f"chat-{self.session.id}-finalize",
                     max_tokens=4096,
                     temperature=0.2,
-                    **self._native_kwargs(),
+                    **self._native_kwargs(read_only=analysis_only),
                 ):
                     event = self._handle_stream_chunk(chunk)
                     if event is not None:
@@ -586,18 +696,63 @@ class Agent:
                     )
                     continue
 
-                if self.approval_mode == "approve":
-                    request_id = self._register_permission_request()
-                    yield ChatStreamEvent(
-                        type="permission_request",
-                        permission_request={
-                            "request_id": request_id,
-                            "tool": tool_name,
-                            "params": params,
-                            "message": self._build_permission_message(tool_name, params),
-                        },
+                tool_spec = tool_registry.get(tool_name)
+                category = tool_spec.category if tool_spec else "unknown"
+                if analysis_only and category != "read":
+                    call = {
+                        "tool": tool_name,
+                        "params": params,
+                        "success": False,
+                        "error": "只做分析/方案：仅允许只读工具",
+                    }
+                    calls.append(call)
+                    yield ChatStreamEvent(type="tool_complete", tool_call=call)
+                    tool_results_parts.append(
+                        f"\n[工具 {tool_name} 被拒绝：只做分析/方案，仅允许只读工具]\n"
                     )
-                    approved = await self._wait_for_permission(request_id)
+                    continue
+
+                cache_key = build_read_cache_key(tool_name, params, self.session.output_dir)
+                if (
+                    analysis_only
+                    and tool_name == "read_file"
+                    and cache_key not in read_cache
+                    and cache_key not in read_file_keys
+                    and len(read_file_keys) >= _ANALYSIS_READ_FILE_LIMIT
+                ):
+                    error = f"项目分析抽样已达到 {_ANALYSIS_READ_FILE_LIMIT} 个不同文件上限"
+                    result = ToolResult(success=True, output=error)
+                    call = {
+                        "tool": tool_name,
+                        "params": params,
+                        "success": True,
+                        "output": error,
+                        "error": None,
+                        "cached": False,
+                        "skipped": True,
+                    }
+                    calls.append(call)
+                    yield ChatStreamEvent(type="tool_complete", tool_call=call)
+                    tool_results_parts.append(self._format_tool_result(tool_name, result))
+                    continue
+                if analysis_only and tool_name == "read_file" and cache_key:
+                    read_file_keys.add(cache_key)
+
+                if self.approval_mode == "approve":
+                    if cache_key in read_cache:
+                        approved = True
+                    else:
+                        request_id = self._register_permission_request()
+                        yield ChatStreamEvent(
+                            type="permission_request",
+                            permission_request={
+                                "request_id": request_id,
+                                "tool": tool_name,
+                                "params": params,
+                                "message": self._build_permission_message(tool_name, params),
+                            },
+                        )
+                        approved = await self._wait_for_permission(request_id)
                     if not approved:
                         call = {
                             "tool": tool_name,
@@ -610,19 +765,28 @@ class Agent:
                         tool_results_parts.append(f"\n[工具 {tool_name} 被用户拒绝]\n")
                         continue
 
+                cached = bool(cache_key and cache_key in read_cache)
                 yield ChatStreamEvent(
                     type="tool_start",
-                    tool_call={"tool": tool_name, "params": params},
+                    tool_call={"tool": tool_name, "params": params, "cached": cached},
                 )
-                result = await asyncio.to_thread(
-                    execute_tool_call, tool_name, params, self.session.output_dir
-                )
+                if cached:
+                    result = read_cache[cache_key]  # type: ignore[index]
+                else:
+                    result = await asyncio.to_thread(
+                        execute_tool_call, tool_name, params, self.session.output_dir
+                    )
+                    if cache_key and result.success:
+                        read_cache[cache_key] = result
+                    if should_invalidate_read_cache(tool_name):
+                        read_cache.clear()
                 call = {
                     "tool": tool_name,
                     "params": params,
                     "success": result.success,
                     "output": result.output,
                     "error": result.error,
+                    "cached": cached,
                 }
                 calls.append(call)
                 yield ChatStreamEvent(type="tool_complete", tool_call=call)
@@ -638,6 +802,34 @@ class Agent:
                 "".join(tool_results_parts) + "\n\n请继续完成用户请求。",
             )
             iterations += 1
+
+        if analysis_only and len(final_content) > _ANALYSIS_FINAL_CHAR_LIMIT:
+            self.session.add_message(
+                "user",
+                "上一版分析过长。请基于已经获得的证据，重新输出一份不超过 3000 个汉字的完整最终方案。"
+                "必须包含项目结构、关键发现、Java 迁移阶段、风险和验收标准；不要调用任何工具，"
+                "不要在标题、表格或列表中途结束。只输出最终方案。",
+            )
+            concise_content = ""
+            async for chunk in self.gateway.chat_with_main_model_stream(
+                messages=self.session.messages,
+                task_id=f"chat-{self.session.id}-concise",
+                max_tokens=4096,
+                temperature=0.2,
+            ):
+                event = self._handle_stream_chunk(chunk)
+                if event is not None:
+                    if event.type == "delta":
+                        concise_content += chunk.content or ""
+                    yield event
+                if chunk.type == "usage":
+                    total_input += chunk.input_tokens
+                    total_output += chunk.output_tokens
+                    total_cost += chunk.cost_usd
+            concise_content = self._strip_toolcall_artifacts(concise_content).strip()
+            if concise_content:
+                final_content = concise_content
+                self.session.add_message("assistant", final_content)
 
         # 不再自动抽取代码块为 generated_N 文件；仅当本轮未写任何文件时兜底保存回复为 response.md
         if self.approval_mode == "auto" and not files_written and final_content.strip():
@@ -659,6 +851,9 @@ class Agent:
 
     async def _should_collaborate(self, user_input: str) -> bool:
         """是否需要多模型协作：先做关键字预筛，再交 LLM 判断"""
+        # 只读分析/方案任务优先保持单 Agent，避免多 Worker 重复侦察同一项目。
+        if _is_analysis_only_request(user_input):
+            return False
         # 关键字预筛：明确的项目/多步骤任务直接走协作
         if any(kw in user_input for kw in _COLLABORATION_KEYWORDS):
             return True

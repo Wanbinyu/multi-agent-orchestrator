@@ -87,6 +87,30 @@ def test_process_tool_calls_rejects_ungranted_tool(tmp_path):
     assert "被拒绝" in processed
 
 
+def test_process_tool_calls_reuses_reads_and_invalidates_after_write(tmp_path):
+    target = tmp_path / "data.txt"
+    target.write_text("old", encoding="utf-8")
+    cache = {}
+    content = (
+        '```tool:read_file\n{"path":"data.txt"}\n```\n'
+        '```tool:read_file\n{"path":"data.txt"}\n```\n'
+        '```tool:write_file\n{"path":"data.txt","content":"new"}\n```\n'
+        '```tool:read_file\n{"path":"data.txt"}\n```'
+    )
+
+    _processed, results = process_tool_calls(
+        content,
+        str(tmp_path),
+        allowed_tools=["read_file", "write_file"],
+        read_cache=cache,
+    )
+
+    assert [result.get("cached", False) for result in results] == [
+        False, True, False, False,
+    ]
+    assert results[-1]["output"] == "new"
+
+
 def test_process_tool_calls_supports_special_closing_token(tmp_path):
     (tmp_path / "data.txt").write_text("ok", encoding="utf-8")
     content = (

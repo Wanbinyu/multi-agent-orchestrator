@@ -11,7 +11,9 @@ from src.cli.chat_command import (
     COMMANDS,
     SlashCommandCompleter,
     _cmd_test_models,
+    _cmd_tree,
     _format_tool_action,
+    _parse_tree_args,
     _print_welcome,
     _set_mode,
     _summarize_tool_activity,
@@ -97,6 +99,7 @@ def test_slash_command_completion_opens_on_slash():
     assert "/new" in names
     assert "/memory search" in names
     assert "/tools" in names
+    assert "/tree" in names
     assert "/exit" in names
 
 
@@ -147,3 +150,22 @@ def test_tool_action_and_summary_are_human_readable_and_compact():
     assert "2 次成功，1 次失败" not in summary
     assert "3 次成功，1 次失败" in summary
     assert "只读模式" in summary
+
+
+def test_tree_args_preserve_windows_paths_with_spaces():
+    assert _parse_tree_args(r"G:\MAO test 5") == (r"G:\MAO test", 5)
+    assert _parse_tree_args(r"G:\MAO test") == (r"G:\MAO test", 4)
+    assert _parse_tree_args("") == (".", 4)
+
+
+def test_cmd_tree_is_local_and_reports_errors(tmp_path, capsys):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print(1)")
+
+    assert _cmd_tree(f"{tmp_path} 2") is True
+    output = capsys.readouterr().out
+    assert "main.py" in output
+    assert "未调用模型" in output
+
+    assert _cmd_tree(str(tmp_path / "missing")) is False
+    assert "项目树生成失败" in capsys.readouterr().out

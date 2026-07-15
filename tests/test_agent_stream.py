@@ -125,3 +125,75 @@ def test_run_turn_stream_writes_response_md(tmp_path):
     done = [e for e in events if e.type == "done"][0]
     assert done.files_written
     assert any("response.md" in f for f in done.files_written)
+
+
+def test_run_turn_stream_reuses_duplicate_read_in_same_turn(tmp_path):
+    session = _make_session(tmp_path)
+    target = tmp_path / "output" / "same.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("cached content", encoding="utf-8")
+    duplicate_calls = (
+        '```tool:read_file\n{"path":"same.txt"}\n```\n'
+        '```tool:read_file\n{"path":"same.txt"}\n```'
+    )
+    gateway = MagicMock()
+    gateway.chat_with_main_model_stream.side_effect = [
+        _async_chunks(StreamChunk(type="delta", content=duplicate_calls)),
+        _async_chunks(StreamChunk(type="delta", content="完成")),
+    ]
+
+    events = _collect_events(Agent(gateway, session), "读取两次")
+    done = next(event for event in events if event.type == "done")
+
+    assert [call["cached"] for call in done.tool_calls] == [False, True]
+    starts = [event.tool_call for event in events if event.type == "tool_start"]
+    assert [call["cached"] for call in starts] == [False, True]
+
+
+def test_analysis_only_turn_enforces_unique_read_file_limit(tmp_path):
+    session = _make_session(tmp_path)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    calls = []
+    for index in range(14):
+        (output_dir / f"file-{index}.txt").write_text(str(index), encoding="utf-8")
+        calls.append(
+            f'```tool:read_file\n{{"path":"file-{index}.txt"}}\n```'
+        )
+
+    gateway = MagicMock()
+    gateway.chat_with_main_model_stream.side_effect = [
+        _async_chunks(StreamChunk(type="delta", content="\n".join(calls))),
+        _async_chunks(StreamChunk(type="delta", content="完整方案")),
+    ]
+
+    events = _collect_events(Agent(gateway, session), "分析项目，只做方案")
+    done = next(event for event in events if event.type == "done")
+
+    assert len([event for event in events if event.type == "tool_start"]) == 12
+    assert sum(call.get("skipped", False) for call in done.tool_calls) == 2
+    assert all("12 个不同文件上限" in call["output"] for call in done.tool_calls[-2:])
+
+
+def test_analysis_only_turn_rewrites_overlong_final_answer(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = MagicMock()
+    gateway.chat_with_main_model_stream.side_effect = [
+        _async_chunks(
+            StreamChunk(type="delta", content="长" * 6001),
+            StreamChunk(type="usage", input_tokens=100, output_tokens=100),
+        ),
+        _async_chunks(
+            StreamChunk(type="delta", content="完整精简方案"),
+            StreamChunk(type="usage", input_tokens=50, output_tokens=10),
+        ),
+    ]
+
+    events = _collect_events(Agent(gateway, session), "分析项目，只做方案")
+    done = next(event for event in events if event.type == "done")
+
+    assert gateway.chat_with_main_model_stream.call_count == 2
+    assert gateway.chat_with_main_model_stream.call_args.kwargs.get("tools") is None
+    assert done.assistant_message == "完整精简方案"
+    assert done.input_tokens == 150
+    assert done.output_tokens == 110

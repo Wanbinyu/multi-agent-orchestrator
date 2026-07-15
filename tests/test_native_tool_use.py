@@ -143,6 +143,37 @@ def test_native_mode_passes_tools_to_gateway(tmp_path):
     assert len(call_kwargs["tools"]) > 0
 
 
+def test_analysis_only_native_mode_exposes_read_tools_only(tmp_path):
+    cfg = _model_cfg(capabilities=["tool_use"])
+    gw = _make_gateway("done", cfg)
+    agent = Agent(gw, _session(tmp_path))
+
+    agent.run_turn("分析项目，只做方案，不修改文件")
+
+    schemas = gw.chat_with_main_model.call_args.kwargs["tools"]
+    names = {schema["name"] for schema in schemas}
+    assert "read_file" in names
+    assert "project_tree" in names
+    assert "write_file" not in names
+    assert "run_command" not in names
+
+
+def test_analysis_only_sync_turn_rewrites_overlong_answer_without_tools(tmp_path):
+    cfg = _model_cfg(capabilities=["tool_use"])
+    gw = _make_gateway("长" * 6001, cfg)
+    gw.chat_with_main_model.side_effect = [
+        ChatResponse(content="长" * 6001, model="claude", provider="anthropic"),
+        ChatResponse(content="完整精简方案", model="claude", provider="anthropic"),
+    ]
+    agent = Agent(gw, _session(tmp_path))
+
+    result = agent.run_turn("分析项目，只做方案")
+
+    assert result.assistant_message == "完整精简方案"
+    assert gw.chat_with_main_model.call_count == 2
+    assert gw.chat_with_main_model.call_args.kwargs.get("tools") is None
+
+
 def test_markdown_mode_does_not_pass_tools(tmp_path):
     cfg = _model_cfg(capabilities=[])
     gw = _make_gateway("done", cfg)

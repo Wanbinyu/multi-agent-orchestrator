@@ -53,3 +53,29 @@ def test_stream_turn_prints_final_answer_and_compact_work_summary(capsys):
     assert "本轮工作" in output
     assert "交付文件" in output
     assert "Read(G:/demo/README.md)" not in output
+
+
+class _FailedReviewAgent(_FakeAgent):
+    async def run_turn_stream(self, _user_input: str):
+        yield ChatStreamEvent(
+            type="plan",
+            plan={"summary": "只读分析", "tasks": []},
+        )
+        yield ChatStreamEvent(
+            type="review_complete",
+            review={"passed": False, "issues": ["缺少测试"]},
+        )
+        yield ChatStreamEvent(
+            type="done",
+            assistant_message="请补充测试后再实施。",
+            input_tokens=10,
+            output_tokens=5,
+        )
+
+
+def test_stream_turn_handles_failed_review_without_markup_error(capsys):
+    asyncio.run(_stream_turn(_FailedReviewAgent(), "只做方案"))
+    output = capsys.readouterr().out
+    assert "审查结果：未通过" in output
+    assert "缺少测试" in output
+    assert "请补充测试后再实施" in output

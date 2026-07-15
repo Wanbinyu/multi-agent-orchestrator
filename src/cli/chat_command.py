@@ -33,6 +33,7 @@ SLASH_COMMANDS: list[tuple[str, str, str]] = [
     ("/load", "/load <id>", "加载已有会话"),
     ("/save", "/save", "保存当前会话"),
     ("/sessions", "/sessions", "列出最近会话"),
+    ("/tree", "/tree [路径] [深度]", "零 token 显示项目结构"),
     ("/plan", "/plan <需求>", "执行一次性多模型任务计划"),
     ("/memory add", "/memory add <分类> <内容>", "添加长期记忆"),
     ("/memory list", "/memory list [分类]", "列出长期记忆"),
@@ -104,6 +105,7 @@ def _summarize_params(params: dict) -> str:
 
 
 _TOOL_PHASES: dict[str, tuple[str, str]] = {
+    "project_tree": ("explore", "探索项目"),
     "list_dir": ("explore", "探索项目"),
     "glob_files": ("explore", "探索项目"),
     "read_file": ("explore", "探索项目"),
@@ -126,6 +128,7 @@ def _format_tool_action(tool_name: str, params: dict[str, Any]) -> str:
     target = _summarize_params(params)
     labels = {
         "list_dir": "浏览目录",
+        "project_tree": "生成项目树",
         "glob_files": "匹配文件",
         "read_file": "读取文件",
         "grep_content": "搜索内容",
@@ -145,7 +148,7 @@ def _format_tool_action(tool_name: str, params: dict[str, Any]) -> str:
 
 
 def _progress_message(counts: Counter[str]) -> str:
-    directories = counts["list_dir"]
+    directories = counts["list_dir"] + counts["project_tree"]
     files = counts["read_file"]
     searches = sum(counts[name] for name in ("glob_files", "grep_content", "search_project_files"))
     writes = counts["write_file"]
@@ -169,19 +172,35 @@ def _summarize_tool_activity(tool_calls: list[dict[str, Any]]) -> list[str]:
     """生成稳定、紧凑的本轮工作摘要。"""
     counts: Counter[str] = Counter()
     unique_targets: dict[str, set[str]] = defaultdict(set)
+    completed_targets: dict[str, set[str]] = defaultdict(set)
     failed: list[dict[str, Any]] = []
+    cache_hits = 0
+    skipped = 0
     for call in tool_calls:
         tool_name = str(call.get("tool", "unknown"))
         counts[tool_name] += 1
-        unique_targets[tool_name].add(_summarize_params(call.get("params", {}) or {}))
+        target = _summarize_params(call.get("params", {}) or {})
+        unique_targets[tool_name].add(target)
         if not call.get("success"):
             failed.append(call)
+        elif call.get("skipped"):
+            skipped += 1
+        else:
+            completed_targets[tool_name].add(target)
+        if call.get("cached"):
+            cache_hits += 1
 
     lines: list[str] = []
-    if counts["list_dir"] or counts["read_file"]:
+    if counts["project_tree"] or counts["list_dir"] or counts["read_file"]:
+        tree_text = (
+            f"生成 {counts['project_tree']} 次项目树，"
+            if counts["project_tree"]
+            else ""
+        )
         lines.append(
-            f"探索：浏览 {len(unique_targets['list_dir'])} 个目录，"
-            f"读取 {len(unique_targets['read_file'])} 个文件"
+            f"探索：{tree_text}"
+            f"浏览 {len(completed_targets['list_dir'])} 个目录，"
+            f"读取 {len(completed_targets['read_file'])} 个文件"
         )
     search_count = sum(counts[name] for name in ("glob_files", "grep_content", "search_project_files", "search_memory"))
     if search_count:
@@ -194,8 +213,12 @@ def _summarize_tool_activity(tool_calls: list[dict[str, Any]]) -> list[str]:
     duplicate_count = sum(counts.values()) - sum(len(values) for values in unique_targets.values())
     if duplicate_count:
         lines.append(f"折叠：{duplicate_count} 次重复操作未逐条展示")
-    success_count = len(tool_calls) - len(failed)
-    lines.append(f"状态：{success_count} 次成功，{len(failed)} 次失败")
+    if cache_hits:
+        lines.append(f"缓存：{cache_hits} 次只读操作直接复用本轮结果")
+    if skipped:
+        lines.append(f"抽样：{skipped} 次超出读取上限的请求已跳过")
+    success_count = len(tool_calls) - len(failed) - skipped
+    lines.append(f"状态：{success_count} 次成功，{len(failed)} 次失败，{skipped} 次跳过")
     for call in failed[:3]:
         lines.append(
             f"失败：{_format_tool_action(str(call.get('tool', 'unknown')), call.get('params', {}) or {})}"
@@ -438,7 +461,7 @@ async def _stream_turn(agent: Agent, user_input: str):
                 status_text = "通过" if passed else "未通过"
                 color = "green" if passed else "yellow"
                 console.print(
-                    f"\n[bold {color}]🔍 审查结果：{status_text}[/{color}]"
+                    f"\n[bold {color}]🔍 审查结果：{status_text}[/]"
                 )
                 for issue in review.get("issues", []):
                     console.print(f"  ⚠ {issue}")
@@ -506,6 +529,31 @@ def _cmd_sessions(store: SessionStore):
     console.print("\n[bold]最近会话：[/bold]")
     for s in sessions[:10]:
         console.print(f"  {s.id}  {s.title or '(无标题)'}  模式={s.approval_mode}  更新于 {s.updated_at}")
+
+
+def _parse_tree_args(raw: str) -> tuple[str, int]:
+    """解析 `/tree [路径] [深度]`，保留 Windows 路径中的空格和反斜杠。"""
+    value = raw.strip()
+    if not value:
+        return ".", 4
+    parts = value.rsplit(maxsplit=1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return parts[0], int(parts[1])
+    return value, 4
+
+
+def _cmd_tree(raw: str) -> bool:
+    """本地生成项目树，不调用 Gateway，也不产生 token。"""
+    from src.tools.search_tools import project_tree
+
+    path, max_depth = _parse_tree_args(raw)
+    result = project_tree(path=path, max_depth=max_depth)
+    if not result.success:
+        console.print(f"[bold red]项目树生成失败：{result.error}[/bold red]")
+        return False
+    console.print(Panel(result.output, title="项目结构", border_style="cyan"))
+    console.print("[dim]本命令在本地执行，未调用模型，未产生 token。[/dim]")
+    return True
 
 
 def _cmd_memory_add(store: MemoryStore, category: str, content: str, tags: list[str] | None = None):
@@ -733,6 +781,8 @@ def run_chat_loop(
                     console.print(f"[bold green]已保存会话：{session.id}[/bold green]")
                 elif cmd == "/sessions":
                     _cmd_sessions(store)
+                elif cmd == "/tree":
+                    _cmd_tree(arg)
                 elif cmd == "/plan":
                     if not arg:
                         console.print("[bold red]用法：/plan <需求>[/bold red]")
@@ -801,7 +851,7 @@ def run_chat_loop(
                 asyncio.run(_stream_turn(agent, user_input))
                 store.save(session)
             except Exception as e:
-                console.print(f"[bold red]错误：{e}[/bold red]")
+                console.print(Text(f"错误：{e}", style="bold red"))
 
     finally:
         store.save(session)

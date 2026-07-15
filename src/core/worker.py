@@ -11,7 +11,9 @@ import yaml
 from src.gateway.client import GatewayClient
 from src.models.schemas import ChatMessage, Task, TaskResult
 from src.tools.file_tools import write_text_file
+from src.tools.read_cache import build_read_cache_key, should_invalidate_read_cache
 from src.tools.registry import tool_registry
+from src.tools.tool_result import ToolResult
 from src.tools.worker_tools import execute_tool_call
 
 
@@ -89,7 +91,8 @@ class Worker:
 {tool_instructions}
 
 执行规则：
-- 探查目录时优先使用 list_dir 或 glob_files，读取具体文件时使用 read_file。
+- 分析项目时先用 project_tree 获取精简结构，再读取入口、依赖、配置、核心模块和测试文件；默认最多读取 12 个不同文件，禁止无差别读取全部文件。
+- 项目分析文本默认控制在 3000 个汉字以内，必须完整覆盖结构、发现、实施阶段、风险和验收；宁可压缩细节也不能中途结束，证据不足的内容标记为“待确认”。
 - 工具执行结果会返回给你；收到结果后必须继续完成任务，不能停在工具调用。
 - 任务需要创建或修改文件时，必须使用 write_file/edit_file，并使用有意义的文件名。
 - 禁止只在正文中输出代码块代替写文件；正文代码块不会自动生成项目文件。
@@ -112,6 +115,7 @@ class Worker:
             iterations = 0
             recovery_requested = False
             requires_file_output = _task_requires_file_output(task)
+            read_cache: dict[str, ToolResult] = {}
 
             while True:
                 response = self.gateway.chat(
@@ -132,6 +136,7 @@ class Worker:
                     task_output_dir,
                     allowed_prefixes=worker_cfg.get("allowed_commands"),
                     allowed_tools=tools,
+                    read_cache=read_cache,
                 )
                 _collect_written_files(tool_results, task_output_dir, files_written)
 
@@ -284,7 +289,7 @@ def _expand_legacy_read_tools(tools: list[str]) -> list[str]:
     """旧配置已授予读取能力时，补齐新的只读目录工具。"""
     expanded = list(dict.fromkeys(tools))
     if any(name in expanded for name in ("read_file", "search_project_files", "search_memory")):
-        for name in ("list_dir", "glob_files", "grep_content", "read_file"):
+        for name in ("project_tree", "list_dir", "glob_files", "grep_content", "read_file"):
             if name not in expanded:
                 expanded.append(name)
     return expanded
@@ -349,6 +354,7 @@ def process_tool_calls(
     base_dir: str,
     allowed_prefixes: list[str] | None = None,
     allowed_tools: list[str] | None = None,
+    read_cache: dict[str, ToolResult] | None = None,
 ) -> tuple[str, list[dict]]:
     """解析并执行工具调用，返回处理后的内容和工具结果列表"""
     pattern = r"```tool:(\w+)\n(.*?)(?:```|<\|tool_calls_section_end\|>|$)"
@@ -378,13 +384,23 @@ def process_tool_calls(
             })
             return f"\n[工具调用参数解析失败：{e}]\n"
 
-        result = execute_tool_call(tool_name, params, base_dir, allowed_prefixes)
+        cache_key = build_read_cache_key(tool_name, params, base_dir)
+        cached = bool(read_cache is not None and cache_key in read_cache)
+        if cached:
+            result = read_cache[cache_key]  # type: ignore[index]
+        else:
+            result = execute_tool_call(tool_name, params, base_dir, allowed_prefixes)
+            if read_cache is not None and cache_key and result.success:
+                read_cache[cache_key] = result
+            if read_cache is not None and should_invalidate_read_cache(tool_name):
+                read_cache.clear()
         tool_results.append({
             "tool": tool_name,
             "params": params,
             "success": result.success,
             "output": result.output,
             "error": result.error,
+            "cached": cached,
         })
 
         output_lines = [f"\n[工具 {tool_name} 执行结果]"]

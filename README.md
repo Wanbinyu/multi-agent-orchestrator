@@ -147,6 +147,7 @@ python run.py chat
 | `/new [标题]` | 创建新会话 |
 | `/load <session_id>` | 加载已有会话 |
 | `/save` | 手动保存当前会话 |
+| `/tree [路径] [深度]` | 本地显示项目结构，不调用模型、不产生 token |
 | `/plan <需求>` | 调用 Orchestrator 执行一次性任务计划 |
 | `/tools` | 显示当前可用工具 |
 | `/exit` | 退出 |
@@ -210,7 +211,7 @@ ARK_API_KEY=你的火山方舟 Key
 Worker 在执行任务时可以使用以下工具：
 
 - **write_file / edit_file**：使用明确路径创建或精确修改文件
-- **read_file / list_dir / glob_files / grep_content**：读取文件、探查目录和搜索内容，支持绝对路径
+- **project_tree / read_file / list_dir / glob_files / grep_content**：生成受限项目树、读取文件、探查目录和搜索内容，支持绝对路径
 - **run_command**：运行白名单内的命令
 - **web_search / fetch_url**：搜索网页和抓取 URL 内容
 - **search_project_files / search_memory**：检索项目索引与长期记忆
