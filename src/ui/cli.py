@@ -7,6 +7,15 @@ import webbrowser
 import uvicorn
 
 
+def serve(host: str = "127.0.0.1", port: int = 8123, *, open_browser: bool = True) -> None:
+    """Run the WebUI for both `mao web` and the legacy `mao-ui` command."""
+    url = f"http://{host}:{port}"
+    print(f"MAO Web UI: {url}")
+    if open_browser:
+        webbrowser.open(url)
+    uvicorn.run("src.ui.app:app", host=host, port=port, log_level="info")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="启动 MAO Web UI")
     parser.add_argument("--host", default="127.0.0.1")
@@ -14,11 +23,7 @@ def main() -> None:
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
 
-    url = f"http://{args.host}:{args.port}"
-    print(f"MAO Web UI: {url}")
-    if not args.no_open:
-        webbrowser.open(url)
-    uvicorn.run("src.ui.app:app", host=args.host, port=args.port, log_level="info")
+    serve(host=args.host, port=args.port, open_browser=not args.no_open)
 
 
 if __name__ == "__main__":

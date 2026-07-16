@@ -1,6 +1,7 @@
 """运行配置路径解析，优先本地私有配置并回退到无密钥示例。"""
 from __future__ import annotations
 
+from importlib.resources import files
 from pathlib import Path
 
 
@@ -17,7 +18,13 @@ def _resolve_config_with_example(path: str | Path, canonical_name: str) -> Path:
 
 
 def resolve_workers_config_path(path: str | Path = "config/workers.yaml") -> Path:
-    return _resolve_config_with_example(path, "workers.yaml")
+    resolved = _resolve_config_with_example(path, "workers.yaml")
+    if resolved.exists():
+        return resolved
+    packaged = files("src.resources").joinpath("workers.yaml.example")
+    if packaged.is_file():
+        return Path(str(packaged))
+    return resolved
 
 
 def resolve_providers_config_path(path: str | Path = "config/providers.yaml") -> Path:

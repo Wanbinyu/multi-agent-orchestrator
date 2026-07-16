@@ -22,12 +22,32 @@ router = APIRouter()
 _base_dir = Path(__file__).parent.parent
 _templates = Jinja2Templates(directory=str(_base_dir / "templates"))
 
-gateway = GatewayClient()
+gateway: GatewayClient | None = None
 store = SessionStore(base_dir="sessions")
 
 # 当前正在流式响应的 Agent 实例，用于权限回调定位
 active_agents: dict[str, Agent] = {}
 _PROJECT_DIRECTORY_SCAN_LIMIT = 5000
+
+
+def _get_gateway() -> GatewayClient:
+    """Create the gateway only after first-run Provider configuration exists."""
+    global gateway
+    if gateway is not None:
+        return gateway
+    if not Path("config/providers.yaml").exists():
+        raise HTTPException(
+            status_code=409,
+            detail="尚未配置 Provider，请先打开连接配置页面。",
+        )
+    try:
+        gateway = GatewayClient()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="尚未配置 Provider，请先打开连接配置页面。",
+        ) from exc
+    return gateway
 
 
 class CreateSessionForm(BaseModel):
@@ -209,7 +229,7 @@ def get_session_context(session_id: str) -> dict[str, Any]:
         session = store.load(session_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return Agent(gateway, session).get_context_status()
+    return Agent(_get_gateway(), session).get_context_status()
 
 
 @router.get("/api/chat/sessions/{session_id}/runs")
@@ -252,7 +272,7 @@ def send_message(session_id: str, form: SendMessageForm) -> dict[str, Any]:
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    agent = Agent(gateway, session)
+    agent = Agent(_get_gateway(), session)
     try:
         result = agent.run_turn(form.message)
     finally:
@@ -269,7 +289,7 @@ async def send_message_stream(session_id: str, form: SendMessageForm):
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    agent = Agent(gateway, session)
+    agent = Agent(_get_gateway(), session)
     active_agents[session_id] = agent
 
     async def event_generator():

@@ -138,4 +138,4 @@ Phase 5（长期记忆与项目上下文）已 100% 完成。下一步将进入 
 
 ## 下一迭代
 
-Phase 6.6 进入 `docs/Phase6.6-项目结构展示与CLI结果可见性计划.md`：先修复单 Agent 工具循环后最终回答不显示的问题，再实现跨平台 `project_tree`、零 token `/tree` 和 Web 文件树。
+Phase 6.6 已完成：修复单 Agent 工具循环后最终回答不显示的问题，并实现跨平台 `project_tree`、零 token `/tree` 和 Web 文件树。

@@ -21,7 +21,7 @@ body:
     id: version
     attributes:
       label: MAO version
-      placeholder: 0.1.0b1
+      placeholder: 0.1.0b2
     validations:
       required: true
   - type: dropdown

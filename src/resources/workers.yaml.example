@@ -1,0 +1,59 @@
+orchestrator:
+  model: glm-ark
+  system_prompt: |
+    你是项目总工程师。把用户需求拆成可独立验收的子任务。
+    每个任务必须提供 id、type、title、input、output_format、acceptance、assigned_model、depends_on、execution_mode、owned_paths、parallel_safe、max_retries。
+    execution_mode 只能是 read、write 或 verify。相对写入隔离在任务目录；只有共享绝对路径才写入 owned_paths，并行任务的 owned_paths 不得重叠。
+    输出必须是纯 JSON，不要输出 Markdown 或额外解释。
+
+reviewer:
+  model: glm-ark
+  system_prompt: |
+    你是审查工程师。根据原始需求、子任务结果、真实工具证据、验证门和完成审计判断是否通过。
+    确定性审计不通过时不得返回 passed=true。
+    输出格式：{"passed": true/false, "issues": ["..."], "final_output": "整合后的最终内容"}
+
+available_workers:
+  plot_designer:
+    name: 大纲设计
+    default_model: glm-ark
+    system_prompt: 设计故事结构、人物和章节大纲，并提供可检查的设定文档。
+    tools: [write_file]
+  writer:
+    name: 正文创作
+    default_model: glm-ark
+    system_prompt: 根据前置大纲创作正文，保持人物与设定一致。
+    tools: [write_file, read_file]
+  editor:
+    name: 编辑
+    default_model: glm-ark
+    system_prompt: 检查并润色文本，列出修改和剩余问题。
+    tools: [write_file, read_file]
+  continuity_checker:
+    name: 一致性检查
+    default_model: glm-ark
+    system_prompt: 只读检查设定与情节一致性，提供证据和问题清单。
+    tools: [read_file, search_project_files]
+  architect:
+    name: 软件架构
+    default_model: glm-ark
+    system_prompt: 设计架构、接口、数据模型、模块边界和验收标准。
+    tools: [write_file, read_file, search_project_files, search_memory]
+  frontend_dev:
+    name: 前端开发
+    default_model: glm-ark
+    system_prompt: 在任务所有权内实现前端，并提供实际文件和验证结果。
+    tools: [write_file, edit_file, read_file, search_project_files, search_memory, run_command]
+    allowed_commands: ["npm ", "node ", "npx ", "python -m pytest", "pytest"]
+  backend_dev:
+    name: 后端开发
+    default_model: glm-ark
+    system_prompt: 在任务所有权内实现后端，并提供实际文件和验证结果。
+    tools: [write_file, edit_file, read_file, search_project_files, search_memory, run_command]
+    allowed_commands: ["python ", "python -m pytest", "pytest"]
+  tester:
+    name: 测试与集成
+    default_model: glm-ark
+    system_prompt: 读取依赖任务产物，编写并运行针对性、集成、全量和 smoke 验证，保留真实命令输出。
+    tools: [write_file, read_file, search_project_files, search_memory, run_command]
+    allowed_commands: ["python ", "python -m pytest", "pytest", "npm ", "node ", "npx"]

@@ -1,7 +1,6 @@
 """CLI 入口"""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -37,13 +36,14 @@ load_dotenv()
 app = typer.Typer(
     help="多模型 Agent 编排工具 CLI",
     invoke_without_command=True,
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 console = Console()
 
 
 @app.callback()
 def app_callback(
+    ctx: typer.Context,
     version: bool = typer.Option(
         False,
         "--version",
@@ -54,6 +54,38 @@ def app_callback(
     if version:
         typer.echo(f"MAO {__version__}")
         raise typer.Exit()
+    if ctx.invoked_subcommand is None:
+        _run_default_cli()
+
+
+def _run_agent_setup(config_dir: str = "config") -> None:
+    wizard = AgentSetupWizard(config_path=f"{config_dir}/providers.yaml")
+    wizard.run()
+    load_dotenv(override=True)
+
+
+def _run_chat(session: str | None = None, config_dir: str = "config") -> None:
+    gateway = GatewayClient(config_path=f"{config_dir}/providers.yaml")
+    store = SessionStore(base_dir="sessions")
+    run_chat_loop(gateway, store, session_id=session)
+
+
+def _run_default_cli(config_dir: str = "config") -> None:
+    """Make `mao` the normal interactive entry point, including first-run setup."""
+    config_path = Path(config_dir) / "providers.yaml"
+    if not config_path.exists():
+        if not sys.stdin.isatty():
+            console.print(
+                "[yellow]尚未配置 Provider。请在交互式终端运行 `mao`，"
+                "或使用 `mao web` 打开配置界面。[/yellow]"
+            )
+            raise typer.Exit(code=2)
+        console.print("[cyan]首次运行：先连接一个模型服务。[/cyan]")
+        _run_agent_setup(config_dir)
+        if not config_path.exists():
+            console.print("[yellow]未生成 Provider 配置，已退出。[/yellow]")
+            raise typer.Exit(code=1)
+    _run_chat(config_dir=config_dir)
 
 
 @app.command()
@@ -61,8 +93,7 @@ def setup(
     config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
 ):
     """运行旧版交互式配置向导（生成 workers.yaml）"""
-    project_root = Path(__file__).parent
-    os.chdir(project_root)
+    project_root = Path.cwd()
     run_setup_wizard(config_dir=config_dir, project_root=str(project_root))
 
 
@@ -71,10 +102,7 @@ def agent_setup(
     config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
 ):
     """运行新版 Agent 连接向导（配置 Provider 和主模型）"""
-    project_root = Path(__file__).parent
-    os.chdir(project_root)
-    wizard = AgentSetupWizard(config_path=f"{config_dir}/providers.yaml")
-    wizard.run()
+    _run_agent_setup(config_dir)
 
 
 @app.command()
@@ -83,12 +111,19 @@ def chat(
     config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
 ):
     """进入交互式多轮对话"""
-    project_root = Path(__file__).parent
-    os.chdir(project_root)
+    _run_chat(session=session, config_dir=config_dir)
 
-    gateway = GatewayClient(config_path=f"{config_dir}/providers.yaml")
-    store = SessionStore(base_dir="sessions")
-    run_chat_loop(gateway, store, session_id=session)
+
+@app.command()
+def web(
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址"),
+    port: int = typer.Option(8123, "--port", help="监听端口"),
+    no_open: bool = typer.Option(False, "--no-open", help="不自动打开浏览器"),
+):
+    """启动本地 WebUI"""
+    from src.ui.cli import serve
+
+    serve(host=host, port=port, open_browser=not no_open)
 
 
 @app.command()
@@ -101,10 +136,6 @@ def run(
     assume_yes: bool = typer.Option(False, "--yes", "-y", help="跳过执行前的确认提示，直接执行"),
 ):
     """运行多模型 Agent 编排流程"""
-    # 切换到项目根目录（兼容从任意位置运行）
-    project_root = Path(__file__).parent
-    os.chdir(project_root)
-
     console.print(Panel.fit(f"🚀 开始处理需求：\n{request}", title="Multi-Agent Orchestrator"))
 
     # 初始化网关与记忆
@@ -211,7 +242,7 @@ def build_review_section(review) -> str:
 
 def _maybe_insert_run_subcommand(argv: list[str]) -> list[str]:
     """如果没有显式指定子命令，默认插入 run 子命令"""
-    known_commands = {"setup", "agent-setup", "chat", "run", "--help", "-h", "--version"}
+    known_commands = {"setup", "agent-setup", "chat", "web", "run", "--help", "-h", "--version"}
     if len(argv) > 1 and argv[1] not in known_commands:
         argv.insert(1, "run")
     return argv

@@ -102,6 +102,14 @@ def test_workers_config_falls_back_to_example(tmp_path):
     assert resolved == example
 
 
+def test_workers_config_falls_back_to_packaged_template(tmp_path):
+    resolved = resolve_workers_config_path(tmp_path / "missing" / "workers.yaml")
+
+    assert resolved.name == "workers.yaml.example"
+    assert resolved.is_file()
+    assert "available_workers" in resolved.read_text(encoding="utf-8")
+
+
 def test_providers_config_falls_back_to_example(tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()

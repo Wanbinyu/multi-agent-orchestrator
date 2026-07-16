@@ -153,6 +153,23 @@ def test_context_status_is_local_and_explainable(client):
     chat_router.gateway.chat_with_main_model.assert_not_called()
 
 
+def test_unconfigured_web_can_load_setup_page_and_reports_chat_configuration_gap(
+    client, monkeypatch
+):
+    monkeypatch.setattr(chat_router, "gateway", None)
+
+    def missing_gateway():
+        raise FileNotFoundError("config/providers.yaml")
+
+    monkeypatch.setattr(chat_router, "GatewayClient", missing_gateway)
+    session_id = client.post("/api/chat/sessions", json={"title": "first run"}).json()["session_id"]
+
+    assert client.get("/").status_code == 200
+    response = client.get(f"/api/chat/sessions/{session_id}/context")
+    assert response.status_code == 409
+    assert "连接配置" in response.json()["detail"]
+
+
 def test_send_message(client):
     created = client.post("/api/chat/sessions", json={"title": ""}).json()
     session_id = created["session_id"]
