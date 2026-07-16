@@ -7,6 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.models.schemas import CapabilityState
+
+
+_CAPABILITY_STATES = {"supported", "unsupported", "unverified"}
+
 
 class ModelCatalogEntry:
     """目录中的模型条目"""
@@ -18,6 +23,7 @@ class ModelCatalogEntry:
         provider_type: str,
         default_model_id: str,
         capabilities: list[str] | None = None,
+        capability_status: dict[str, CapabilityState] | None = None,
         input_price_per_1m: float = 0.0,
         output_price_per_1m: float = 0.0,
         description: str = "",
@@ -26,12 +32,22 @@ class ModelCatalogEntry:
         context_window_source: str = "unverified",
         context_window_verified_at: str = "",
         dynamic_model_alias: bool = False,
+        metadata_source: str = "unverified",
+        metadata_verified_at: str = "",
     ):
         self.alias = alias
         self.name = name
         self.provider_type = provider_type
         self.default_model_id = default_model_id
-        self.capabilities = capabilities or []
+        self.capabilities = list(capabilities or [])
+        self.capability_status = dict(capability_status) if capability_status else {
+            capability: "unverified" for capability in self.capabilities
+        }
+        invalid_states = set(self.capability_status.values()) - _CAPABILITY_STATES
+        if invalid_states:
+            raise ValueError(f"无效能力状态: {sorted(invalid_states)}")
+        if not metadata_source.strip():
+            raise ValueError("metadata_source 不能为空")
         self.input_price_per_1m = input_price_per_1m
         self.output_price_per_1m = output_price_per_1m
         self.description = description
@@ -40,6 +56,8 @@ class ModelCatalogEntry:
         self.context_window_source = context_window_source
         self.context_window_verified_at = context_window_verified_at
         self.dynamic_model_alias = dynamic_model_alias
+        self.metadata_source = metadata_source.strip()
+        self.metadata_verified_at = metadata_verified_at
 
     def to_model_config(self, provider_name: str) -> dict[str, Any]:
         """生成 providers.yaml 中 models 段的配置"""
@@ -49,6 +67,9 @@ class ModelCatalogEntry:
             "input_price_per_1m": self.input_price_per_1m,
             "output_price_per_1m": self.output_price_per_1m,
             "capabilities": self.capabilities,
+            "capability_status": self.capability_status,
+            "metadata_source": self.metadata_source,
+            "metadata_verified_at": self.metadata_verified_at,
             "context_window_tokens": self.context_window_tokens,
             "max_output_tokens": self.max_output_tokens,
             "context_window_source": self.context_window_source,

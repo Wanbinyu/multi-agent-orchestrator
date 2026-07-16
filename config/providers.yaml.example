@@ -57,6 +57,9 @@ models:
     input_price_per_1m: 0.5
     output_price_per_1m: 0.5
     capabilities: [tool_use, coding, reasoning]
+    capability_status: {tool_use: unverified, coding: unverified, reasoning: unverified}
+    metadata_source: unverified
+    metadata_verified_at: ""
     context_window_tokens: 0     # 未验证时保持 0；MAO 使用 32K 保守预算
     max_output_tokens: 4096
     context_safety_ratio: 0.08
@@ -69,6 +72,9 @@ models:
     input_price_per_1m: 3.0
     output_price_per_1m: 15.0
     capabilities: [tool_use, coding, reasoning, vision]
+    capability_status: {tool_use: unverified, coding: unverified, reasoning: unverified, vision: unverified}
+    metadata_source: unverified
+    metadata_verified_at: ""
     context_window_tokens: 0
     max_output_tokens: 4096
     context_window_source: unverified
@@ -80,6 +86,9 @@ models:
     input_price_per_1m: 0.0
     output_price_per_1m: 0.0
     capabilities: [coding]
+    capability_status: {coding: unverified}
+    metadata_source: local_runtime_config
+    metadata_verified_at: ""
     context_window_tokens: 32768
     max_output_tokens: 4096
     context_window_source: local_runtime_config
@@ -90,6 +99,9 @@ models:
     input_price_per_1m: 0.0
     output_price_per_1m: 0.0
     capabilities: [coding]
+    capability_status: {coding: unverified}
+    metadata_source: local_runtime_config
+    metadata_verified_at: ""
     context_window_tokens: 4096
     max_output_tokens: 1024
     context_window_source: local_runtime_config

@@ -19,11 +19,12 @@ def _session(tmp_path) -> Session:
     )
 
 
-def _model_cfg(native_tools=None, capabilities=None) -> ModelConfig:
+def _model_cfg(native_tools=None, capabilities=None, capability_status=None) -> ModelConfig:
     return ModelConfig(
         provider="anthropic",
         model_id="claude",
         capabilities=capabilities if capabilities is not None else [],
+        capability_status=capability_status if capability_status is not None else {},
         native_tools=native_tools,
     )
 
@@ -87,6 +88,16 @@ def test_native_enabled_by_capability(tmp_path):
 
 def test_native_disabled_without_capability(tmp_path):
     cfg = _model_cfg(capabilities=["coding"])
+    gw = _make_gateway("ok", cfg)
+    agent = Agent(gw, _session(tmp_path))
+    assert agent._should_use_native_tools() is False
+
+
+def test_native_disabled_when_tool_capability_is_unverified(tmp_path):
+    cfg = _model_cfg(
+        capabilities=["tool_use"],
+        capability_status={"tool_use": "unverified"},
+    )
     gw = _make_gateway("ok", cfg)
     agent = Agent(gw, _session(tmp_path))
     assert agent._should_use_native_tools() is False

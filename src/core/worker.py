@@ -325,7 +325,7 @@ def _worker_native_tool_kwargs(
         model_config = gateway.get_model_config(model_name)
         enabled = model_config.native_tools
         if enabled is None:
-            enabled = "tool_use" in model_config.capabilities
+            enabled = model_config.supports_capability("tool_use")
         if not enabled:
             return {}
         provider = gateway.providers.get(model_config.provider)

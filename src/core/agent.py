@@ -315,7 +315,7 @@ class Agent:
             return False
         if cfg.native_tools is not None:
             return cfg.native_tools
-        return "tool_use" in (cfg.capabilities or [])
+        return cfg.supports_capability("tool_use")
 
     def _get_native_tools(self) -> list[dict[str, Any]] | None:
         """获取原生工具 schema（缓存）。不启用原生时返回 None"""

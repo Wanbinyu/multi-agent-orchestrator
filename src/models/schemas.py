@@ -1,9 +1,11 @@
 """Pydantic 数据模型"""
+from datetime import date
 from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
 TaskExecutionMode = Literal["read", "write", "verify"]
+CapabilityState = Literal["supported", "unsupported", "unverified"]
 
 
 class Task(BaseModel):
@@ -58,6 +60,19 @@ class ModelConfig(BaseModel):
     input_price_per_1m: float = 0.0
     output_price_per_1m: float = 0.0
     capabilities: list[str] = Field(default_factory=list, description="模型能力标签，如 tool_use/coding/reasoning/vision")
+    capability_status: dict[str, CapabilityState] = Field(
+        default_factory=dict,
+        description="显式能力真值；存在时优先于兼容用 capabilities 列表",
+    )
+    metadata_source: str = Field(
+        default="unverified",
+        min_length=1,
+        description="模型 ID、能力、价格和限制信息的来源",
+    )
+    metadata_verified_at: str = Field(
+        default="",
+        description="模型元数据最近验证日期，ISO 8601 日期",
+    )
     max_context_tokens: int = Field(
         default=0,
         ge=0,
@@ -103,6 +118,42 @@ class ModelConfig(BaseModel):
     fallback_models: list[str] = Field(default_factory=list, description="主模型失败后的回退模型链")
     failover_enabled: bool = Field(default=True, description="是否允许自动故障切换")
     failover_cooldown_seconds: int = Field(default=60, description="模型标记为不健康后的冷却时间（秒）")
+
+    @field_validator("capabilities")
+    @classmethod
+    def normalize_capabilities(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+    @field_validator("capability_status")
+    @classmethod
+    def validate_capability_names(
+        cls, values: dict[str, CapabilityState]
+    ) -> dict[str, CapabilityState]:
+        normalized: dict[str, CapabilityState] = {}
+        for name, state in values.items():
+            clean_name = name.strip()
+            if not clean_name:
+                raise ValueError("capability_status 不允许空能力名")
+            normalized[clean_name] = state
+        return normalized
+
+    @field_validator("metadata_verified_at")
+    @classmethod
+    def validate_metadata_date(cls, value: str) -> str:
+        if value:
+            date.fromisoformat(value)
+        return value
+
+    def get_capability_state(self, capability: str) -> CapabilityState:
+        """返回能力真值；没有新字段的旧配置保持原有行为。"""
+        if capability in self.capability_status:
+            return self.capability_status[capability]
+        if not self.capability_status and capability in self.capabilities:
+            return "supported"
+        return "unverified"
+
+    def supports_capability(self, capability: str) -> bool:
+        return self.get_capability_state(capability) == "supported"
 
 
 class WorkerConfig(BaseModel):

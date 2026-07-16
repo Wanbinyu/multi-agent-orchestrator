@@ -179,6 +179,10 @@ def build_provider_config(
             "model_id": model_data["model_id"],
             "input_price_per_1m": model_data.get("input_price_per_1m", 0.0),
             "output_price_per_1m": model_data.get("output_price_per_1m", 0.0),
+            "capabilities": model_data.get("capabilities", []),
+            "capability_status": model_data.get("capability_status", {}),
+            "metadata_source": model_data.get("metadata_source", "unverified"),
+            "metadata_verified_at": model_data.get("metadata_verified_at", ""),
         }
 
     return provider_cfg, model_configs, preset["env_var"]

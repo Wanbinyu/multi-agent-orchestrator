@@ -1,23 +1,25 @@
 # v0.1.0-beta.3 执行清单
 
-**状态**：准备完成，尚未开始实现
+**状态**：进行中，B3.1 已完成
 
 **目标**：Provider/Claude 可信接入与首次使用稳定性
 
-**基线提交**：`ac95647`
+**规划基线提交**：`ac95647`
+
+**B3.1 起始提交**：`67ac9a9`
 
 **基线测试**：`506 passed, 1 warning`
 
 ## 0. 开始前检查
 
-- [ ] `git status --short --branch` 干净。
-- [ ] `git fetch origin` 后确认 `main` 没有未合并提交。
-- [ ] 阅读：
+- [x] `git status --short --branch` 干净。
+- [x] `git fetch origin` 后确认 `main` 没有未合并提交。
+- [x] 阅读：
   - `docs/版本计划-v0.1.0-beta.3至beta.6.md`
   - `docs/Claude与插件接入决策.md`
   - `docs/项目进度与关键操作.md`
-- [ ] 不使用对话中曾出现过的旧密钥；真实 Key 必须在 Provider 控制台轮换后写入本地 `.env`。
-- [ ] 未获得所有者确认前，不执行真实付费 Claude 调用。
+- [x] 不使用对话中曾出现过的旧密钥；真实 Key 必须在 Provider 控制台轮换后写入本地 `.env`。
+- [x] 未获得所有者确认前，不执行真实付费 Claude 调用。
 
 ## 1. B3.1 Provider 能力真值
 
@@ -35,17 +37,26 @@
 
 ### 任务
 
-- [ ] 定义能力字段与状态：supported / unsupported / unverified。
-- [ ] 增加来源、验证日期、动态别名和最大输出字段。
-- [ ] 未验证能力不自动启用。
-- [ ] Web/CLI 能区分逻辑别名与上游模型 ID。
-- [ ] 修正示例配置和测试夹具。
+- [x] 定义能力字段与状态：supported / unsupported / unverified。
+- [x] 增加来源、验证日期、动态别名和最大输出字段。
+- [x] 未验证能力不自动启用。
+- [x] Web/CLI 能区分逻辑别名与上游模型 ID。
+- [x] 修正示例配置和测试夹具。
 
 ### 验收
 
-- [ ] 旧配置仍可加载。
-- [ ] 未知模型回退保守上下文和能力。
-- [ ] 能力数据有单元测试，错误字段被拒绝。
+- [x] 旧配置仍可加载。
+- [x] 未知模型回退保守上下文和能力。
+- [x] 能力数据有单元测试，错误字段被拒绝。
+
+### B3.1 实施记录（2026-07-16）
+
+- 数据契约：`ModelConfig` 新增 `capability_status`、`metadata_source` 和 `metadata_verified_at`，状态只接受 `supported`、`unsupported`、`unverified`。
+- 兼容规则：旧配置没有 `capability_status` 时继续按 `capabilities` 运行；新字段存在时，只有 `supported` 自动启用能力，显式 `native_tools` 仍是用户覆盖项。
+- 配置链：模型目录、Web 预设展开、Web 保存/编辑、旧 CLI 预设生成器和示例 YAML 均保留新字段。
+- 运行链：Agent 和 Worker 使用同一个能力判断，不再把显式 `unverified` 的 `tool_use` 当成可用。
+- 验证：`python -m pytest -q` 为 `517 passed, 1 warning`；`compileall`、`node --check` 和 `git diff --check` 通过。
+- 剩余风险：内置 Provider 的真实能力、模型 ID、价格和限制尚未逐项核实；在 B3.2 之前不得把未验证状态改成 `supported`。
 
 ## 2. B3.2 官方 Anthropic 预设与连接
 
@@ -183,4 +194,4 @@
 
 ## 8. 当前下一步
 
-从 **B3.1 Provider 能力真值** 开始。先做数据模型和兼容读取测试，不先改 UI，也不进行真实付费调用。
+从 **B3.2 官方 Anthropic 预设与连接** 开始。先核实官方资料并完成离线契约测试；没有所有者授权时不进行真实付费调用。

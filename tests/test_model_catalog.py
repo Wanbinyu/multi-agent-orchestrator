@@ -1,5 +1,6 @@
 """测试模型目录"""
 import pytest
+from pydantic import ValidationError
 
 from src.models.catalog import (
     BUILTIN_MODELS,
@@ -9,7 +10,9 @@ from src.models.catalog import (
     get_model_catalog,
     get_provider_templates,
     list_models_by_provider,
+    ModelCatalogEntry,
 )
+from src.models.schemas import ModelConfig
 
 
 def test_catalog_contains_common_models():
@@ -28,6 +31,8 @@ def test_model_entry_attributes():
     assert entry.dynamic_model_alias is True
     assert entry.context_window_tokens == 0
     assert "unverified" in entry.context_window_source
+    assert entry.capability_status["tool_use"] == "unverified"
+    assert entry.metadata_source == "unverified"
 
 
 def test_model_config_conversion():
@@ -37,6 +42,69 @@ def test_model_config_conversion():
     assert cfg["model_id"] == "ark-code-latest"
     assert "capabilities" in cfg
     assert cfg["dynamic_model_alias"] is True
+    assert cfg["capability_status"]["tool_use"] == "unverified"
+    assert cfg["metadata_source"] == "unverified"
+
+
+def test_legacy_capability_list_remains_compatible():
+    cfg = ModelConfig(provider="p", model_id="m", capabilities=["tool_use"])
+    assert cfg.supports_capability("tool_use") is True
+
+
+@pytest.mark.parametrize("state", ["unverified", "unsupported"])
+def test_unavailable_capability_is_not_enabled(state):
+    cfg = ModelConfig(
+        provider="p",
+        model_id="m",
+        capabilities=["tool_use"],
+        capability_status={"tool_use": state},
+    )
+    assert cfg.supports_capability("tool_use") is False
+
+
+def test_supported_capability_is_enabled():
+    cfg = ModelConfig(
+        provider="p",
+        model_id="m",
+        capability_status={"tool_use": "supported"},
+    )
+    assert cfg.supports_capability("tool_use") is True
+
+
+def test_unknown_model_capability_is_unverified():
+    cfg = ModelConfig(provider="p", model_id="unknown")
+    assert cfg.get_capability_state("tool_use") == "unverified"
+    assert cfg.supports_capability("tool_use") is False
+
+
+def test_invalid_capability_state_is_rejected():
+    with pytest.raises(ValidationError):
+        ModelConfig(
+            provider="p",
+            model_id="m",
+            capability_status={"tool_use": "maybe"},
+        )
+
+
+def test_invalid_metadata_date_is_rejected():
+    with pytest.raises(ValidationError):
+        ModelConfig(
+            provider="p",
+            model_id="m",
+            metadata_source="provider_docs",
+            metadata_verified_at="not-a-date",
+        )
+
+
+def test_invalid_catalog_capability_state_is_rejected():
+    with pytest.raises(ValueError, match="无效能力状态"):
+        ModelCatalogEntry(
+            alias="bad",
+            name="Bad",
+            provider_type="openai",
+            default_model_id="bad",
+            capability_status={"tool_use": "maybe"},
+        )
 
 
 def test_provider_templates():

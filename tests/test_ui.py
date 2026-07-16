@@ -67,6 +67,9 @@ class TestPresets:
         assert data["key"] == "openai"
         assert data["preset"]["type"] == "openai"
         assert any(m["alias"] == "gpt-4o" for m in data["default_models"])
+        gpt_4o = next(m for m in data["default_models"] if m["alias"] == "gpt-4o")
+        assert gpt_4o["capability_status"]["tool_use"] == "unverified"
+        assert gpt_4o["metadata_source"] == "unverified"
 
     def test_get_unknown_preset_404(self, client):
         res = client.get("/api/presets/not-exist")
@@ -89,6 +92,9 @@ class TestProviderCrud:
                     "input_price_per_1m": 5.0,
                     "output_price_per_1m": 15.0,
                     "capabilities": ["coding"],
+                    "capability_status": {"coding": "supported", "tool_use": "unverified"},
+                    "metadata_source": "provider_docs",
+                    "metadata_verified_at": "2026-07-16",
                     "context_window_tokens": 128000,
                     "max_output_tokens": 8192,
                     "context_safety_ratio": 0.1,
@@ -114,7 +120,43 @@ class TestProviderCrud:
         assert cfg["models"]["gpt-4o"]["context_window_tokens"] == 128000
         assert cfg["models"]["gpt-4o"]["max_output_tokens"] == 8192
         assert cfg["models"]["gpt-4o"]["compaction_threshold"] == 0.7
+        assert cfg["models"]["gpt-4o"]["capability_status"]["coding"] == "supported"
+        assert cfg["models"]["gpt-4o"]["metadata_source"] == "provider_docs"
+        assert cfg["models"]["gpt-4o"]["metadata_verified_at"] == "2026-07-16"
         assert cfg["main_model"] == "gpt-4o"
+
+    def test_rejects_invalid_capability_state(self, client):
+        payload = {
+            "preset_key": "openai",
+            "provider_name": "bad-capability",
+            "display_name": "Bad Capability",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "k",
+            "models": [{
+                "alias": "x",
+                "model_id": "x",
+                "capability_status": {"tool_use": "maybe"},
+            }],
+        }
+        res = client.post("/api/config/providers", json=payload)
+        assert res.status_code == 422
+
+    def test_rejects_invalid_metadata_date(self, client):
+        payload = {
+            "preset_key": "openai",
+            "provider_name": "bad-metadata",
+            "display_name": "Bad Metadata",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "k",
+            "models": [{
+                "alias": "x",
+                "model_id": "x",
+                "metadata_source": "provider_docs",
+                "metadata_verified_at": "not-a-date",
+            }],
+        }
+        res = client.post("/api/config/providers", json=payload)
+        assert res.status_code == 422
 
     def test_rejects_invalid_context_budget_fields(self, client):
         payload = {

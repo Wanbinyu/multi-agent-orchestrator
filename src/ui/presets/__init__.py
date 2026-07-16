@@ -37,6 +37,9 @@ def register_preset(key: str, preset: dict[str, Any]) -> None:
                 "input_price_per_1m": 0.0,
                 "output_price_per_1m": 0.0,
                 "capabilities": ["coding"],
+                "capability_status": {"coding": "unverified"},
+                "metadata_source": "unverified",
+                "metadata_verified_at": "",
             }
         },
     }
@@ -82,6 +85,12 @@ def expand_preset_models(preset_key: str) -> list[dict[str, Any]]:
             "input_price_per_1m": data.get("input_price_per_1m", 0.0),
             "output_price_per_1m": data.get("output_price_per_1m", 0.0),
             "capabilities": data.get("capabilities", []),
+            "capability_status": data.get("capability_status") or {
+                capability: "unverified"
+                for capability in data.get("capabilities", [])
+            },
+            "metadata_source": data.get("metadata_source", "unverified"),
+            "metadata_verified_at": data.get("metadata_verified_at", ""),
             "context_window_tokens": data.get("context_window_tokens", 0),
             "max_output_tokens": data.get("max_output_tokens", 4096),
             "context_safety_ratio": data.get("context_safety_ratio", 0.08),

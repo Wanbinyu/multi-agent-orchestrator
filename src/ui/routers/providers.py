@@ -1,12 +1,14 @@
 """Provider 配置相关 API 路由"""
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from src.gateway.connection_test import check_provider_connection
+from src.models.schemas import CapabilityState
 from src.ui import config_manager
 from src.ui.presets import (
     build_default_provider_name,
@@ -25,6 +27,9 @@ class ModelEntry(BaseModel):
     input_price_per_1m: float = 0.0
     output_price_per_1m: float = 0.0
     capabilities: list[str] = Field(default_factory=list)
+    capability_status: dict[str, CapabilityState] = Field(default_factory=dict)
+    metadata_source: str = Field(default="unverified", min_length=1)
+    metadata_verified_at: str = ""
     context_window_tokens: int = Field(default=0, ge=0, le=2_000_000)
     max_output_tokens: int = Field(default=4096, ge=1, le=262_144)
     context_safety_ratio: float = Field(default=0.08, ge=0.0, le=0.5)
@@ -32,6 +37,13 @@ class ModelEntry(BaseModel):
     context_window_source: str = "unverified"
     context_window_verified_at: str = ""
     dynamic_model_alias: bool = False
+
+    @field_validator("metadata_verified_at")
+    @classmethod
+    def _check_metadata_date(cls, value: str) -> str:
+        if value:
+            date.fromisoformat(value)
+        return value
 
 
 class ProviderForm(BaseModel):

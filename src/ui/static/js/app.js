@@ -191,6 +191,9 @@
     tr.dataset.contextSource = model?.context_window_source || "unverified";
     tr.dataset.contextVerifiedAt = model?.context_window_verified_at || "";
     tr.dataset.dynamicAlias = model?.dynamic_model_alias ? "true" : "false";
+    tr.dataset.capabilityStatus = JSON.stringify(model?.capability_status || {});
+    tr.dataset.metadataSource = model?.metadata_source || "unverified";
+    tr.dataset.metadataVerifiedAt = model?.metadata_verified_at || "";
     tr.innerHTML = `
       <td data-label="逻辑别名"><input type="text" class="model-alias" value="${escapeHtml(
         model?.alias || ""
@@ -229,6 +232,9 @@
           .value.split(",")
           .map((s) => s.trim())
           .filter(Boolean),
+        capability_status: JSON.parse(row.dataset.capabilityStatus || "{}"),
+        metadata_source: row.dataset.metadataSource || "unverified",
+        metadata_verified_at: row.dataset.metadataVerifiedAt || "",
         context_window_tokens: parseInt(row.querySelector(".model-context-window").value, 10) || 0,
         max_output_tokens: parseInt(row.querySelector(".model-max-output").value, 10) || 4096,
         context_safety_ratio: (parseFloat(row.querySelector(".model-safety-ratio").value) || 0) / 100,
@@ -273,6 +279,9 @@
         input_price_per_1m: data.input_price_per_1m,
         output_price_per_1m: data.output_price_per_1m,
         capabilities: data.capabilities || [],
+        capability_status: data.capability_status || {},
+        metadata_source: data.metadata_source || "unverified",
+        metadata_verified_at: data.metadata_verified_at || "",
         context_window_tokens: data.context_window_tokens || 0,
         max_output_tokens: data.max_output_tokens || 4096,
         context_safety_ratio: data.context_safety_ratio ?? 0.08,
