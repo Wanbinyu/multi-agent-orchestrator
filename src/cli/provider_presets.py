@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from src.models.catalog import BUILTIN_MODELS
+
 
 ProviderPreset = dict
 
@@ -14,21 +16,13 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "base_url": "https://api.anthropic.com",
         "env_var": "ANTHROPIC_API_KEY",
         "models": {
-            "claude-fable-5": {
-                "model_id": "claude-fable-5-20251001",
-                "input_price_per_1m": 15.0,
-                "output_price_per_1m": 75.0,
-            },
-            "claude-sonnet-5": {
-                "model_id": "claude-sonnet-5-20251001",
-                "input_price_per_1m": 3.0,
-                "output_price_per_1m": 15.0,
-            },
-            "claude-haiku-4-5": {
-                "model_id": "claude-haiku-4-5-20251001",
-                "input_price_per_1m": 0.25,
-                "output_price_per_1m": 1.25,
-            },
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in (
+                "claude-fable-5",
+                "claude-opus-4-8",
+                "claude-sonnet-5",
+                "claude-haiku-4-5",
+            )
         },
     },
     "openai": {
@@ -103,6 +97,7 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "type": "anthropic",
         "base_url": "https://api.va11.icu/",
         "env_var": "KIMI_API_KEY",
+        # 这些 Claude 风格名称只用于兼容旧配置，始终在本地映射为 Kimi ID。
         "model_map": {
             "claude-sonnet-5": "kimi-for-coding",
             "claude-sonnet-5-20251001": "kimi-for-coding",
@@ -183,6 +178,10 @@ def build_provider_config(
             "capability_status": model_data.get("capability_status", {}),
             "metadata_source": model_data.get("metadata_source", "unverified"),
             "metadata_verified_at": model_data.get("metadata_verified_at", ""),
+            "context_window_tokens": model_data.get("context_window_tokens", 0),
+            "max_output_tokens": model_data.get("max_output_tokens", 4096),
+            "context_window_source": model_data.get("context_window_source", "unverified"),
+            "context_window_verified_at": model_data.get("context_window_verified_at", ""),
         }
 
     return provider_cfg, model_configs, preset["env_var"]

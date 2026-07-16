@@ -15,6 +15,11 @@ def test_build_provider_config_anthropic():
     assert cfg["base_url"] == "https://api.anthropic.com"
     assert cfg["api_keys"] == ["${ANTHROPIC_API_KEY}"]
     assert "claude-sonnet-5" in models
+    assert models["claude-sonnet-5"]["model_id"] == "claude-sonnet-5"
+    assert models["claude-sonnet-5"]["context_window_tokens"] == 1_000_000
+    assert models["claude-sonnet-5"]["max_output_tokens"] == 128_000
+    assert models["claude-sonnet-5"]["capability_status"]["tool_use"] == "unverified"
+    assert models["claude-haiku-4-5"]["model_id"] == "claude-haiku-4-5-20251001"
     assert env_var == "ANTHROPIC_API_KEY"
 
 

@@ -23,19 +23,32 @@ class ConnectionTestResult:
     base_url: str
     available_models: list[str]
     error_message: str = ""
+    error_code: str = ""
     response_time_ms: float = 0.0
 
 
 def check_anthropic_connection(
     api_key: str,
     base_url: str,
-    model_id: str = "claude-sonnet-4-5-20241022",
+    model_id: str = "claude-sonnet-5",
     timeout: int = 30,
 ) -> ConnectionTestResult:
     """测试 Anthropic Messages API 连通性"""
     import time
 
     start = time.time()
+    if not api_key.strip():
+        return _error_result(
+            "anthropic", base_url, "API Key 不能为空", start, "authentication_error"
+        )
+    if not model_id.strip():
+        return _error_result(
+            "anthropic",
+            base_url,
+            "测试 Anthropic 需要指定 model_id",
+            start,
+            "invalid_request_error",
+        )
     try:
         client_kwargs: dict[str, Any] = {
             "base_url": base_url or None,
@@ -61,14 +74,78 @@ def check_anthropic_connection(
             available_models=[],
             response_time_ms=elapsed,
         )
-    except anthropic.AuthenticationError as e:
-        return _error_result("anthropic", base_url, "API Key 无效或已过期", e, start)
-    except anthropic.NotFoundError as e:
-        return _error_result("anthropic", base_url, "请求的模型不存在，请检查 base_url 或 model_id", e, start)
-    except anthropic.APIConnectionError as e:
-        return _error_result("anthropic", base_url, "无法连接到服务器，请检查网络或 base_url", e, start)
-    except Exception as e:
-        return _error_result("anthropic", base_url, f"测试失败: {e}", e, start)
+    except anthropic.AuthenticationError:
+        return _error_result(
+            "anthropic",
+            base_url,
+            "API Key 无效、已过期或已撤销",
+            start,
+            "authentication_error",
+        )
+    except anthropic.PermissionDeniedError:
+        return _error_result(
+            "anthropic",
+            base_url,
+            "API Key 无权访问该模型或资源",
+            start,
+            "permission_error",
+        )
+    except anthropic.NotFoundError:
+        return _error_result(
+            "anthropic",
+            base_url,
+            "请求的模型不存在，请检查是否使用官方模型 ID",
+            start,
+            "not_found_error",
+        )
+    except anthropic.RateLimitError:
+        return _error_result(
+            "anthropic",
+            base_url,
+            "已达到 Anthropic 速率或加速限制，请稍后重试",
+            start,
+            "rate_limit_error",
+        )
+    except anthropic.APITimeoutError:
+        return _error_result(
+            "anthropic",
+            base_url,
+            "Anthropic 请求超时，请检查网络或增大超时时间",
+            start,
+            "timeout_error",
+        )
+    except anthropic.BadRequestError as exception:
+        if _is_context_limit_error(exception):
+            return _error_result(
+                "anthropic",
+                base_url,
+                "请求超过模型上下文或输出限制，请缩短输入或降低输出上限",
+                start,
+                "context_length_error",
+            )
+        return _error_result(
+            "anthropic",
+            base_url,
+            "请求参数或消息格式不受支持",
+            start,
+            "invalid_request_error",
+        )
+    except anthropic.APIConnectionError:
+        return _error_result(
+            "anthropic",
+            base_url,
+            "无法连接到服务器，请检查网络或 base_url",
+            start,
+            "connection_error",
+        )
+    except Exception:
+        return _error_result(
+            "anthropic",
+            base_url,
+            "Anthropic 连接测试失败",
+            start,
+            "provider_error",
+        )
 
 
 def check_openai_compatible_connection(
@@ -101,14 +178,14 @@ def check_openai_compatible_connection(
             available_models=[],
             response_time_ms=elapsed,
         )
-    except openai.AuthenticationError as e:
-        return _error_result("openai_compatible", base_url, "API Key 无效或已过期", e, start)
-    except openai.NotFoundError as e:
-        return _error_result("openai_compatible", base_url, "请求的模型不存在，请检查 model_id", e, start)
-    except openai.APIConnectionError as e:
-        return _error_result("openai_compatible", base_url, "无法连接到服务器，请检查网络或 base_url", e, start)
-    except Exception as e:
-        return _error_result("openai_compatible", base_url, f"测试失败: {e}", e, start)
+    except openai.AuthenticationError:
+        return _error_result("openai_compatible", base_url, "API Key 无效或已过期", start)
+    except openai.NotFoundError:
+        return _error_result("openai_compatible", base_url, "请求的模型不存在，请检查 model_id", start)
+    except openai.APIConnectionError:
+        return _error_result("openai_compatible", base_url, "无法连接到服务器，请检查网络或 base_url", start)
+    except Exception:
+        return _error_result("openai_compatible", base_url, "OpenAI 兼容连接测试失败", start)
 
 
 def check_provider_connection(
@@ -150,21 +227,34 @@ def _error_result(
     provider_name: str,
     base_url: str,
     message: str,
-    exception: Exception,
     start_time: float,
+    error_code: str = "",
 ) -> ConnectionTestResult:
     import time
 
     elapsed = (time.time() - start_time) * 1000
-    error = f"{message}"
-    if str(exception) and str(exception) != message:
-        error += f" ({exception})"
     return ConnectionTestResult(
         success=False,
         provider_name=provider_name,
-        provider_type="unknown",
+        provider_type="anthropic" if provider_name == "anthropic" else "openai",
         base_url=base_url,
         available_models=[],
-        error_message=error,
+        error_message=message,
+        error_code=error_code,
         response_time_ms=elapsed,
     )
+
+
+def _is_context_limit_error(exception: anthropic.BadRequestError) -> bool:
+    """Anthropic 将上下文超限归为通用 invalid_request_error。"""
+    body = getattr(exception, "body", None)
+    normalized = f"{body or ''} {exception}".lower()
+    markers = (
+        "context window",
+        "context length",
+        "too many input tokens",
+        "prompt is too long",
+        "maximum context",
+        "input length",
+    )
+    return any(marker in normalized for marker in markers)

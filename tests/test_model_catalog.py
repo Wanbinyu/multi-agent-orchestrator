@@ -46,6 +46,23 @@ def test_model_config_conversion():
     assert cfg["metadata_source"] == "unverified"
 
 
+def test_official_anthropic_catalog_matches_verified_limits():
+    sonnet = BUILTIN_MODELS["claude-sonnet-5"]
+    assert sonnet.default_model_id == "claude-sonnet-5"
+    assert sonnet.input_price_per_1m == 3.0
+    assert sonnet.output_price_per_1m == 15.0
+    assert sonnet.context_window_tokens == 1_000_000
+    assert sonnet.max_output_tokens == 128_000
+    assert sonnet.capability_status["vision"] == "unverified"
+    assert sonnet.capability_status["tool_use"] == "unverified"
+    assert sonnet.metadata_verified_at == "2026-07-16"
+
+    haiku = BUILTIN_MODELS["claude-haiku-4-5"]
+    assert haiku.default_model_id == "claude-haiku-4-5-20251001"
+    assert haiku.context_window_tokens == 200_000
+    assert haiku.max_output_tokens == 64_000
+
+
 def test_legacy_capability_list_remains_compatible():
     cfg = ModelConfig(provider="p", model_id="m", capabilities=["tool_use"])
     assert cfg.supports_capability("tool_use") is True

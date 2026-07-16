@@ -1,6 +1,6 @@
 # v0.1.0-beta.3 执行清单
 
-**状态**：进行中，B3.1 已完成
+**状态**：进行中，B3.1-B3.2 离线验收已完成
 
 **目标**：Provider/Claude 可信接入与首次使用稳定性
 
@@ -74,17 +74,28 @@
 
 ### 任务
 
-- [ ] 从官方资料核实模型 ID、价格、上下文和输出限制。
-- [ ] 删除或标记无法确认的模型条目。
-- [ ] 明确 `ANTHROPIC_API_KEY` 配置提示。
-- [ ] 区分官方 Anthropic、Anthropic 兼容服务和 OpenRouter Claude。
-- [ ] 覆盖 401/403、404、429、超时和上下文超限。
+- [x] 从官方资料核实模型 ID、价格、上下文和输出限制。
+- [x] 删除或标记无法确认的模型条目。
+- [x] 明确 `ANTHROPIC_API_KEY` 配置提示。
+- [x] 区分官方 Anthropic、Anthropic 兼容服务和 OpenRouter Claude。
+- [x] 覆盖 401/403、404、429、超时和上下文超限。
 
 ### 验收
 
-- [ ] 离线 mock 覆盖所有错误类别。
-- [ ] 无 Key 时错误清晰，不打印 Key。
-- [ ] 有所有者授权时执行一次最小真实连接 smoke，并记录费用。
+- [x] 离线 mock 覆盖所有错误类别。
+- [x] 无 Key 时错误清晰，不打印 Key。
+- [ ] 有所有者授权时执行一次最小真实连接 smoke，并记录费用。当前未授权、未执行，不阻塞离线验收。
+
+### B3.2 实施记录（2026-07-16）
+
+- 官方来源：模型数据使用 [Models overview](https://platform.claude.com/docs/en/about-claude/models/overview)，鉴权使用 [Get started](https://platform.claude.com/docs/en/get-started)，错误分类使用 [Claude API errors](https://platform.claude.com/docs/en/api/errors)。
+- 模型 ID：Fable 5、Opus 4.8、Sonnet 5 使用官方无日期固定 ID；Haiku 4.5 使用 `claude-haiku-4-5-20251001`。
+- 限制与价格：记录 1M/128K 与 Haiku 200K/64K 上下文/输出限制；价格使用官方标准价格，不把 Sonnet 5 限时优惠写成长期价格。
+- 单一真值：`src/models/catalog.py` 作为官方 Anthropic 数据源，CLI 与 Web 预设由目录生成，不再各自复制模型元数据。
+- 能力边界：`tool_use` 等待 B3.3 完整回合验证；`vision` 等待结构化图片消息，因此两者保持 `unverified`。
+- 连接诊断：新增稳定 `error_code`，覆盖鉴权、权限、模型不存在、限流、超时、上下文超限、普通参数错误和连接失败；用户消息不拼接 SDK 原始异常。
+- 验证：`python -m pytest -q` 为 `526 passed, 1 warning`；`compileall`、`node --check` 和 `git diff --check` 通过。
+- 未执行：未读取或使用任何真实 Anthropic Key，未产生付费调用。
 
 ## 3. B3.3 Claude 原生工具完整回合
 
@@ -194,4 +205,4 @@
 
 ## 8. 当前下一步
 
-从 **B3.2 官方 Anthropic 预设与连接** 开始。先核实官方资料并完成离线契约测试；没有所有者授权时不进行真实付费调用。
+从 **B3.3 Claude 原生工具完整回合** 开始。优先设计结构化内容块和工具结果回传契约，继续使用离线 mock；没有所有者授权时不进行真实付费调用。

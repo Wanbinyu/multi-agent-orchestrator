@@ -71,6 +71,23 @@ class TestPresets:
         assert gpt_4o["capability_status"]["tool_use"] == "unverified"
         assert gpt_4o["metadata_source"] == "unverified"
 
+    def test_official_anthropic_preset_uses_verified_model_data(self, client):
+        res = client.get("/api/presets/anthropic")
+        assert res.status_code == 200
+        models = {m["alias"]: m for m in res.json()["default_models"]}
+        assert set(models) == {
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-haiku-4-5",
+        }
+        assert models["claude-opus-4-8"]["model_id"] == "claude-opus-4-8"
+        assert models["claude-sonnet-5"]["context_window_tokens"] == 1_000_000
+        assert models["claude-haiku-4-5"]["max_output_tokens"] == 64_000
+        assert models["claude-sonnet-5"]["capability_status"]["tool_use"] == "unverified"
+        assert models["claude-sonnet-5"]["capability_status"]["vision"] == "unverified"
+        assert models["claude-sonnet-5"]["metadata_verified_at"] == "2026-07-16"
+
     def test_get_unknown_preset_404(self, client):
         res = client.get("/api/presets/not-exist")
         assert res.status_code == 404
@@ -262,6 +279,7 @@ class TestConnection:
                 base_url="https://x",
                 available_models=[],
                 error_message="鉴权失败",
+                error_code="authentication_error",
             )
 
         monkeypatch.setattr("src.ui.routers.providers.check_provider_connection", fake_check)
@@ -277,6 +295,7 @@ class TestConnection:
         data = res.json()
         assert data["success"] is False
         assert "鉴权失败" in data["error_message"]
+        assert data["error_code"] == "authentication_error"
 
 
 class TestMainModel:

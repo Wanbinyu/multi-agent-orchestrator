@@ -206,6 +206,7 @@ def test_provider(provider_name: str, payload: TestConnectionForm) -> dict[str, 
         "provider": result.provider_name,
         "base_url": result.base_url,
         "error_message": result.error_message,
+        "error_code": result.error_code,
         "response_time_ms": round(result.response_time_ms, 1),
     }
 

@@ -11,6 +11,8 @@ from src.models.schemas import CapabilityState
 
 
 _CAPABILITY_STATES = {"supported", "unsupported", "unverified"}
+_ANTHROPIC_MODEL_SOURCE = "https://platform.claude.com/docs/en/about-claude/models/overview"
+_ANTHROPIC_VERIFIED_AT = "2026-07-16"
 
 
 class ModelCatalogEntry:
@@ -59,15 +61,14 @@ class ModelCatalogEntry:
         self.metadata_source = metadata_source.strip()
         self.metadata_verified_at = metadata_verified_at
 
-    def to_model_config(self, provider_name: str) -> dict[str, Any]:
-        """生成 providers.yaml 中 models 段的配置"""
+    def to_model_data(self) -> dict[str, Any]:
+        """生成不含 Provider 归属的模型配置。"""
         return {
-            "provider": provider_name,
             "model_id": self.default_model_id,
             "input_price_per_1m": self.input_price_per_1m,
             "output_price_per_1m": self.output_price_per_1m,
-            "capabilities": self.capabilities,
-            "capability_status": self.capability_status,
+            "capabilities": list(self.capabilities),
+            "capability_status": dict(self.capability_status),
             "metadata_source": self.metadata_source,
             "metadata_verified_at": self.metadata_verified_at,
             "context_window_tokens": self.context_window_tokens,
@@ -76,6 +77,10 @@ class ModelCatalogEntry:
             "context_window_verified_at": self.context_window_verified_at,
             "dynamic_model_alias": self.dynamic_model_alias,
         }
+
+    def to_model_config(self, provider_name: str) -> dict[str, Any]:
+        """生成 providers.yaml 中 models 段的配置。"""
+        return {"provider": provider_name, **self.to_model_data()}
 
 
 # 内置模型目录
@@ -135,35 +140,93 @@ BUILTIN_MODELS: dict[str, ModelCatalogEntry] = {
         output_price_per_1m=2.0,
         description="DeepSeek R1，适合复杂推理",
     ),
+    "claude-fable-5": ModelCatalogEntry(
+        alias="claude-fable-5",
+        name="Claude Fable 5",
+        provider_type="anthropic",
+        default_model_id="claude-fable-5",
+        capabilities=["tool_use", "coding", "reasoning", "vision"],
+        capability_status={
+            "tool_use": "unverified",
+            "coding": "supported",
+            "reasoning": "supported",
+            "vision": "unverified",
+        },
+        input_price_per_1m=10.0,
+        output_price_per_1m=50.0,
+        description="Anthropic Claude Fable，长时 Agent 能力",
+        context_window_tokens=1_000_000,
+        max_output_tokens=128_000,
+        context_window_source=_ANTHROPIC_MODEL_SOURCE,
+        context_window_verified_at=_ANTHROPIC_VERIFIED_AT,
+        metadata_source=_ANTHROPIC_MODEL_SOURCE,
+        metadata_verified_at=_ANTHROPIC_VERIFIED_AT,
+    ),
     "claude-opus-4-8": ModelCatalogEntry(
         alias="claude-opus-4-8",
         name="Claude Opus 4.8",
         provider_type="anthropic",
-        default_model_id="claude-opus-4-8-20251001",
+        default_model_id="claude-opus-4-8",
         capabilities=["tool_use", "coding", "reasoning", "vision"],
-        input_price_per_1m=15.0,
-        output_price_per_1m=75.0,
+        capability_status={
+            "tool_use": "unverified",
+            "coding": "supported",
+            "reasoning": "supported",
+            "vision": "unverified",
+        },
+        input_price_per_1m=5.0,
+        output_price_per_1m=25.0,
         description="Anthropic Claude Opus，最强推理",
+        context_window_tokens=1_000_000,
+        max_output_tokens=128_000,
+        context_window_source=_ANTHROPIC_MODEL_SOURCE,
+        context_window_verified_at=_ANTHROPIC_VERIFIED_AT,
+        metadata_source=_ANTHROPIC_MODEL_SOURCE,
+        metadata_verified_at=_ANTHROPIC_VERIFIED_AT,
     ),
     "claude-sonnet-5": ModelCatalogEntry(
         alias="claude-sonnet-5",
         name="Claude Sonnet 5",
         provider_type="anthropic",
-        default_model_id="claude-sonnet-5-20251001",
+        default_model_id="claude-sonnet-5",
         capabilities=["tool_use", "coding", "reasoning", "vision"],
+        capability_status={
+            "tool_use": "unverified",
+            "coding": "supported",
+            "reasoning": "supported",
+            "vision": "unverified",
+        },
         input_price_per_1m=3.0,
         output_price_per_1m=15.0,
         description="Anthropic Claude Sonnet，均衡选择",
+        context_window_tokens=1_000_000,
+        max_output_tokens=128_000,
+        context_window_source=_ANTHROPIC_MODEL_SOURCE,
+        context_window_verified_at=_ANTHROPIC_VERIFIED_AT,
+        metadata_source=_ANTHROPIC_MODEL_SOURCE,
+        metadata_verified_at=_ANTHROPIC_VERIFIED_AT,
     ),
     "claude-haiku-4-5": ModelCatalogEntry(
         alias="claude-haiku-4-5",
         name="Claude Haiku 4.5",
         provider_type="anthropic",
         default_model_id="claude-haiku-4-5-20251001",
-        capabilities=["tool_use", "chat"],
-        input_price_per_1m=0.5,
-        output_price_per_1m=2.0,
+        capabilities=["tool_use", "chat", "reasoning", "vision"],
+        capability_status={
+            "tool_use": "unverified",
+            "chat": "supported",
+            "reasoning": "supported",
+            "vision": "unverified",
+        },
+        input_price_per_1m=1.0,
+        output_price_per_1m=5.0,
         description="Anthropic Claude Haiku，快速便宜",
+        context_window_tokens=200_000,
+        max_output_tokens=64_000,
+        context_window_source=_ANTHROPIC_MODEL_SOURCE,
+        context_window_verified_at=_ANTHROPIC_VERIFIED_AT,
+        metadata_source=_ANTHROPIC_MODEL_SOURCE,
+        metadata_verified_at=_ANTHROPIC_VERIFIED_AT,
     ),
     "gpt-4o": ModelCatalogEntry(
         alias="gpt-4o",
@@ -211,7 +274,12 @@ PROVIDER_TEMPLATES: dict[str, dict[str, Any]] = {
         "base_url": "https://api.anthropic.com",
         "timeout": 120,
         "rpm_limit": 60,
-        "supported_models": ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"],
+        "supported_models": [
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-haiku-4-5",
+        ],
     },
     "kimi": {
         "name": "Kimi 转发",

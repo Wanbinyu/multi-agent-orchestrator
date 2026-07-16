@@ -72,12 +72,13 @@ models:
     input_price_per_1m: 3.0
     output_price_per_1m: 15.0
     capabilities: [tool_use, coding, reasoning, vision]
-    capability_status: {tool_use: unverified, coding: unverified, reasoning: unverified, vision: unverified}
-    metadata_source: unverified
-    metadata_verified_at: ""
-    context_window_tokens: 0
-    max_output_tokens: 4096
-    context_window_source: unverified
+    capability_status: {tool_use: unverified, coding: supported, reasoning: supported, vision: unverified}
+    metadata_source: https://platform.claude.com/docs/en/about-claude/models/overview
+    metadata_verified_at: "2026-07-16"
+    context_window_tokens: 1000000
+    max_output_tokens: 128000
+    context_window_source: https://platform.claude.com/docs/en/about-claude/models/overview
+    context_window_verified_at: "2026-07-16"
 
   # 本地模型（不计费）
   qwen-local:
