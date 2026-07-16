@@ -15,10 +15,13 @@ defaults:
     shell: bash
 
 # Stable terminal width for Rich/Typer help rendering in pytest and CLI smoke.
+# UTF-8 stdout avoids Windows cp1252/GBK failures on Chinese CLI help text.
 env:
   COLUMNS: "160"
   TERM: xterm-256color
   NO_COLOR: "1"
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
 
 jobs:
   test:

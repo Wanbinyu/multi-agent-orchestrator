@@ -86,14 +86,15 @@ class SessionStore:
         return Session(**data)
 
     def list(self) -> list[Session]:
-        """列出所有会话，按更新时间倒序"""
+        """列出所有会话，按更新时间倒序（同秒时用 id 保证稳定）"""
         if not self.base_dir.exists():
             return []
         sessions: list[Session] = []
-        for path in sorted(self.base_dir.glob("*.yaml"), reverse=True):
+        for path in self.base_dir.glob("*.yaml"):
             with open(path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             sessions.append(Session(**data))
+        sessions.sort(key=lambda s: (s.updated_at, s.id), reverse=True)
         return sessions
 
     def delete(self, session_id: str) -> None:

@@ -38,11 +38,15 @@ def test_save_and_load_session(tmp_path):
 def test_list_sessions(tmp_path):
     store = SessionStore(base_dir=str(tmp_path))
     s1 = store.create(title="A")
+    s1.updated_at = "2020-01-01T00:00:00+00:00"
+    store.save(s1)
     s2 = store.create(title="B")
+    s2.updated_at = "2021-01-01T00:00:00+00:00"
+    store.save(s2)
 
     sessions = store.list()
     assert len(sessions) == 2
-    # 默认按时间倒序
+    # 默认按 updated_at 倒序，不依赖同毫秒创建时的 id 字典序
     assert sessions[0].id == s2.id
     assert sessions[1].id == s1.id
 
