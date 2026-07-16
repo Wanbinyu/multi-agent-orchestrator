@@ -23,6 +23,7 @@ There is no migration of session or memory data in this release. Back up private
 - Real paid-model compatibility is manually smoke-tested and is not exercised in CI.
 - Layered context compaction, persistent project summaries and full performance benchmarks are post-beta work.
 
-## Release checklist
+## Release status
 
-Do not publish this release until CI, fresh-clone installation, six recorded acceptance scenarios and the real Provider smoke test all pass.
+Local acceptance gates, real Provider smoke tests and the cross-platform CI matrix
+(Windows/Ubuntu × Python 3.11/3.12 + security) all passed on 2026-07-16 before this tag.
