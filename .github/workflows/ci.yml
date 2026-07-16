@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Force bash on all runners so Windows and Ubuntu share the same step syntax.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
@@ -28,15 +33,22 @@ jobs:
         with:
           node-version: "20"
       - name: Install
-        run: python -m pip install --upgrade pip && python -m pip install -e ".[test]"
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
       - name: Tests
         run: python -m pytest -q
       - name: Python syntax
         run: python -m compileall -q src tests scripts run.py
       - name: JavaScript syntax
-        run: node --check src/ui/static/js/app.js && node --check src/ui/static/js/chat.js
+        run: |
+          node --check src/ui/static/js/app.js
+          node --check src/ui/static/js/chat.js
       - name: CLI smoke
-        run: mao --version && mao --help && mao-ui --help
+        run: |
+          mao --version
+          mao --help
+          mao-ui --help
       - name: Diff hygiene
         run: git diff --check
 
@@ -51,8 +63,21 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Dependency audit
-        run: python -m pip install pip-audit && python -m pip_audit -r requirements.txt
-      - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-audit
+          python -m pip_audit -r requirements.txt
+      # Use the free open-source binary. gitleaks-action requires a paid
+      # license on private repositories, which blocks pre-public beta CI.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.24.3"
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "${archive}"
+          tar -xzf "${archive}" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Secret scan
+        run: gitleaks git --verbose --redact .
