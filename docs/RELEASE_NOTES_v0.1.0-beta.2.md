@@ -29,6 +29,7 @@ Python 3.11 or 3.12 is required. Provider keys and runtime data remain in the cu
 - Wheel install and WebUI health smoke passed from an empty directory.
 - Wheel/sdist build and metadata validation passed.
 - Tests and internal acceptance documents are absent from distribution artifacts.
+- Remote Windows/Ubuntu CI for Python 3.11/3.12, dependency audit and secret scan passed.
 
 ## Known limitations
 
