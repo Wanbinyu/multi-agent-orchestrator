@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Iterable
 
 from src.models.schemas import ChatMessage
@@ -47,7 +48,25 @@ def count_tokens(text: str) -> int:
 
 def count_message_tokens(message: ChatMessage) -> int:
     """估算单条消息的 token 数（含开销）"""
-    content = getattr(message, "content", "")
+    if message.provider_payload:
+        content = json.dumps(
+            message.provider_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+    elif message.content_blocks:
+        content = json.dumps(
+            [
+                block.model_dump(mode="json", exclude_none=True)
+                for block in message.content_blocks
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+    else:
+        content = getattr(message, "content", "")
     if not isinstance(content, str):
         content = str(content)
     return count_tokens(content) + _PER_MESSAGE_OVERHEAD

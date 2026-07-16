@@ -4,7 +4,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.core.worker import Worker
-from src.models.schemas import ChatResponse, ModelConfig, ProviderConfig, Task
+from src.models.schemas import (
+    ChatResponse,
+    ModelConfig,
+    ProviderConfig,
+    Task,
+    ToolResultContentBlock,
+    ToolUseContentBlock,
+)
 
 
 def _mock_gateway(response_content: str) -> MagicMock:
@@ -142,6 +149,11 @@ def test_execute_uses_native_tools_without_markdown_prompt_conflict(tmp_path):
                 '{"path":"main.py","content":"print(1)"}\n```'
             ),
             model="glm-ark", provider="ark",
+            content_blocks=[ToolUseContentBlock(
+                id="toolu_worker_write_1",
+                name="write_file",
+                input={"path": "main.py", "content": "print(1)"},
+            )],
         ),
         ChatResponse(content="完成", model="glm-ark", provider="ark"),
     ]
@@ -159,6 +171,10 @@ def test_execute_uses_native_tools_without_markdown_prompt_conflict(tmp_path):
     prompt = first_call.kwargs["messages"][1].content
     assert "原生 tool_use" in prompt
     assert "```tool:" not in prompt
+    second_messages = gateway.chat.call_args_list[1].kwargs["messages"]
+    result_message = second_messages[-1]
+    assert isinstance(result_message.content_blocks[0], ToolResultContentBlock)
+    assert result_message.content_blocks[0].tool_use_id == "toolu_worker_write_1"
 
 
 def test_execute_unknown_worker_type():

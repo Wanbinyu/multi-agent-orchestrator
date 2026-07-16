@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.core.session import Session, SessionStore
-from src.models.schemas import ChatMessage
+from src.models.schemas import ChatMessage, ToolUseContentBlock
 
 
 def test_create_session(tmp_path):
@@ -70,6 +70,34 @@ def test_session_yaml_is_human_readable(tmp_path):
     text = (tmp_path / f"{session.id}.yaml").read_text(encoding="utf-8")
     assert "messages:" in text
     assert "你好" in text
+
+
+def test_session_persists_safe_blocks_but_not_provider_private_state(tmp_path):
+    store = SessionStore(base_dir=str(tmp_path))
+    session = store.create(title="native")
+    session.add_message(
+        "assistant",
+        "调用 read_file",
+        content_blocks=[ToolUseContentBlock(
+            id="toolu_session_1",
+            name="read_file",
+            input={"path": "README.md"},
+        )],
+        provider_payload=[{
+            "type": "thinking",
+            "thinking": "private chain of thought",
+            "signature": "secret-signature",
+        }],
+    )
+
+    store.save(session)
+    text = (tmp_path / f"{session.id}.yaml").read_text(encoding="utf-8")
+    loaded = store.load(session.id)
+
+    assert "private chain of thought" not in text
+    assert "secret-signature" not in text
+    assert loaded.messages[0].content_blocks[0].type == "tool_use"
+    assert loaded.messages[0].provider_payload == []
 
 
 def test_add_message_updates_updated_at():

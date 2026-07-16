@@ -112,17 +112,27 @@
 
 ### 任务
 
-- [ ] 建立 Anthropic 多段内容/工具结果的结构化内部表示方案。
-- [ ] 保持不支持原生工具的 Markdown 兜底。
-- [ ] 流式和非流式路径行为一致。
-- [ ] thinking 内容不展示、不写日志，也不破坏必要状态。
-- [ ] 视觉能力在结构化消息完成前保持未验证。
+- [x] 建立 Anthropic 多段内容/工具结果的结构化内部表示方案。
+- [x] 保持不支持原生工具的 Markdown 兜底。
+- [x] 流式和非流式路径行为一致。
+- [x] thinking 内容不展示、不写日志，也不破坏必要状态。
+- [x] 视觉能力在结构化图片消息完成前保持未验证。
 
 ### 验收
 
-- [ ] 至少覆盖一次 read 工具和一次受批准 write 工具回合。
-- [ ] 工具错误能返回模型并保留 Evidence。
-- [ ] 上下文压缩不会生成孤立工具块。
+- [x] 至少覆盖一次 read 工具和一次受批准 write 工具回合。
+- [x] 工具错误能返回模型并保留 Evidence。
+- [x] 上下文压缩不会生成孤立工具块。
+
+### 完成记录（2026-07-16）
+
+- 消息内部增加安全可持久化的 `text`、`tool_use`、`tool_result` 块；旧字符串消息和旧 Session YAML 保持兼容。
+- Anthropic 同步与流式响应均保留下一回合必需的 Provider 私有状态；thinking/signature 只存在于当前进程内，不显示、不写 Session YAML 或日志。
+- 工具结果使用原始 `tool_use_id`，结果块排在后续文本之前，失败结果设置 `is_error: true`；达到工具上限时也会先返回配对错误结果。
+- Agent、Worker、人工批准写入、工具失败 Evidence、流式状态和压缩边界均有离线契约测试；写文件意图同时覆盖带路径和内容的真实表达。
+- 上下文预算按实际原生载荷估算，避免遗漏必须回传的私有块。
+- 验证：`python -m pytest -q` 为 `536 passed, 1 warning`；`compileall`、`node --check` 和 `git diff --check` 通过。
+- 未执行：未读取或使用真实 Anthropic Key，未产生付费调用；官方 Claude 的 `tool_use` 仍保持 `unverified`，等待所有者授权的真实端到端 smoke，`vision` 等待结构化图片消息。
 
 ## 4. B3.4 Provider 错误与恢复
 
@@ -205,4 +215,4 @@
 
 ## 8. 当前下一步
 
-从 **B3.3 Claude 原生工具完整回合** 开始。优先设计结构化内容块和工具结果回传契约，继续使用离线 mock；没有所有者授权时不进行真实付费调用。
+从 **B3.4 Provider 错误与恢复** 开始。先定义结构化 ProviderError 和稳定错误码，再统一 CLI/Web 显示、重试、故障切换与 RunJournal Evidence；没有所有者授权时不进行真实付费调用。

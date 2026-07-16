@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from src.core.token_counter import count_messages_tokens, count_tokens
 from src.gateway.client import GatewayClient
-from src.models.schemas import ChatMessage
+from src.models.schemas import ChatMessage, ToolResultContentBlock, ToolUseContentBlock
 
 
 _COMPACTION_PROMPT = """请把以下对话历史压缩为一份简洁的摘要，保留对后续对话至关重要的信息：
@@ -68,8 +68,17 @@ class ContextCompactor:
         if len(non_system) <= self.keep_recent:
             return messages
 
-        recent = non_system[-self.keep_recent:]
-        old = non_system[: -self.keep_recent]
+        cut = len(non_system) - self.keep_recent
+        while (
+            cut > 0
+            and self._has_tool_results(non_system[cut])
+            and self._has_tool_uses(non_system[cut - 1])
+        ):
+            cut -= 1
+        recent = non_system[cut:]
+        old = non_system[:cut]
+        if not old:
+            return messages
 
         summary_text = self._summarize(old)
         if not summary_text.strip():
@@ -84,6 +93,20 @@ class ContextCompactor:
             ),
         )
         return system_msgs + [summary_msg] + recent
+
+    @staticmethod
+    def _has_tool_uses(message: ChatMessage) -> bool:
+        return any(
+            isinstance(block, ToolUseContentBlock)
+            for block in message.content_blocks
+        )
+
+    @staticmethod
+    def _has_tool_results(message: ChatMessage) -> bool:
+        return any(
+            isinstance(block, ToolResultContentBlock)
+            for block in message.content_blocks
+        )
 
     def _summarize(self, messages: list[ChatMessage]) -> str:
         """调用主模型把旧消息总结为文本"""

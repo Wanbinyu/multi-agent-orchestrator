@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from src.core.token_counter import count_message_tokens, count_messages_tokens, count_tokens
-from src.models.schemas import ChatMessage
+from src.models.schemas import ChatMessage, ToolUseContentBlock
 
 
 def test_count_tokens_nonempty():
@@ -35,3 +35,23 @@ def test_count_messages_tokens_sum():
     # 等于各条之和
     expected = sum(count_message_tokens(m) for m in msgs)
     assert total == expected
+
+
+def test_count_message_tokens_uses_native_payload_instead_of_display_text():
+    short = ChatMessage(role="assistant", content="调用工具")
+    native = ChatMessage(
+        role="assistant",
+        content="调用工具",
+        content_blocks=[ToolUseContentBlock(
+            id="toolu_count_1",
+            name="read_file",
+            input={"path": "README.md"},
+        )],
+        provider_payload=[{
+            "type": "thinking",
+            "thinking": "x" * 200,
+            "signature": "sig",
+        }],
+    )
+
+    assert count_message_tokens(native) > count_message_tokens(short)

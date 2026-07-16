@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from src.models.schemas import ApprovalMode, ChatMessage
+from src.models.schemas import ApprovalMode, ChatMessage, MessageContentBlock
 
 
 class Session(BaseModel):
@@ -25,9 +25,20 @@ class Session(BaseModel):
     config_dir: str = "config"
     approval_mode: ApprovalMode = "auto"
 
-    def add_message(self, role: str, content: str) -> ChatMessage:
+    def add_message(
+        self,
+        role: str,
+        content: str,
+        content_blocks: list[MessageContentBlock] | None = None,
+        provider_payload: list[dict[str, Any]] | None = None,
+    ) -> ChatMessage:
         """添加一条消息并更新时间戳"""
-        msg = ChatMessage(role=role, content=content)
+        msg = ChatMessage(
+            role=role,
+            content=content,
+            content_blocks=content_blocks or [],
+            provider_payload=provider_payload or [],
+        )
         self.messages.append(msg)
         self.updated_at = datetime.now(timezone.utc).isoformat()
         return msg

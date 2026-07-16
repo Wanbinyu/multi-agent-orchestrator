@@ -24,6 +24,11 @@ from src.core.engineering import (
     VerificationTracker,
 )
 from src.core.memory import MemoryContextBuilder, MemoryStore
+from src.core.native_content import (
+    attach_tool_use_ids,
+    native_tool_specs,
+    tool_result_blocks,
+)
 from src.core.session import Session
 from src.core.token_counter import count_messages_tokens
 from src.gateway.client import GatewayClient
@@ -31,6 +36,7 @@ from src.models.schemas import (
     ApprovalMode,
     ChatMessage,
     ChatStreamEvent,
+    MessageContentBlock,
     ModelConfig,
     StreamChunk,
     TaskResult,
@@ -526,6 +532,13 @@ class Agent:
             calls.append({"tool": tool_name, "params": params})
         return calls
 
+    @classmethod
+    def _tool_specs(
+        cls, content: str, content_blocks: list[MessageContentBlock] | None = None
+    ) -> list[dict[str, Any]]:
+        native_specs = native_tool_specs(content_blocks or [])
+        return native_specs or cls._parse_tool_calls(content)
+
     @staticmethod
     def _strip_toolcall_artifacts(content: str) -> str:
         """清除编码模型遗留的特殊 token，避免污染展示与上下文"""
@@ -599,6 +612,7 @@ class Agent:
     def _execute_tool_calls(
         self,
         content: str,
+        content_blocks: list[MessageContentBlock] | None = None,
         files_written: list[str] | None = None,
         read_cache: dict[str, ToolResult] | None = None,
         analysis_only: bool = False,
@@ -609,7 +623,8 @@ class Agent:
         calls: list[dict[str, Any]] = []
         outputs: list[str] = []
 
-        for spec in self._parse_tool_calls(content):
+        specs = self._tool_specs(content, content_blocks)
+        for spec in specs:
             tool_name = spec["tool"]
             params = spec.get("params", {})
 
@@ -700,6 +715,7 @@ class Agent:
             if files_written is not None:
                 self._record_written_file(tool_name, params, result, files_written)
 
+        attach_tool_use_ids(calls, specs)
         return "\n".join(outputs), calls
 
     def _register_permission_request(self) -> str:
@@ -724,8 +740,12 @@ class Agent:
         await event.wait()
         return self._permission_results.get(request_id, False)
 
-    def _has_tool_calls(self, content: str) -> bool:
-        return bool(re.search(r"```tool:\w+\n", content, re.DOTALL))
+    def _has_tool_calls(
+        self, content: str, content_blocks: list[MessageContentBlock] | None = None
+    ) -> bool:
+        return bool(native_tool_specs(content_blocks or [])) or bool(
+            re.search(r"```tool:\w+\n", content, re.DOTALL)
+        )
 
     def run_turn(self, user_input: str) -> AgentTurnResult:
         """执行一轮对话"""
@@ -772,16 +792,37 @@ class Agent:
             total_output += response.output_tokens
             total_cost += response.cost_usd
 
-            self.session.add_message("assistant", response.content)
+            self.session.add_message(
+                "assistant",
+                response.content,
+                response.content_blocks,
+                response.provider_payload,
+            )
             final_content = response.content
 
-            if not self._has_tool_calls(response.content):
+            if not self._has_tool_calls(response.content, response.content_blocks):
                 break
             if iterations >= self.max_tool_iterations:
                 # 达到最大工具轮数，追加提示并要求模型直接给出最终结果
+                limit_specs = self._tool_specs(
+                    response.content, response.content_blocks
+                )
+                limit_calls = [
+                    {
+                        "tool": spec["tool"],
+                        "params": spec.get("params", {}),
+                        "success": False,
+                        "error": "已达到最大工具调用次数",
+                    }
+                    for spec in limit_specs
+                ]
+                attach_tool_use_ids(limit_calls, limit_specs)
+                tool_calls.extend(limit_calls)
+                limit_prompt = "已达到最大工具调用次数，请基于已获得的信息直接完成用户请求，不要再调用工具。"
                 self.session.add_message(
                     "user",
-                    "已达到最大工具调用次数，请基于已获得的信息直接完成用户请求，不要再调用工具。",
+                    limit_prompt,
+                    tool_result_blocks(limit_calls, limit_prompt),
                 )
                 response = self.gateway.chat_with_main_model(
                     messages=self.session.messages,
@@ -793,12 +834,18 @@ class Agent:
                 total_input += response.input_tokens
                 total_output += response.output_tokens
                 total_cost += response.cost_usd
-                self.session.add_message("assistant", response.content)
+                self.session.add_message(
+                    "assistant",
+                    response.content,
+                    response.content_blocks,
+                    response.provider_payload,
+                )
                 final_content = response.content
                 break
 
             tool_results_text, calls = self._execute_tool_calls(
                 response.content,
+                response.content_blocks,
                 files_written,
                 read_cache,
                 analysis_only,
@@ -812,6 +859,7 @@ class Agent:
             self.session.add_message(
                 "user",
                 tool_results_text + "\n\n请继续完成用户请求。",
+                tool_result_blocks(calls),
             )
             iterations += 1
 
@@ -834,7 +882,12 @@ class Agent:
             concise_content = self._strip_toolcall_artifacts(response.content).strip()
             if concise_content:
                 final_content = concise_content
-                self.session.add_message("assistant", final_content)
+                self.session.add_message(
+                    "assistant",
+                    final_content,
+                    response.content_blocks,
+                    response.provider_payload,
+                )
 
         # 不再自动抽取代码块为 generated_N 文件（易产出无意义文件名）；
         # 模型应通过 write_file 显式写文件。仅当本轮未写任何文件时，兜底保存回复为 response.md。
@@ -950,6 +1003,8 @@ class Agent:
         while True:
             await asyncio.to_thread(self._maybe_compact_context)
             full_content = ""
+            response_blocks: list[MessageContentBlock] = []
+            provider_payload: list[dict[str, Any]] = []
             output_before = total_output
             async for chunk in self.gateway.chat_with_main_model_stream(
                 messages=self.session.messages,
@@ -967,8 +1022,16 @@ class Agent:
                     total_input += chunk.input_tokens
                     total_output += chunk.output_tokens
                     total_cost += chunk.cost_usd
+                elif chunk.type == "message_state":
+                    response_blocks = chunk.content_blocks
+                    provider_payload = chunk.provider_payload
 
-            self.session.add_message("assistant", self._strip_toolcall_artifacts(full_content))
+            self.session.add_message(
+                "assistant",
+                self._strip_toolcall_artifacts(full_content),
+                response_blocks,
+                provider_payload,
+            )
             final_content = self._strip_toolcall_artifacts(full_content)
 
             # 模型本轮返回了 token 但没有可解析文本，可能是原生 tool_use/reasoning 未捕获
@@ -995,15 +1058,31 @@ class Agent:
                 )
                 return
 
-            if not self._has_tool_calls(full_content):
+            if not self._has_tool_calls(full_content, response_blocks):
                 break
             if iterations >= self.max_tool_iterations:
                 # 达到最大工具轮数，追加提示并要求模型直接给出最终结果
+                limit_specs = self._tool_specs(full_content, response_blocks)
+                limit_calls = [
+                    {
+                        "tool": spec["tool"],
+                        "params": spec.get("params", {}),
+                        "success": False,
+                        "error": "已达到最大工具调用次数",
+                    }
+                    for spec in limit_specs
+                ]
+                attach_tool_use_ids(limit_calls, limit_specs)
+                tool_calls.extend(limit_calls)
+                limit_prompt = "已达到最大工具调用次数，请基于已获得的信息直接完成用户请求，不要再调用工具。"
                 self.session.add_message(
                     "user",
-                    "已达到最大工具调用次数，请基于已获得的信息直接完成用户请求，不要再调用工具。",
+                    limit_prompt,
+                    tool_result_blocks(limit_calls, limit_prompt),
                 )
                 full_content = ""
+                final_blocks: list[MessageContentBlock] = []
+                final_provider_payload: list[dict[str, Any]] = []
                 async for chunk in self.gateway.chat_with_main_model_stream(
                     messages=self.session.messages,
                     task_id=f"chat-{self.session.id}-finalize",
@@ -1020,12 +1099,20 @@ class Agent:
                         total_input += chunk.input_tokens
                         total_output += chunk.output_tokens
                         total_cost += chunk.cost_usd
+                    elif chunk.type == "message_state":
+                        final_blocks = chunk.content_blocks
+                        final_provider_payload = chunk.provider_payload
                 final_content = self._strip_toolcall_artifacts(full_content)
-                self.session.add_message("assistant", final_content)
+                self.session.add_message(
+                    "assistant",
+                    final_content,
+                    final_blocks,
+                    final_provider_payload,
+                )
                 break
 
             # 流式执行工具调用，期间可能产出 permission_request 事件
-            tool_specs = self._parse_tool_calls(full_content)
+            tool_specs = self._tool_specs(full_content, response_blocks)
             calls: list[dict[str, Any]] = []
             tool_results_parts: list[str] = []
 
@@ -1188,10 +1275,12 @@ class Agent:
             if not calls:
                 break
 
+            attach_tool_use_ids(calls, tool_specs)
             tool_calls.extend(calls)
             self.session.add_message(
                 "user",
                 "".join(tool_results_parts) + "\n\n请继续完成用户请求。",
+                tool_result_blocks(calls),
             )
             iterations += 1
 
@@ -1203,6 +1292,8 @@ class Agent:
                 "不要在标题、表格或列表中途结束。只输出最终答复。",
             )
             concise_content = ""
+            concise_blocks: list[MessageContentBlock] = []
+            concise_provider_payload: list[dict[str, Any]] = []
             async for chunk in self.gateway.chat_with_main_model_stream(
                 messages=self.session.messages,
                 task_id=f"chat-{self.session.id}-concise",
@@ -1218,10 +1309,18 @@ class Agent:
                     total_input += chunk.input_tokens
                     total_output += chunk.output_tokens
                     total_cost += chunk.cost_usd
+                elif chunk.type == "message_state":
+                    concise_blocks = chunk.content_blocks
+                    concise_provider_payload = chunk.provider_payload
             concise_content = self._strip_toolcall_artifacts(concise_content).strip()
             if concise_content:
                 final_content = concise_content
-                self.session.add_message("assistant", final_content)
+                self.session.add_message(
+                    "assistant",
+                    final_content,
+                    concise_blocks,
+                    concise_provider_payload,
+                )
 
         # 不再自动抽取代码块为 generated_N 文件；仅当本轮未写任何文件时兜底保存回复为 response.md
         if self.approval_mode == "auto" and not files_written and final_content.strip():

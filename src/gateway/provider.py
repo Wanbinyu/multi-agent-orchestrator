@@ -8,7 +8,16 @@ from typing import Any
 import anthropic
 import openai
 
-from src.models.schemas import ChatMessage, ChatResponse, ModelConfig, ProviderConfig, StreamChunk
+from src.models.schemas import (
+    ChatMessage,
+    ChatResponse,
+    MessageContentBlock,
+    ModelConfig,
+    ProviderConfig,
+    StreamChunk,
+    TextContentBlock,
+    ToolUseContentBlock,
+)
 
 
 def _clean_text_for_api(text: str) -> str:
@@ -97,7 +106,7 @@ class AnthropicProvider(BaseProvider):
             if m.role == "system":
                 system_msg = _clean_text_for_api(m.content)
             else:
-                chat_messages.append({"role": m.role, "content": _clean_text_for_api(m.content)})
+                chat_messages.append({"role": m.role, "content": self._message_content(m)})
 
         upstream_model_id = self.map_model_id(model_config.model_id)
         request_kwargs: dict[str, Any] = {
@@ -116,14 +125,17 @@ class AnthropicProvider(BaseProvider):
         output_tokens = response.usage.output_tokens
         cost = self._calc_cost(input_tokens, output_tokens, model_config)
 
+        content, content_blocks, provider_payload = self._extract_response_state(response)
         return ChatResponse(
-            content=self._extract_content(response),
+            content=content,
             model=upstream_model_id,
             provider=self.name,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost,
             raw_response=response,
+            content_blocks=content_blocks,
+            provider_payload=provider_payload,
         )
 
     def chat_stream(
@@ -143,7 +155,7 @@ class AnthropicProvider(BaseProvider):
             if m.role == "system":
                 system_msg = _clean_text_for_api(m.content)
             else:
-                chat_messages.append({"role": m.role, "content": _clean_text_for_api(m.content)})
+                chat_messages.append({"role": m.role, "content": self._message_content(m)})
 
         upstream_model_id = self.map_model_id(model_config.model_id)
         stream_kwargs: dict[str, Any] = {
@@ -220,23 +232,89 @@ class AnthropicProvider(BaseProvider):
                     cost_usd=self._calc_cost(input_tokens, output_tokens, model_config),
                 )
 
+            get_final_message = getattr(stream, "get_final_message", None)
+            final_message = get_final_message() if callable(get_final_message) else None
+            if isinstance(getattr(final_message, "content", None), list):
+                _, content_blocks, provider_payload = self._extract_response_state(
+                    final_message
+                )
+                yield StreamChunk(
+                    type="message_state",
+                    content_blocks=content_blocks,
+                    provider_payload=provider_payload,
+                )
+
+    @staticmethod
+    def _message_content(message: ChatMessage) -> str | list[dict[str, Any]]:
+        if message.provider_payload:
+            return message.provider_payload
+        if message.content_blocks:
+            return [
+                block.model_dump(mode="json", exclude_none=True)
+                for block in message.content_blocks
+            ]
+        return _clean_text_for_api(message.content)
+
+    @staticmethod
+    def _block_payload(block: Any) -> dict[str, Any]:
+        if isinstance(block, dict):
+            return dict(block)
+        model_dump = getattr(block, "model_dump", None)
+        if callable(model_dump):
+            return model_dump(mode="json", exclude_none=True)
+        block_type = getattr(block, "type", "")
+        if block_type == "text":
+            return {"type": "text", "text": getattr(block, "text", "")}
+        if block_type == "tool_use":
+            return {
+                "type": "tool_use",
+                "id": getattr(block, "id", ""),
+                "name": getattr(block, "name", ""),
+                "input": getattr(block, "input", {}) or {},
+            }
+        return {"type": block_type}
+
+    @classmethod
+    def _extract_response_state(
+        cls, response: Any
+    ) -> tuple[str, list[MessageContentBlock], list[dict[str, Any]]]:
+        """拆分显示内容、安全持久块和不可落盘的 Provider 原始状态。"""
+        import json
+
+        display_parts: list[str] = []
+        safe_blocks: list[MessageContentBlock] = []
+        provider_payload: list[dict[str, Any]] = []
+        for block in response.content:
+            payload = cls._block_payload(block)
+            provider_payload.append(payload)
+            block_type = payload.get("type")
+            if block_type == "text":
+                text = str(payload.get("text", ""))
+                display_parts.append(text)
+                safe_blocks.append(TextContentBlock(text=text))
+            elif block_type == "tool_use":
+                tool_id = str(payload.get("id", ""))
+                tool_name = str(payload.get("name", ""))
+                tool_input = payload.get("input") or {}
+                if not isinstance(tool_input, dict):
+                    tool_input = {}
+                display_parts.append(
+                    f"```tool:{tool_name}\n{json.dumps(tool_input, ensure_ascii=False)}\n```"
+                )
+                safe_blocks.append(
+                    ToolUseContentBlock(
+                        id=tool_id,
+                        name=tool_name,
+                        input=tool_input,
+                    )
+                )
+            # thinking/redacted_thinking 只保留在 provider_payload 内存态。
+        return "\n".join(display_parts), safe_blocks, provider_payload
+
     @staticmethod
     def _extract_content(response: Any) -> str:
         """把 Anthropic 返回的文本块和 tool_use 块统一转成 Markdown 工具块"""
-        import json
-
-        parts = []
-        for block in response.content:
-            block_type = getattr(block, "type", None)
-            if block_type == "text":
-                parts.append(block.text)
-            elif block_type == "tool_use":
-                tool_input = getattr(block, "input", {}) or {}
-                parts.append(
-                    f"```tool:{getattr(block, 'name', '')}\n{json.dumps(tool_input, ensure_ascii=False)}\n```"
-                )
-            # thinking 块不加入对话内容，避免刷屏和上下文膨胀
-        return "\n".join(parts)
+        return AnthropicProvider._extract_response_state(response)[0]
 
     def _calc_cost(self, input_tokens: int, output_tokens: int, model_config: ModelConfig) -> float:
         return (

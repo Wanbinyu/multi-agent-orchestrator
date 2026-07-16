@@ -4,7 +4,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from src.core.compactor import ContextCompactor
-from src.models.schemas import ChatMessage
+from src.models.schemas import (
+    ChatMessage,
+    ToolResultContentBlock,
+    ToolUseContentBlock,
+)
 
 
 def _make_messages(n: int, content_size: int = 200) -> list[ChatMessage]:
@@ -104,3 +108,40 @@ def test_transcript_truncates_long_content():
     transcript = ContextCompactor._build_transcript([long_msg])
     assert "已截断" in transcript
     assert len(transcript) < 2000
+
+
+def test_compaction_does_not_orphan_native_tool_result():
+    gw = _mock_gateway(summary_text="摘要")
+    compactor = ContextCompactor(
+        gw,
+        max_context_tokens=100,
+        threshold=0.5,
+        keep_recent=1,
+        min_messages_to_compact=4,
+    )
+    messages = [ChatMessage(role="system", content="system")]
+    messages.extend(
+        ChatMessage(role="user", content="old" * 100) for _ in range(6)
+    )
+    messages.append(ChatMessage(
+        role="assistant",
+        content="调用工具",
+        content_blocks=[ToolUseContentBlock(
+            id="toolu_compact_1",
+            name="read_file",
+            input={"path": "README.md"},
+        )],
+    ))
+    messages.append(ChatMessage(
+        role="user",
+        content="工具结果",
+        content_blocks=[ToolResultContentBlock(
+            tool_use_id="toolu_compact_1",
+            content="README",
+        )],
+    ))
+
+    result = compactor.maybe_compact(messages)
+
+    assert result[-2].content_blocks[0].type == "tool_use"
+    assert result[-1].content_blocks[0].type == "tool_result"

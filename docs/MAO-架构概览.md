@@ -64,6 +64,10 @@ flowchart TD
 
 Provider 层当前覆盖 Anthropic 协议、OpenAI 兼容协议、Ollama 和 llama.cpp。本地逻辑模型名与上游真实模型 ID 分离，避免把协议名误认为实际模型名。
 
+Anthropic 工具回合同时维护三层内容：面向 UI 和旧 Provider 的字符串正文、可持久化的 `text`/`tool_use`/`tool_result` 安全块，以及仅在当前进程内回传的 Provider 私有块。私有块用于保存 thinking/signature 等协议状态，Pydantic 序列化时强制排除；工具结果必须携带原始 `tool_use_id` 并排在同一用户消息的后续文本之前。不支持结构化工具的模型继续使用 Markdown 工具块兜底。
+
+上下文压缩不会把原生 `tool_use` 与紧随其后的 `tool_result` 分开；上下文预算按真正发送的原生载荷估算，而不是只统计展示文本。
+
 关键模块：
 
 - `src/gateway/client.py`
@@ -91,6 +95,7 @@ Provider 层当前覆盖 Anthropic 协议、OpenAI 兼容协议、Ollama 和 lla
 关键模块：
 
 - `src/core/agent.py`
+- `src/core/native_content.py`
 - `src/core/engineering/classifier.py`
 - `src/core/engineering/evidence.py`
 - `src/core/engineering/verifier.py`

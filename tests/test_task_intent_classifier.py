@@ -17,6 +17,7 @@ from src.core.engineering import TaskIntentClassifier
         ("实现一个前后端登录功能", "build", True),
         ("开发登录功能", "build", True),
         ("写文件", "build", True),
+        ("写文件 native.txt，内容为 hello", "build", True),
         ("先做 Java 重构方案，不要修改文件", "plan", False),
         ("持续监控测试进程，完成后通知", "monitor", False),
         ("处理一下", "unclassified", False),

@@ -232,7 +232,9 @@ def test_run_turn_respects_max_tool_iterations(tmp_path):
 
     # 初始调用 + 2 次工具循环 + 1 次最终总结 = 4 次模型调用
     assert gateway.chat_with_main_model.call_count == 4
-    assert len(result.tool_calls) == 2
+    assert len(result.tool_calls) == 3
+    assert [call["success"] for call in result.tool_calls] == [False, False, False]
+    assert result.tool_calls[-1]["error"] == "已达到最大工具调用次数"
 
 
 def test_run_turn_writes_code_blocks(tmp_path):

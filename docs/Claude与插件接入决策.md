@@ -23,9 +23,9 @@
 - Provider 连接测试、模型映射、费用估算和故障分类基础。
 - OpenRouter 中的 Claude 模型路径。
 
-因此当前状态是“基础链路已实现，真实兼容性尚未形成发布级证据”。
+因此当前状态是“官方模型真值和原生工具回合已完成离线契约验证，真实付费兼容性仍待所有者授权的 smoke”。
 
-截至 2026-07-16，B3.2 已完成官方模型 ID、标准价格、上下文/输出限制、鉴权入口和连接错误的离线契约验证。`tool_use` 与视觉仍保持 `unverified`，分别等待 B3.3 的完整工具回合与结构化消息支持；未执行真实付费 smoke。
+截至 2026-07-16，B3.2 已完成官方模型 ID、标准价格、上下文/输出限制、鉴权入口和连接错误的离线契约验证；B3.3 已完成结构化 `tool_use`/`tool_result`、同步/流式状态、thinking 私有态、人工批准写入和压缩边界的离线验收。`tool_use` 与视觉仍保持 `unverified`，分别等待真实端到端 smoke 与结构化图片消息；未执行真实付费 smoke。
 
 ## 3. Claude 接入缺口
 
@@ -35,9 +35,9 @@
    - 预设模型 ID、价格、上下文和能力必须有官方来源与验证日期。
    - 未验证模型不能因为名称包含 Claude 就自动声明视觉、reasoning 或工具能力。
 
-2. **完整工具回合不足**
-   - 当前可发送原生工具 Schema，并把返回的 `tool_use` 转成 MAO 工具块。
-   - 仍需验证工具结果进入下一回合时是否符合官方 Messages API 语义，而不只是字符串兜底。
+2. **完整工具回合缺少真实 smoke**
+   - 离线契约已验证原生工具 Schema、结构化 `tool_use`、本地执行和带原始 ID 的 `tool_result` 回传。
+   - 发布级能力声明仍需所有者授权后，用官方 Messages API 完成最小真实 read/write smoke。
 
 3. **多模态消息模型不足**
    - 当前 `ChatMessage.content` 主要是字符串。
@@ -49,7 +49,7 @@
 ### P1
 
 - Prompt caching 是否启用，需要先确认 SDK、模型和计费语义，并用指标证明收益。
-- Extended thinking/reasoning 必须结构化处理，不向用户暴露隐藏推理，也不能静默丢失必要状态。
+- Extended thinking/reasoning 已按“当前进程内回传、显示和持久化时排除”处理；真实模型兼容性仍需 smoke 验证。
 - Bedrock/Vertex 上的 Claude 属于独立 Provider 适配，放在官方 Anthropic API 稳定之后。
 
 ## 4. Claude 凭据边界

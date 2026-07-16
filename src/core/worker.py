@@ -10,6 +10,11 @@ import yaml
 
 from src.core.collaboration import is_write_path_allowed
 from src.core.config_paths import resolve_workers_config_path
+from src.core.native_content import (
+    attach_tool_use_ids,
+    native_tool_specs,
+    tool_result_blocks,
+)
 from src.gateway.client import GatewayClient
 from src.models.schemas import ChatMessage, Task, TaskResult
 from src.tools.file_tools import write_text_file
@@ -152,16 +157,26 @@ class Worker:
                     read_cache=read_cache,
                     task=task,
                 )
+                native_specs = native_tool_specs(response.content_blocks)
+                attach_tool_use_ids(tool_results, native_specs)
                 for tool_result in tool_results:
                     tool_result["task_id"] = task.id
                 tool_trace.extend(tool_results)
                 _collect_written_files(tool_results, task_output_dir, files_written)
 
                 if tool_results:
-                    messages.append(ChatMessage(role="assistant", content=response.content))
+                    messages.append(ChatMessage(
+                        role="assistant",
+                        content=response.content,
+                        content_blocks=response.content_blocks,
+                        provider_payload=response.provider_payload,
+                    ))
                     messages.append(ChatMessage(
                         role="user",
                         content=processed + "\n\n请根据工具结果继续完成任务。",
+                        content_blocks=tool_result_blocks(
+                            tool_results, "请根据工具结果继续完成任务。"
+                        ),
                     ))
                     iterations += 1
                     if iterations >= self.max_tool_iterations:
@@ -197,7 +212,12 @@ class Worker:
                     and not recovery_requested
                     and iterations < self.max_tool_iterations
                 ):
-                    messages.append(ChatMessage(role="assistant", content=final_content))
+                    messages.append(ChatMessage(
+                        role="assistant",
+                        content=final_content,
+                        content_blocks=response.content_blocks,
+                        provider_payload=response.provider_payload,
+                    ))
                     messages.append(ChatMessage(
                         role="user",
                         content=(

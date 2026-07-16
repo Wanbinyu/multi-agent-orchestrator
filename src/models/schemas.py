@@ -164,10 +164,39 @@ class WorkerConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
 
 
+class TextContentBlock(BaseModel):
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ToolUseContentBlock(BaseModel):
+    type: Literal["tool_use"] = "tool_use"
+    id: str
+    name: str
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolResultContentBlock(BaseModel):
+    type: Literal["tool_result"] = "tool_result"
+    tool_use_id: str
+    content: str
+    is_error: bool = False
+
+
+MessageContentBlock = TextContentBlock | ToolUseContentBlock | ToolResultContentBlock
+
+
 class ChatMessage(BaseModel):
     """统一消息格式"""
     role: Literal["system", "user", "assistant"]
     content: str
+    content_blocks: list[MessageContentBlock] = Field(default_factory=list)
+    provider_payload: list[dict[str, Any]] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+        description="仅在当前进程内回传 Provider 私有块，不写入 Session 或日志",
+    )
 
 
 ApprovalMode = Literal["auto", "approve", "readonly"]
@@ -191,13 +220,25 @@ class ChatResponse(BaseModel):
     output_tokens: int = 0
     cost_usd: float = 0.0
     raw_response: Any = None
+    content_blocks: list[MessageContentBlock] = Field(default_factory=list)
+    provider_payload: list[dict[str, Any]] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+    )
 
 
 class StreamChunk(BaseModel):
     """流式输出内部块（Provider -> Gateway -> Agent）"""
 
-    type: Literal["delta", "usage", "failover"]
+    type: Literal["delta", "usage", "failover", "message_state"]
     content: str | None = None  # delta 文本
+    content_blocks: list[MessageContentBlock] = Field(default_factory=list)
+    provider_payload: list[dict[str, Any]] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+    )
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0

@@ -1,11 +1,20 @@
 """原生 tool_use 测试"""
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 
 from src.core.agent import Agent, TOOL_RULES_NATIVE
 from src.core.session import Session
-from src.models.schemas import ChatResponse, ModelConfig, ProviderConfig
+from src.models.schemas import (
+    ChatResponse,
+    ModelConfig,
+    ProviderConfig,
+    StreamChunk,
+    TextContentBlock,
+    ToolResultContentBlock,
+    ToolUseContentBlock,
+)
 from src.tools.registry import tool_registry
 
 
@@ -210,3 +219,209 @@ def test_native_openai_schema_type(tmp_path):
     tools = agent._get_native_tools()
     assert tools is not None
     assert tools[0]["type"] == "function"  # openai 格式
+
+
+def test_sync_native_write_round_returns_structured_tool_result(tmp_path):
+    cfg = _model_cfg(capability_status={"tool_use": "supported"})
+    gw = _make_gateway("", cfg)
+    tool_block = ToolUseContentBlock(
+        id="toolu_write_1",
+        name="write_file",
+        input={"path": "native.txt", "content": "hello"},
+    )
+    gw.chat_with_main_model.side_effect = [
+        ChatResponse(
+            content='```tool:write_file\n{"path":"native.txt","content":"hello"}\n```',
+            model="claude",
+            provider="anthropic",
+            content_blocks=[tool_block],
+            provider_payload=[tool_block.model_dump()],
+        ),
+        ChatResponse(
+            content="文件已创建。",
+            model="claude",
+            provider="anthropic",
+            content_blocks=[TextContentBlock(text="文件已创建。")],
+        ),
+    ]
+    session = _session(tmp_path)
+    agent = Agent(gw, session)
+
+    result = agent.run_turn("写文件 native.txt，内容为 hello")
+
+    assert (tmp_path / "output" / "native.txt").read_text(encoding="utf-8") == "hello"
+    assert result.tool_calls[0]["tool_use_id"] == "toolu_write_1"
+    result_message = next(
+        message
+        for message in session.messages
+        if any(isinstance(block, ToolResultContentBlock) for block in message.content_blocks)
+    )
+    assert isinstance(result_message.content_blocks[0], ToolResultContentBlock)
+    assert result_message.content_blocks[0].tool_use_id == "toolu_write_1"
+    assert result_message.content_blocks[0].is_error is False
+
+
+def test_sync_native_tool_error_is_returned_and_recorded_as_evidence(tmp_path):
+    cfg = _model_cfg(capability_status={"tool_use": "supported"})
+    gw = _make_gateway("", cfg)
+    tool_block = ToolUseContentBlock(
+        id="toolu_missing_1",
+        name="read_file",
+        input={"path": "missing.txt"},
+    )
+    gw.chat_with_main_model.side_effect = [
+        ChatResponse(
+            content='```tool:read_file\n{"path":"missing.txt"}\n```',
+            model="claude",
+            provider="anthropic",
+            content_blocks=[tool_block],
+            provider_payload=[tool_block.model_dump()],
+        ),
+        ChatResponse(content="文件不存在。", model="claude", provider="anthropic"),
+    ]
+    session = _session(tmp_path)
+    agent = Agent(gw, session)
+
+    result = agent.run_turn("读取 missing.txt 并说明结果")
+
+    assert result.tool_calls[0]["success"] is False
+    assert result.tool_calls[0]["tool_use_id"] == "toolu_missing_1"
+    assert result.engineering["evidence_count"] >= 1
+    result_block = next(
+        block
+        for message in session.messages
+        for block in message.content_blocks
+        if isinstance(block, ToolResultContentBlock)
+    )
+    assert result_block.is_error is True
+    assert result_block.tool_use_id == "toolu_missing_1"
+
+
+def test_stream_native_round_preserves_tool_id(tmp_path):
+    cfg = _model_cfg(capability_status={"tool_use": "supported"})
+    gw = _make_gateway("", cfg)
+    tool_block = ToolUseContentBlock(
+        id="toolu_stream_read_1",
+        name="read_file",
+        input={"path": "hello.txt"},
+    )
+    (tmp_path / "output").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "output" / "hello.txt").write_text("hello", encoding="utf-8")
+
+    async def _chunks(*chunks):
+        for chunk in chunks:
+            yield chunk
+
+    gw.chat_with_main_model_stream.side_effect = [
+        _chunks(
+            StreamChunk(
+                type="delta",
+                content='```tool:read_file\n{"path":"hello.txt"}\n```',
+            ),
+            StreamChunk(type="usage", input_tokens=5, output_tokens=3),
+            StreamChunk(
+                type="message_state",
+                content_blocks=[tool_block],
+                provider_payload=[tool_block.model_dump()],
+            ),
+        ),
+        _chunks(
+            StreamChunk(type="delta", content="读取完成。"),
+            StreamChunk(type="usage", input_tokens=4, output_tokens=2),
+            StreamChunk(
+                type="message_state",
+                content_blocks=[TextContentBlock(text="读取完成。")],
+            ),
+        ),
+    ]
+    session = _session(tmp_path)
+    agent = Agent(gw, session)
+
+    async def _run():
+        return [event async for event in agent.run_turn_stream("读取 hello.txt")]
+
+    events = asyncio.run(_run())
+    done = next(event for event in events if event.type == "done")
+    assert done.tool_calls[0]["tool_use_id"] == "toolu_stream_read_1"
+    result_block = next(
+        block
+        for message in session.messages
+        for block in message.content_blocks
+        if isinstance(block, ToolResultContentBlock)
+    )
+    assert result_block.tool_use_id == "toolu_stream_read_1"
+
+
+def test_stream_native_write_round_executes_after_approval(tmp_path):
+    cfg = _model_cfg(capability_status={"tool_use": "supported"})
+    gw = _make_gateway("", cfg)
+    tool_block = ToolUseContentBlock(
+        id="toolu_stream_write_1",
+        name="write_file",
+        input={"path": "approved-native.txt", "content": "approved"},
+    )
+
+    async def _chunks(*chunks):
+        for chunk in chunks:
+            yield chunk
+
+    gw.chat_with_main_model_stream.side_effect = [
+        _chunks(
+            StreamChunk(
+                type="delta",
+                content=(
+                    '```tool:write_file\n'
+                    '{"path":"approved-native.txt","content":"approved"}\n```'
+                ),
+            ),
+            StreamChunk(type="usage", input_tokens=5, output_tokens=3),
+            StreamChunk(
+                type="message_state",
+                content_blocks=[tool_block],
+                provider_payload=[tool_block.model_dump()],
+            ),
+        ),
+        _chunks(
+            StreamChunk(type="delta", content="文件已创建。"),
+            StreamChunk(type="usage", input_tokens=4, output_tokens=2),
+            StreamChunk(
+                type="message_state",
+                content_blocks=[TextContentBlock(text="文件已创建。")],
+            ),
+        ),
+    ]
+    session = _session(tmp_path)
+    session.approval_mode = "approve"
+    agent = Agent(gw, session)
+
+    async def _run():
+        events = []
+        async for event in agent.run_turn_stream(
+            "写文件 approved-native.txt，内容为 approved"
+        ):
+            events.append(event)
+            if event.type == "permission_request":
+                request_id = event.permission_request["request_id"]
+                asyncio.get_running_loop().call_soon(
+                    agent.respond_to_permission, request_id, True
+                )
+        return events
+
+    events = asyncio.run(_run())
+    permission = next(event for event in events if event.type == "permission_request")
+    done = next(event for event in events if event.type == "done")
+
+    assert permission.permission_request["tool"] == "write_file"
+    assert done.tool_calls[0]["success"] is True
+    assert done.tool_calls[0]["tool_use_id"] == "toolu_stream_write_1"
+    assert (
+        tmp_path / "output" / "approved-native.txt"
+    ).read_text(encoding="utf-8") == "approved"
+    result_block = next(
+        block
+        for message in session.messages
+        for block in message.content_blocks
+        if isinstance(block, ToolResultContentBlock)
+    )
+    assert result_block.tool_use_id == "toolu_stream_write_1"
+    assert result_block.is_error is False
