@@ -1,4 +1,8 @@
 """CLI 入口单元测试"""
+from __future__ import annotations
+
+import os
+import re
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -10,40 +14,57 @@ from src.models.schemas import ChatResponse, ReviewResult, Task, TaskPlan, TaskR
 
 runner = CliRunner()
 
+# CI runners report a narrow TTY and Rich injects ANSI spans that can split
+# option tokens in the raw help buffer. Force a wide plain-friendly width.
+_HELP_ENV = {
+    **os.environ,
+    "COLUMNS": "160",
+    "TERM": "xterm-256color",
+    "NO_COLOR": "1",
+}
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI SGR sequences so help assertions are terminal-independent."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
 
 def test_version_option():
-    result = runner.invoke(run.app, ["--version"])
+    result = runner.invoke(run.app, ["--version"], env=_HELP_ENV)
     assert result.exit_code == 0
-    assert "MAO 0.1.0b1" in result.output
+    assert "MAO 0.1.0b1" in _plain(result.output)
 
 
 def test_run_help_shows_all_options():
-    result = runner.invoke(run.app, ["run", "--help"])
+    result = runner.invoke(run.app, ["run", "--help"], env=_HELP_ENV)
+    out = _plain(result.output)
     assert result.exit_code == 0
-    assert "--output" in result.output
-    assert "-o" in result.output
-    assert "--config" in result.output
-    assert "-c" in result.output
-    assert "--max-workers" in result.output
-    assert "-w" in result.output
-    assert "--orchestrator-model" in result.output
-    assert "-m" in result.output
-    assert "--yes" in result.output
-    assert "-y" in result.output
+    assert "--output" in out
+    assert "-o" in out
+    assert "--config" in out
+    assert "-c" in out
+    assert "--max-workers" in out
+    assert "-w" in out
+    assert "--orchestrator-model" in out
+    assert "-m" in out
+    assert "--yes" in out
+    assert "-y" in out
 
 
 def test_setup_help_shows_config_option():
-    result = runner.invoke(run.app, ["setup", "--help"])
+    result = runner.invoke(run.app, ["setup", "--help"], env=_HELP_ENV)
+    out = _plain(result.output)
     assert result.exit_code == 0
-    assert "--config" in result.output
-    assert "-c" in result.output
+    assert "--config" in out
+    assert "-c" in out
 
 
 def test_agent_setup_help_shows_config_option():
-    result = runner.invoke(run.app, ["agent-setup", "--help"])
+    result = runner.invoke(run.app, ["agent-setup", "--help"], env=_HELP_ENV)
+    out = _plain(result.output)
     assert result.exit_code == 0
-    assert "--config" in result.output
-    assert "-c" in result.output
+    assert "--config" in out
+    assert "-c" in out
 
 
 def test_maybe_insert_run_subcommand_with_bare_request():
