@@ -36,6 +36,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
+      # Private runtime configs are gitignored; seed examples so fresh clones
+      # and CI match a first-time contributor checkout.
+      - name: Seed example configs
+        run: |
+          test -f config/providers.yaml || cp config/providers.yaml.example config/providers.yaml
+          test -f config/workers.yaml || cp config/workers.yaml.example config/workers.yaml
       - name: Tests
         run: python -m pytest -q
       - name: Python syntax

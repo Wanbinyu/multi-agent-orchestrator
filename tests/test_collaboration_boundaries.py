@@ -9,7 +9,10 @@ from src.core.collaboration import (
     normalize_task_contract,
     validate_collaboration_plan,
 )
-from src.core.config_paths import resolve_workers_config_path
+from src.core.config_paths import (
+    resolve_providers_config_path,
+    resolve_workers_config_path,
+)
 from src.models.schemas import Task, TaskPlan
 from src.core.worker import load_workers_config
 
@@ -95,6 +98,17 @@ def test_workers_config_falls_back_to_example(tmp_path):
     example.write_text("available_workers: {}\n", encoding="utf-8")
 
     resolved = resolve_workers_config_path(config_dir / "workers.yaml")
+
+    assert resolved == example
+
+
+def test_providers_config_falls_back_to_example(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    example = config_dir / "providers.yaml.example"
+    example.write_text("providers: {}\nmodels: {}\nmain_model: null\n", encoding="utf-8")
+
+    resolved = resolve_providers_config_path(config_dir / "providers.yaml")
 
     assert resolved == example
 

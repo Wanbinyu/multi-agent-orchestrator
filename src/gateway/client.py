@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from src.core.config_paths import resolve_providers_config_path
 from src.core.context_budget import ContextBudget, ContextBudgetManager
 from src.gateway.provider import BaseProvider, create_provider
 from src.gateway.router import ModelRouter
@@ -126,8 +127,9 @@ class GatewayClient:
         return budget
 
     def _load_config(self, config_path: str):
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+        resolved = resolve_providers_config_path(config_path)
+        with resolved.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
 
         # 加载 providers
         disabled_providers: set[str] = set()
