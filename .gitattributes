@@ -1,5 +1,10 @@
 /tests export-ignore
+/tests/** export-ignore
 /.github export-ignore
+/.github/** export-ignore
 /docs/acceptance export-ignore
+/docs/acceptance/** export-ignore
+/docs/archive export-ignore
+/docs/archive/** export-ignore
 /CONTRIBUTING.md export-ignore
 /TESTING.md export-ignore
