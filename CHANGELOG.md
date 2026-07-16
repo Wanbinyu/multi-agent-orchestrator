@@ -15,7 +15,7 @@ All notable changes are documented here. MAO follows Semantic Versioning; beta r
 - CI secret scan now uses the free gitleaks binary so private pre-release repos are not blocked by the paid `gitleaks-action` license.
 - CI steps run under bash on Windows and Ubuntu for consistent multi-line commands.
 
-## [0.1.0-beta.1] - Unreleased
+## [0.1.0-beta.1] - 2026-07-16
 
 ### Added
 
