@@ -12,6 +12,8 @@ from typing import Any
 import anthropic
 import openai
 
+from src.gateway.errors import ProviderError, classify_provider_error
+
 
 @dataclass
 class ConnectionTestResult:
@@ -24,6 +26,8 @@ class ConnectionTestResult:
     available_models: list[str]
     error_message: str = ""
     error_code: str = ""
+    action: str = ""
+    retryable: bool = False
     response_time_ms: float = 0.0
 
 
@@ -38,16 +42,18 @@ def check_anthropic_connection(
 
     start = time.time()
     if not api_key.strip():
-        return _error_result(
-            "anthropic", base_url, "API Key 不能为空", start, "authentication_error"
-        )
-    if not model_id.strip():
-        return _error_result(
+        return _provider_error_result(
             "anthropic",
             base_url,
-            "测试 Anthropic 需要指定 model_id",
+            ProviderError("authentication_error", provider="anthropic", model=model_id),
             start,
-            "invalid_request_error",
+        )
+    if not model_id.strip():
+        return _provider_error_result(
+            "anthropic",
+            base_url,
+            ProviderError("configuration_error", provider="anthropic"),
+            start,
         )
     try:
         client_kwargs: dict[str, Any] = {
@@ -74,77 +80,16 @@ def check_anthropic_connection(
             available_models=[],
             response_time_ms=elapsed,
         )
-    except anthropic.AuthenticationError:
-        return _error_result(
+    except Exception as exception:
+        return _provider_error_result(
             "anthropic",
             base_url,
-            "API Key 无效、已过期或已撤销",
+            classify_provider_error(
+                exception,
+                provider="anthropic",
+                model=model_id,
+            ),
             start,
-            "authentication_error",
-        )
-    except anthropic.PermissionDeniedError:
-        return _error_result(
-            "anthropic",
-            base_url,
-            "API Key 无权访问该模型或资源",
-            start,
-            "permission_error",
-        )
-    except anthropic.NotFoundError:
-        return _error_result(
-            "anthropic",
-            base_url,
-            "请求的模型不存在，请检查是否使用官方模型 ID",
-            start,
-            "not_found_error",
-        )
-    except anthropic.RateLimitError:
-        return _error_result(
-            "anthropic",
-            base_url,
-            "已达到 Anthropic 速率或加速限制，请稍后重试",
-            start,
-            "rate_limit_error",
-        )
-    except anthropic.APITimeoutError:
-        return _error_result(
-            "anthropic",
-            base_url,
-            "Anthropic 请求超时，请检查网络或增大超时时间",
-            start,
-            "timeout_error",
-        )
-    except anthropic.BadRequestError as exception:
-        if _is_context_limit_error(exception):
-            return _error_result(
-                "anthropic",
-                base_url,
-                "请求超过模型上下文或输出限制，请缩短输入或降低输出上限",
-                start,
-                "context_length_error",
-            )
-        return _error_result(
-            "anthropic",
-            base_url,
-            "请求参数或消息格式不受支持",
-            start,
-            "invalid_request_error",
-        )
-    except anthropic.APIConnectionError:
-        return _error_result(
-            "anthropic",
-            base_url,
-            "无法连接到服务器，请检查网络或 base_url",
-            start,
-            "connection_error",
-        )
-    except Exception:
-        return _error_result(
-            "anthropic",
-            base_url,
-            "Anthropic 连接测试失败",
-            start,
-            "provider_error",
         )
 
 
@@ -158,6 +103,17 @@ def check_openai_compatible_connection(
     import time
 
     start = time.time()
+    if not api_key.strip():
+        return _provider_error_result(
+            "openai_compatible",
+            base_url,
+            ProviderError(
+                "authentication_error",
+                provider="openai_compatible",
+                model=model_id,
+            ),
+            start,
+        )
     try:
         client = openai.OpenAI(
             api_key=api_key,
@@ -178,14 +134,17 @@ def check_openai_compatible_connection(
             available_models=[],
             response_time_ms=elapsed,
         )
-    except openai.AuthenticationError:
-        return _error_result("openai_compatible", base_url, "API Key 无效或已过期", start)
-    except openai.NotFoundError:
-        return _error_result("openai_compatible", base_url, "请求的模型不存在，请检查 model_id", start)
-    except openai.APIConnectionError:
-        return _error_result("openai_compatible", base_url, "无法连接到服务器，请检查网络或 base_url", start)
-    except Exception:
-        return _error_result("openai_compatible", base_url, "OpenAI 兼容连接测试失败", start)
+    except Exception as exception:
+        return _provider_error_result(
+            "openai_compatible",
+            base_url,
+            classify_provider_error(
+                exception,
+                provider="openai_compatible",
+                model=model_id,
+            ),
+            start,
+        )
 
 
 def check_provider_connection(
@@ -203,6 +162,7 @@ def check_provider_connection(
     elif provider_type == "openai":
         if not model_id:
             # 对于 OpenAI 兼容服务，必须指定一个模型名测试
+            error = ProviderError("configuration_error")
             return ConnectionTestResult(
                 success=False,
                 provider_name="openai_compatible",
@@ -210,9 +170,12 @@ def check_provider_connection(
                 base_url=base_url,
                 available_models=[],
                 error_message="测试 OpenAI 兼容服务需要指定 model_id",
+                error_code="configuration_error",
+                action=error.action,
             )
         return check_openai_compatible_connection(api_key, base_url, model_id, timeout)
     else:
+        error = ProviderError("configuration_error")
         return ConnectionTestResult(
             success=False,
             provider_name=provider_type,
@@ -220,6 +183,8 @@ def check_provider_connection(
             base_url=base_url,
             available_models=[],
             error_message=f"不支持的 provider 类型: {provider_type}",
+            error_code="configuration_error",
+            action=error.action,
         )
 
 
@@ -229,6 +194,8 @@ def _error_result(
     message: str,
     start_time: float,
     error_code: str = "",
+    action: str = "",
+    retryable: bool = False,
 ) -> ConnectionTestResult:
     import time
 
@@ -241,20 +208,24 @@ def _error_result(
         available_models=[],
         error_message=message,
         error_code=error_code,
+        action=action,
+        retryable=retryable,
         response_time_ms=elapsed,
     )
 
 
-def _is_context_limit_error(exception: anthropic.BadRequestError) -> bool:
-    """Anthropic 将上下文超限归为通用 invalid_request_error。"""
-    body = getattr(exception, "body", None)
-    normalized = f"{body or ''} {exception}".lower()
-    markers = (
-        "context window",
-        "context length",
-        "too many input tokens",
-        "prompt is too long",
-        "maximum context",
-        "input length",
+def _provider_error_result(
+    provider_name: str,
+    base_url: str,
+    error: ProviderError,
+    start_time: float,
+) -> ConnectionTestResult:
+    return _error_result(
+        provider_name,
+        base_url,
+        error.message,
+        start_time,
+        error.code,
+        error.action,
+        error.retryable,
     )
-    return any(marker in normalized for marker in markers)

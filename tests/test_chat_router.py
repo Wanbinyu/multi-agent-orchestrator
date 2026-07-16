@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from src.gateway.errors import ProviderError
 from src.models.schemas import ChatResponse, ModelConfig
 from src.ui.app import app
 from src.ui.routers import chat as chat_router
@@ -214,6 +215,30 @@ def test_failed_sync_message_persists_session_and_journal(client):
         message["role"] == "user" and message["content"] == "检查项目"
         for message in saved_session["messages"]
     )
+    runs = client.get(f"/api/chat/sessions/{session_id}/runs").json()["runs"]
+    assert runs[0]["status"] == "failed"
+
+
+def test_sync_provider_error_has_structured_safe_web_response(client):
+    created = client.post("/api/chat/sessions", json={"title": "provider"}).json()
+    session_id = created["session_id"]
+    chat_router.gateway.chat_with_main_model.side_effect = ProviderError(
+        "authentication_error",
+        provider="anthropic",
+        model="claude",
+        cause_type="AuthenticationError",
+    )
+
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"message": "回答你好"},
+    )
+
+    assert response.status_code == 401
+    payload = response.json()
+    assert payload["error"]["error_code"] == "authentication_error"
+    assert payload["error"]["retryable"] is False
+    assert payload["detail"].startswith("[authentication_error]")
     runs = client.get(f"/api/chat/sessions/{session_id}/runs").json()["runs"]
     assert runs[0]["status"] == "failed"
 

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.ui.routers import chat, memory, providers
+from src.gateway.errors import ProviderError, provider_error_http_status
 
 
 @asynccontextmanager
@@ -38,6 +40,14 @@ templates = Jinja2Templates(directory=str(_base_dir / "templates"))
 app.include_router(providers.router)
 app.include_router(chat.router)
 app.include_router(memory.router)
+
+
+@app.exception_handler(ProviderError)
+async def provider_error_handler(_request: Request, exc: ProviderError):
+    return JSONResponse(
+        status_code=provider_error_http_status(exc),
+        content={"detail": exc.user_message, "error": exc.to_dict()},
+    )
 
 
 @app.get("/")

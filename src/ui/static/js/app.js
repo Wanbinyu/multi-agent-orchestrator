@@ -365,7 +365,9 @@
       if (res.success) {
         showResult(`✅ 连接成功 · ${res.response_time_ms}ms`, true);
       } else {
-        showResult(`❌ 连接失败：${res.error_message}`, false);
+        const code = res.error_code ? `[${res.error_code}] ` : "";
+        const action = res.action ? `；建议：${res.action}` : "";
+        showResult(`❌ 连接失败：${code}${res.error_message}${action}`, false);
       }
       await loadConfig();
     } catch (err) {

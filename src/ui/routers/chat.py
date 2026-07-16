@@ -13,6 +13,7 @@ from src.core.agent import Agent, AgentTurnResult
 from src.core.engineering import RunJournalStore
 from src.core.session import Session, SessionStore
 from src.gateway.client import GatewayClient
+from src.gateway.errors import ProviderError
 from src.models.schemas import ApprovalMode, ChatStreamEvent
 from src.tools.paths import resolve_path
 from src.tools.search_tools import PROJECT_TREE_IGNORED_DIRS
@@ -297,7 +298,16 @@ async def send_message_stream(session_id: str, form: SendMessageForm):
             async for event in agent.run_turn_stream(form.message):
                 yield f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
         except Exception as e:
-            ev = ChatStreamEvent(type="error", error=str(e))
+            if isinstance(e, ProviderError):
+                ev = ChatStreamEvent(
+                    type="error",
+                    error=e.user_message,
+                    error_code=e.code,
+                    action=e.action,
+                    retryable=e.retryable,
+                )
+            else:
+                ev = ChatStreamEvent(type="error", error=str(e))
             yield f"event: error\ndata: {ev.model_dump_json()}\n\n"
         finally:
             store.save(session)

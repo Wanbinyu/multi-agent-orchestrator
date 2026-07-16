@@ -95,8 +95,8 @@ def _anthropic_status_error(exception_type, status: int, body=None):
     [
         (anthropic.AuthenticationError, 401, "authentication_error", "API Key"),
         (anthropic.PermissionDeniedError, 403, "permission_error", "无权"),
-        (anthropic.NotFoundError, 404, "not_found_error", "模型不存在"),
-        (anthropic.RateLimitError, 429, "rate_limit_error", "速率"),
+        (anthropic.NotFoundError, 404, "model_not_found", "模型"),
+        (anthropic.RateLimitError, 429, "rate_limit_error", "重试"),
     ],
 )
 def test_anthropic_connection_classifies_status_errors(
@@ -111,7 +111,7 @@ def test_anthropic_connection_classifies_status_errors(
         result = check_anthropic_connection("fake-key", "https://api.anthropic.com")
         assert result.success is False
         assert result.error_code == expected_code
-        assert expected_text in result.error_message
+        assert expected_text in f"{result.error_message} {result.action}"
         assert result.provider_type == "anthropic"
         assert "private-value" not in result.error_message
 
@@ -197,7 +197,7 @@ def test_openai_connection_auth_error():
 
         result = check_openai_compatible_connection("fake-key", "https://api.openai.com/v1", "gpt-4o")
         assert result.success is False
-        assert "API Key" in result.error_message
+    assert "API Key" in result.action
 
 
 def test_provider_connection_unsupported_type():

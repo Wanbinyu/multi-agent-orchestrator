@@ -246,6 +246,8 @@ class StreamChunk(BaseModel):
     from_model: str | None = None
     to_model: str | None = None
     reason: str | None = None
+    error_code: str | None = None
+    attempts: int = 0
 
 
 class ChatStreamEvent(BaseModel):
@@ -277,6 +279,9 @@ class ChatStreamEvent(BaseModel):
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     files_written: list[str] = Field(default_factory=list)
     error: str = ""
+    error_code: str = ""
+    action: str = ""
+    retryable: bool = False
 
     # 多模型协作相关 payload
     plan: dict[str, Any] = Field(default_factory=dict)

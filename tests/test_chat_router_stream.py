@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from src.gateway.errors import ProviderError
 from src.models.schemas import StreamChunk
 from src.ui.app import app
 from src.ui.routers import chat as chat_router
@@ -131,3 +132,30 @@ def test_failed_stream_persists_messages_and_failed_journal(client, monkeypatch)
     )
     runs = client.get(f"/api/chat/sessions/{session_id}/runs").json()["runs"]
     assert runs[0]["status"] == "failed"
+
+
+def test_stream_provider_error_matches_structured_web_semantics(client):
+    created = client.post("/api/chat/sessions", json={"title": "provider"}).json()
+    session_id = created["session_id"]
+
+    async def _broken_stream(*_args, **_kwargs):
+        raise ProviderError(
+            "authentication_error",
+            provider="anthropic",
+            model="claude",
+        )
+        yield  # pragma: no cover
+
+    chat_router.gateway.chat_with_main_model_stream.side_effect = _broken_stream
+
+    with client.stream(
+        "POST",
+        f"/api/chat/sessions/{session_id}/messages/stream",
+        json={"message": "回答你好"},
+    ) as response:
+        events = _parse_sse(response)
+
+    error = next(data for event, data in events if event == "error")
+    assert error["error_code"] == "authentication_error"
+    assert error["retryable"] is False
+    assert error["error"].startswith("[authentication_error]")

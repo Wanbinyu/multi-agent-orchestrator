@@ -20,6 +20,7 @@ from src.cli.chat_command import (
     _summarize_tool_activity,
 )
 from src.core.session import Session
+from src.gateway.errors import ProviderError
 
 
 def _make_session(mode: str = "approve") -> Session:
@@ -77,7 +78,12 @@ def test_cmd_test_models_checks_every_model_and_warns_about_cost(capsys):
     gateway.models = {"main": MagicMock(), "fallback": MagicMock()}
     gateway.test_model.side_effect = [
         {"success": True, "response_time_ms": 12.0, "error": ""},
-        {"success": False, "response_time_ms": 4.0, "error": "429 quota"},
+        {
+            "success": False,
+            "response_time_ms": 4.0,
+            "error": ProviderError("authentication_error").user_message,
+            "error_code": "authentication_error",
+        },
     ]
 
     _cmd_test_models(gateway)
@@ -88,6 +94,8 @@ def test_cmd_test_models_checks_every_model_and_warns_about_cost(capsys):
     output = capsys.readouterr().out
     assert "少量 token" in output
     assert "健康冷却" in output
+    assert "[authentication_error]" in output
+    assert "API" in output and "Key" in output
 
 
 def test_cmd_context_reports_local_status_without_model_call(capsys):

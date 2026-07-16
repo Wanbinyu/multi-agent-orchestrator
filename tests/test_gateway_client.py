@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from src.core.context_budget import ContextBudgetExceeded
 from src.gateway.client import Billing, GatewayClient
+from src.gateway.errors import ProviderError
 from src.models.schemas import ChatMessage, ChatResponse, ModelConfig
 
 
@@ -124,9 +124,12 @@ def test_chat_rejects_oversized_context_before_provider_call(tmp_path, monkeypat
     )
     messages = [ChatMessage(role="user", content="x" * 30_000)]
 
-    with pytest.raises(ContextBudgetExceeded, match="发送前阻止请求"):
+    with pytest.raises(ProviderError) as raised:
         client.chat(messages, "glm-ark", max_tokens=4096)
 
+    assert raised.value.code == "context_length_error"
+    assert raised.value.attempts == 0
+    assert "输入估算" in raised.value.user_message
     provider.chat.assert_not_called()
 
 
@@ -151,9 +154,12 @@ def test_chat_exhausts_retries_and_raises(tmp_path, monkeypatch):
     client, provider = _make_client(tmp_path, monkeypatch)
     provider.chat.side_effect = RuntimeError("always fails")
 
-    with pytest.raises(RuntimeError, match="模型 glm-ark 请求失败"):
+    with pytest.raises(ProviderError) as raised:
         client.chat([MagicMock()], "glm-ark", max_retries=2)
 
+    assert raised.value.code == "provider_error"
+    assert raised.value.attempts == 3
+    assert raised.value.final_model == "glm-ark"
     assert provider.chat.call_count == 3
 
 
@@ -162,8 +168,9 @@ def test_chat_unknown_model_raises():
     client.models = {}
     client.providers = {}
 
-    with pytest.raises(ValueError, match="未知模型"):
+    with pytest.raises(ProviderError) as raised:
         client.chat([MagicMock()], "not-a-model")
+    assert raised.value.code == "configuration_error"
 
 
 def test_chat_unknown_provider_raises(tmp_path, monkeypatch):
@@ -182,8 +189,9 @@ def test_chat_unknown_provider_raises(tmp_path, monkeypatch):
     monkeypatch.setattr("src.gateway.client.create_provider", lambda name, cfg: MagicMock())
     client = GatewayClient(config_path=str(config_path))
 
-    with pytest.raises(ValueError, match="未知 provider"):
+    with pytest.raises(ProviderError) as raised:
         client.chat([MagicMock()], "glm-ark")
+    assert raised.value.code == "configuration_error"
 
 
 def test_chat_with_main_model_uses_main_model(tmp_path, monkeypatch):
@@ -206,8 +214,9 @@ def test_chat_with_main_model_raises_when_not_configured():
     client = GatewayClient.__new__(GatewayClient)
     client.main_model = None
 
-    with pytest.raises(ValueError, match="未配置主模型"):
+    with pytest.raises(ProviderError) as raised:
         client.chat_with_main_model([MagicMock()])
+    assert raised.value.code == "configuration_error"
 
 
 def test_get_main_model():

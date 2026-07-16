@@ -8,6 +8,7 @@ import pytest
 from src.core.agent import Agent
 from src.core.engineering import RunJournalStore
 from src.core.session import Session
+from src.gateway.errors import ProviderError
 from src.models.schemas import ChatResponse, ModelConfig
 
 
@@ -179,6 +180,101 @@ def test_run_turn_failure_marks_journal_failed(tmp_path):
     assert journal is not None
     assert journal.status == "failed"
     assert journal.residual_risks == ["gateway down"]
+
+
+def test_provider_failure_trace_is_persisted_and_next_run_recovers(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway("恢复成功")
+    gateway.last_attempt_trace = [
+        {
+            "model": "glm-ark",
+            "provider": "ark",
+            "attempt": 1,
+            "success": False,
+            "error_code": "timeout_error",
+            "retryable": True,
+        },
+        {
+            "model": "glm-chat",
+            "provider": "ark",
+            "attempt": 1,
+            "success": False,
+            "error_code": "timeout_error",
+            "retryable": True,
+        },
+    ]
+    gateway.chat_with_main_model.side_effect = ProviderError(
+        "timeout_error",
+        provider="ark",
+        model="glm-chat",
+        attempts=2,
+        attempted_models=["glm-ark", "glm-chat"],
+        final_model="glm-chat",
+    )
+    agent = Agent(gateway, session)
+
+    with pytest.raises(ProviderError):
+        agent.run_turn("回答当前状态")
+
+    failed = RunJournalStore.from_output_dir(session.output_dir).latest()
+    assert failed is not None
+    assert failed.status == "failed"
+    provider_evidence = next(
+        item for item in failed.evidence if item.source == "gateway:provider"
+    )
+    assert provider_evidence.metadata["attempts"] == 2
+    assert provider_evidence.metadata["final_model"] == "glm-chat"
+    assert provider_evidence.metadata["failover"] is True
+
+    gateway.chat_with_main_model.side_effect = None
+    gateway.chat_with_main_model.return_value = ChatResponse(
+        content="恢复成功",
+        model="ark-code-latest",
+        provider="ark",
+    )
+    gateway.last_attempt_trace = []
+    recovered = agent.run_turn("回答你好")
+
+    assert recovered.assistant_message == "恢复成功"
+    journals = RunJournalStore.from_output_dir(session.output_dir).list()
+    assert [journal.status for journal in journals[:2]] == ["completed", "failed"]
+
+
+def test_successful_provider_failover_is_recorded_as_evidence(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway("回退模型完成")
+    gateway.last_attempt_trace = [
+        {
+            "model": "glm-ark",
+            "provider": "ark",
+            "attempt": 1,
+            "success": False,
+            "error_code": "quota_exceeded",
+            "retryable": False,
+        },
+        {
+            "model": "kimi-for-coding",
+            "provider": "moonshot",
+            "attempt": 1,
+            "success": True,
+            "error_code": "",
+            "retryable": False,
+        },
+    ]
+    agent = Agent(gateway, session)
+
+    result = agent.run_turn("回答你好")
+
+    assert result.assistant_message == "回退模型完成"
+    journal = RunJournalStore.from_output_dir(session.output_dir).latest()
+    assert journal is not None
+    evidence = next(
+        item for item in journal.evidence if item.source == "gateway:provider"
+    )
+    assert evidence.success is True
+    assert evidence.metadata["attempts"] == 2
+    assert evidence.metadata["final_model"] == "kimi-for-coding"
+    assert evidence.metadata["failover"] is True
 
 
 def test_run_turn_compaction_failure_marks_journal_failed(tmp_path):

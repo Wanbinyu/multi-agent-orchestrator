@@ -252,16 +252,54 @@ class Agent:
                 message.content = content
                 return
 
+    def _record_provider_trace(self, journal: RunJournal) -> bool:
+        trace = list(getattr(self.gateway, "last_attempt_trace", []) or [])
+        failures = [item for item in trace if not item.get("success")]
+        if not failures:
+            return False
+        final = trace[-1] if trace else {}
+        attempted_models = list(dict.fromkeys(
+            str(item.get("model", "")) for item in trace if item.get("model")
+        ))
+        error_codes = list(dict.fromkeys(
+            str(item.get("error_code", ""))
+            for item in failures
+            if item.get("error_code")
+        ))
+        evidence = Evidence(
+            source="gateway:provider",
+            claim=(
+                f"Provider 请求经过 {len(trace)} 次尝试，"
+                f"最终模型为 {final.get('model') or '未完成'}"
+            ),
+            excerpt=json.dumps(trace, ensure_ascii=False),
+            confidence=1.0,
+            kind="runtime",
+            success=bool(final.get("success")),
+            metadata={
+                "attempts": len(trace),
+                "failed_attempts": len(failures),
+                "attempted_models": attempted_models,
+                "final_model": final.get("model", ""),
+                "error_codes": error_codes,
+                "failover": len(attempted_models) > 1,
+            },
+        )
+        _, added = journal.add_evidence(evidence)
+        return added
+
     def _fail_engineering_run(
-        self, journal: RunJournal, error: str
+        self, journal: RunJournal, error: Exception | str
     ) -> dict[str, Any]:
         if journal.status != "running":
             return journal.event_payload()
-        journal.decisions.append(f"运行异常：{error}")
+        self._record_provider_trace(journal)
+        message = str(error)
+        journal.decisions.append(f"运行异常：{message}")
         return self._finish_engineering_run(
             journal,
             "failed",
-            residual_risks=[error],
+            residual_risks=[message],
         )
 
     def _record_tool_evidence(
@@ -605,6 +643,8 @@ class Agent:
                     "from_model": chunk.from_model or "",
                     "to_model": chunk.to_model or "",
                     "reason": chunk.reason or "",
+                    "error_code": chunk.error_code or "",
+                    "attempts": chunk.attempts,
                 },
             )
         return None
@@ -757,7 +797,7 @@ class Agent:
             self._maybe_compact_context()
             return self._run_turn_impl(user_input, run_journal)
         except Exception as exc:
-            self._fail_engineering_run(run_journal, str(exc))
+            self._fail_engineering_run(run_journal, exc)
             raise
 
     def _run_turn_impl(
@@ -788,6 +828,7 @@ class Agent:
                 temperature=0.2,
                 **self._native_kwargs(read_only=analysis_only),
             )
+            self._record_provider_trace(run_journal)
             total_input += response.input_tokens
             total_output += response.output_tokens
             total_cost += response.cost_usd
@@ -831,6 +872,7 @@ class Agent:
                     temperature=0.2,
                     **self._native_kwargs(read_only=analysis_only),
                 )
+                self._record_provider_trace(run_journal)
                 total_input += response.input_tokens
                 total_output += response.output_tokens
                 total_cost += response.cost_usd
@@ -876,6 +918,7 @@ class Agent:
                 max_tokens=4096,
                 temperature=0.2,
             )
+            self._record_provider_trace(run_journal)
             total_input += response.input_tokens
             total_output += response.output_tokens
             total_cost += response.cost_usd
@@ -937,7 +980,7 @@ class Agent:
                 yield event
         except Exception as exc:
             engineering = await asyncio.to_thread(
-                self._fail_engineering_run, run_journal, str(exc)
+                self._fail_engineering_run, run_journal, exc
             )
             yield ChatStreamEvent(
                 type="engineering_complete",
@@ -1026,6 +1069,7 @@ class Agent:
                     response_blocks = chunk.content_blocks
                     provider_payload = chunk.provider_payload
 
+            self._record_provider_trace(run_journal)
             self.session.add_message(
                 "assistant",
                 self._strip_toolcall_artifacts(full_content),
@@ -1102,6 +1146,7 @@ class Agent:
                     elif chunk.type == "message_state":
                         final_blocks = chunk.content_blocks
                         final_provider_payload = chunk.provider_payload
+                self._record_provider_trace(run_journal)
                 final_content = self._strip_toolcall_artifacts(full_content)
                 self.session.add_message(
                     "assistant",
@@ -1312,6 +1357,7 @@ class Agent:
                 elif chunk.type == "message_state":
                     concise_blocks = chunk.content_blocks
                     concise_provider_payload = chunk.provider_payload
+            self._record_provider_trace(run_journal)
             concise_content = self._strip_toolcall_artifacts(concise_content).strip()
             if concise_content:
                 final_content = concise_content

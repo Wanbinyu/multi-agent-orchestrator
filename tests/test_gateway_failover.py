@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.gateway.client import GatewayClient
+from src.gateway.errors import ProviderError
 from src.models.schemas import ChatMessage, ChatResponse, ModelConfig, ProviderConfig, StreamChunk
 
 
@@ -74,9 +75,11 @@ def test_chat_stream_no_duplicate_on_mid_stream_error(tmp_path, monkeypatch):
         async for _ in client.chat_stream([MagicMock()], "glm-ark", max_retries=2):
             pass
 
-    with pytest.raises(RuntimeError, match="流式请求中断"):
+    with pytest.raises(ProviderError) as raised:
         asyncio.run(_run())
 
+    assert raised.value.code == "stream_interrupted"
+    assert raised.value.retryable is False
     # provider 只被调用一次，没有重试
     assert provider.chat_stream.call_count == 1
 
@@ -137,6 +140,44 @@ def test_chat_fails_over_on_quota_error(tmp_path, monkeypatch):
     assert client.last_failover is not None
     assert client.last_failover["from_model"] == "glm-ark"
     assert client.last_failover["to_model"] == "glm-chat"
+
+
+def test_chat_retries_short_rate_limit_before_failover(tmp_path, monkeypatch):
+    client, provider = _make_client(tmp_path, monkeypatch)
+
+    def _chat(messages, model_config, **kwargs):
+        if model_config.model_id == "ark-code-latest":
+            raise RuntimeError("Error code: 429 rate limit")
+        return ChatResponse(
+            content="fallback answer",
+            model=model_config.model_id,
+            provider="ark",
+        )
+
+    provider.chat.side_effect = _chat
+
+    response = client.chat([MagicMock()], "glm-ark", max_retries=1)
+
+    assert response.content == "fallback answer"
+    assert provider.chat.call_count == 3
+    assert [item["error_code"] for item in client.last_attempt_trace] == [
+        "rate_limit_error",
+        "rate_limit_error",
+        "",
+    ]
+    assert client.last_failover["error_code"] == "rate_limit_error"
+    assert client.last_failover["attempts"] == 2
+
+
+def test_chat_retries_server_error_then_succeeds(tmp_path, monkeypatch):
+    client, provider = _make_client(tmp_path, monkeypatch)
+    response = ChatResponse(content="ok", model="ark-code-latest", provider="ark")
+    provider.chat.side_effect = [RuntimeError("status code: 503"), response]
+
+    assert client.chat([MagicMock()], "glm-ark", max_retries=1).content == "ok"
+    assert provider.chat.call_count == 2
+    assert client.last_attempt_trace[0]["error_code"] == "server_error"
+    assert client.last_attempt_trace[-1]["success"] is True
 
 
 def test_failover_chain_expands_nested_fallbacks(tmp_path, monkeypatch):
@@ -203,9 +244,10 @@ def test_chat_raises_on_fatal_error_without_failover(tmp_path, monkeypatch):
 
     provider.chat.side_effect = RuntimeError("AuthenticationError: invalid api key")
 
-    with pytest.raises(RuntimeError, match="请求失败"):
+    with pytest.raises(ProviderError) as raised:
         client.chat([MagicMock()], "glm-ark")
 
+    assert raised.value.code == "authentication_error"
     assert client.last_failover is None
     assert provider.chat.call_count == 1
 
@@ -214,9 +256,10 @@ def test_bad_request_does_not_failover_or_mark_unhealthy(tmp_path, monkeypatch):
     client, provider = _make_client(tmp_path, monkeypatch)
     provider.chat.side_effect = RuntimeError("BadRequestError: invalid max_tokens")
 
-    with pytest.raises(RuntimeError, match="请求参数错误"):
+    with pytest.raises(ProviderError) as raised:
         client.chat([MagicMock()], "glm-ark")
 
+    assert raised.value.code == "invalid_request_error"
     assert provider.chat.call_count == 1
     assert client._unhealthy_models == {}
 
@@ -295,6 +338,10 @@ def test_unhealthy_models_are_skipped(tmp_path, monkeypatch):
     assert client.last_failover is not None
     assert client.last_failover["from_model"] == "glm-ark"
     assert "冷却" in client.last_failover["reason"]
+    assert [item["error_code"] for item in client.last_attempt_trace] == [
+        "cooldown_skip",
+        "",
+    ]
 
 
 def test_stream_reports_model_skipped_during_cooldown(tmp_path, monkeypatch):
@@ -341,6 +388,19 @@ def test_model_diagnostic_updates_health_state(tmp_path, monkeypatch):
     assert "glm-ark" not in client._unhealthy_models
     call = provider.chat.call_args
     assert call.kwargs["max_tokens"] == 1
+
+
+def test_model_auth_failure_does_not_enter_cooldown(tmp_path, monkeypatch):
+    client, provider = _make_client(tmp_path, monkeypatch)
+    provider.chat.side_effect = RuntimeError(
+        "AuthenticationError: invalid api key private-value"
+    )
+
+    failed = client.test_model("glm-ark")
+
+    assert failed["error_code"] == "authentication_error"
+    assert "private-value" not in failed["error"]
+    assert "glm-ark" not in client._unhealthy_models
 
 
 # ---------- Agent 事件转换 ----------

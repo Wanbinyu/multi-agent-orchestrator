@@ -786,10 +786,16 @@ def _cmd_test_models(gateway: GatewayClient):
     console.print("[dim]每个模型会发送一个最小请求，可能产生少量 token 消耗。[/dim]")
     for model_name in gateway.models:
         result = gateway.test_model(model_name)
-        status = "[green]✅ 正常[/green]" if result.get("success") else "[red]❌ 失败[/red]"
         detail = result.get("error", "") if not result.get("success") else f"{result.get('response_time_ms', 0):.0f}ms"
-        console.print(f"  {model_name}: {status} {detail}")
-    console.print("[dim]失败模型已进入健康冷却，后续对话会暂时跳过。[/dim]")
+        line = Text(f"  {model_name}: ")
+        if result.get("success"):
+            line.append("✅ 正常", style="green")
+        else:
+            line.append("❌ 失败", style="red")
+        if detail:
+            line.append(f" {detail}")
+        console.print(line)
+    console.print("[dim]可恢复的失败模型会进入健康冷却；认证或配置错误不会自动切换。[/dim]")
 
 
 def _cmd_tools():
