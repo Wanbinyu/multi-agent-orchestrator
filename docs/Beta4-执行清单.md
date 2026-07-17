@@ -205,3 +205,12 @@ Reviewer 对照需求与证据独立验证，不阅读 Worker 自述。
 ## 9. 当前下一步
 
 B4.1（工程记录可视化）与 B4.2（压缩事件与上下文透明度）已完成，`570 passed`。执行 **B4.3 会话恢复确认**：检测 `running`/`blocked` 运行与未完成计划，CLI `/load` 与 Web 打开会话时显示恢复横幅，用户显式确认后才继续，决策写入 RunJournal。
+
+## 10. 使用反馈修复记录（2026-07-17）
+
+beta.3 真实使用中暴露的连锁问题：relay（聚合转发）对新目录模型 ID `kimi-k2.7-code` 返回空响应；空响应被误判为 `completed`；句中"帮我先做/把……搭建好"被分类为 `unclassified` 进入只读。已修复：
+
+- **空响应守卫补洞**（`fix: fail silent empty model responses`）：无可解析文本且无工具调用时，有 token（任意轮）或首轮零 token 均按 `failed` 处理并给出可操作提示（检查 Provider 连接与模型 ID）；工具轮之后的零 token 空响应保持原有收尾行为。空 assistant 消息不再写入会话历史。回归：`test_empty_response_guard.py` 4 例。
+- **分类器句中形式**（`fix: recognize mid-sentence build phrasing`）：`_EXPLICIT_WRITE_PATTERNS` 新增"帮我……做一个/套/份"和"把……搭建好/做出来"模式；排除"帮我看看怎么做""做版本对比""把搭建的事告诉我"等只读问法。回归：`test_task_intent_classifier.py` 8 例。
+- **Kimi K3 加入目录**（`feat: add kimi k3 to model catalog`）：模型 ID `kimi-k3`，1M 上下文；元数据来自 2026-07-16 发布报道，`metadata_source="unverified"`、`context_window_source="unverified_press_2026-07"`，等待官方文档逐项核实。
+- 遗留：用户本地 relay（`api.va11.icu`）是否支持 `kimi-k3`/`kimi-k2.7-code` 需用户与 relay 提供方确认；MAO 目录按官方 moonshot.cn 模型 ID 维护。全量回归 `582 passed, 1 warning`。
