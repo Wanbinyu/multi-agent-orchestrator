@@ -1,6 +1,6 @@
 # v0.1.0-beta.3 执行清单
 
-**状态**：进行中，B3.1-B3.2 离线验收已完成
+**状态**：已完成，2026-07-17 发布 `v0.1.0-beta.3` pre-release
 
 **目标**：Provider/Claude 可信接入与首次使用稳定性
 
@@ -222,8 +222,8 @@
 - [x] `pip-audit` 通过（无已知漏洞）；gitleaks 由远端 CI 安全任务执行。
 - [x] 构建 wheel/sdist，`twine check` 通过。
 - [x] 空目录隔离安装与 `mao web /health` 通过（`scripts/verify_distribution.py`）。
-- [ ] 远端 Windows/Ubuntu CI 通过。
-- [ ] 所有者单独确认后才创建 Tag 和 GitHub pre-release。
+- [x] 远端 Windows/Ubuntu CI 通过。
+- [x] 所有者单独确认后才创建 Tag 和 GitHub pre-release。（2026-07-17 经确认发布 `v0.1.0-beta.3`）
 
 收口同时移除了 CLI 预设中指向第三方聚合 relay（`api.va11.icu`）的 `kimi` 条目；官方 moonshot.cn 由 Web 预设覆盖，`model_map` 机制测试改用中性示例地址。
 
