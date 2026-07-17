@@ -1110,6 +1110,57 @@ body::before {
   border-color: rgba(248, 113, 113, 0.38);
 }
 
+.run-detail-toggle {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.run-detail-toggle:hover {
+  color: var(--accent, #38bdf8);
+  border-color: currentColor;
+}
+
+.run-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px dashed var(--panel-border);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.run-detail[hidden] {
+  display: none;
+}
+
+.run-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.run-detail-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.run-detail-line {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .empty-item {
   color: var(--text-dim);
   font-size: 0.78rem;

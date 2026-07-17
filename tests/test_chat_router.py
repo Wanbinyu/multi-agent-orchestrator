@@ -197,6 +197,22 @@ def test_send_message(client):
     assert runs.json()["runs"][0]["status"] == "completed"
     assert detail.status_code == 200
     assert detail.json()["run_id"] == data["run_id"]
+    # Web 展开详情依赖的完整字段（renderRunDetail 消费这些键）
+    detail_payload = detail.json()
+    for key in (
+        "objective",
+        "intent",
+        "plan",
+        "evidence",
+        "verification",
+        "requirements",
+        "audit",
+        "decisions",
+        "files_changed",
+        "residual_risks",
+        "metrics",
+    ):
+        assert key in detail_payload, key
 
 
 def test_failed_sync_message_persists_session_and_journal(client):

@@ -33,6 +33,7 @@ SLASH_COMMANDS: list[tuple[str, str, str]] = [
     ("/load", "/load <id>", "加载已有会话"),
     ("/save", "/save", "保存当前会话"),
     ("/sessions", "/sessions", "列出最近会话"),
+    ("/runs", "/runs [run_id]", "本地查看本会话工程运行记录"),
     ("/context", "/context", "显示上下文预算与自动压缩状态"),
     ("/tree", "/tree [路径] [深度]", "零 token 显示项目结构"),
     ("/plan", "/plan <需求>", "执行一次性多模型任务计划"),
@@ -641,6 +642,138 @@ def _cmd_sessions(store: SessionStore):
         console.print(f"  {s.id}  {s.title or '(无标题)'}  模式={s.approval_mode}  更新于 {s.updated_at}")
 
 
+_RUN_STATUS_LABELS = {
+    "running": "进行中",
+    "completed": "已完成",
+    "failed": "失败",
+    "blocked": "受阻",
+}
+_PLAN_STATUS_LABELS = {
+    "pending": "待开始",
+    "in_progress": "进行中",
+    "completed": "已完成",
+    "failed": "失败",
+    "blocked": "受阻",
+}
+_REQUIREMENT_STATUS_LABELS = {
+    "unverified": "未验证",
+    "satisfied": "已满足",
+    "failed": "未通过",
+    "waived": "已豁免",
+}
+_AUDIT_STATUS_LABELS = {
+    "not_required": "无需工程验证",
+    "passed": "已通过",
+    "blocked": "未闭环",
+    "failed": "运行失败",
+}
+
+
+def _cmd_runs(session, run_id: str = "") -> None:
+    """本地读取本会话 RunJournal，不调用模型、不产生 token。"""
+    from src.core.engineering.journal import RunJournalStore
+
+    run_store = RunJournalStore.from_output_dir(session.output_dir)
+    if run_id.strip():
+        try:
+            journal = run_store.load(run_id.strip())
+        except (FileNotFoundError, ValueError) as e:
+            console.print(f"[bold red]{e}[/bold red]")
+            return
+        _print_run_detail(journal)
+        return
+
+    journals = run_store.list()
+    if not journals:
+        console.print("本会话暂无工程运行记录")
+        return
+    console.print("\n[bold]本会话运行记录（最近 10 条）：[/bold]")
+    for journal in journals[:10]:
+        status = _RUN_STATUS_LABELS.get(journal.status, journal.status)
+        console.print(
+            f"  {journal.run_id}  [{status}] {journal.started_at}  "
+            f"{journal.objective[:40]}"
+        )
+    console.print(
+        "[dim]使用 /runs <run_id> 查看完整工程记录；本命令为本地读取，未调用模型。[/dim]"
+    )
+
+
+def _print_run_detail(journal) -> None:
+    """打印单个 RunJournal 的完整工程记录。"""
+    status = _RUN_STATUS_LABELS.get(journal.status, journal.status)
+    console.print(f"\n[bold]工程记录 {journal.run_id}[/bold]  状态：{status}")
+    console.print(f"目标：{journal.objective}")
+    intent = journal.intent
+    console.print(
+        f"分类：{intent.kind}（{intent.classification_source}，置信度 "
+        f"{intent.confidence:.2f}）  风险：{intent.risk_level}  "
+        f"写入授权：{'是' if intent.write_authorized else '否'}"
+    )
+
+    if journal.plan:
+        plan = journal.plan
+        plan_status = _PLAN_STATUS_LABELS.get(plan.status, plan.status)
+        console.print(f"\n[bold]工作计划[/bold]（{plan_status}）：")
+        for step in plan.steps:
+            step_label = _PLAN_STATUS_LABELS.get(step.status, step.status)
+            line = f"  [{step_label}] {step.title}"
+            if step.note:
+                line += f"  — {step.note}"
+            console.print(line)
+        for criterion in plan.acceptance_criteria:
+            console.print(f"  验收：{criterion}")
+
+    console.print(f"\n[bold]证据[/bold]（{len(journal.evidence)} 条）：")
+    for item in journal.evidence[-20:]:
+        mark = "✓" if item.success else "✗"
+        line = f"  [{item.kind}]{mark} {item.claim}"
+        if item.path:
+            line += f"（{item.path}）"
+        console.print(line)
+    if len(journal.evidence) > 20:
+        console.print(f"  … 其余 {len(journal.evidence) - 20} 条略")
+
+    console.print(f"\n[bold]验证门[/bold]（{len(journal.verification)} 个）：")
+    for gate in journal.verification:
+        mark = "✓" if gate.passed else ("✗" if gate.passed is False else "…")
+        console.print(f"  {mark} [{gate.check_type}] {gate.command_or_check}")
+
+    if journal.requirements:
+        console.print(f"\n[bold]需求核对[/bold]（{len(journal.requirements)} 项）：")
+        for req in journal.requirements:
+            label = _REQUIREMENT_STATUS_LABELS.get(req.status, req.status)
+            console.print(f"  [{label}] {req.requirement}")
+
+    if journal.audit:
+        audit = journal.audit
+        label = _AUDIT_STATUS_LABELS.get(audit.status, audit.status)
+        console.print(f"\n[bold]完成审计[/bold]：{label}")
+        if audit.missing_checks:
+            console.print(f"  缺失检查：{'、'.join(audit.missing_checks)}")
+        if audit.failed_checks:
+            console.print(f"  失败检查：{'、'.join(audit.failed_checks)}")
+        if audit.summary:
+            console.print(f"  摘要：{audit.summary}")
+
+    if journal.decisions:
+        console.print(f"\n[bold]决策[/bold]（{len(journal.decisions)} 条）：")
+        for decision in journal.decisions:
+            console.print(f"  - {decision}")
+    if journal.files_changed:
+        console.print(f"\n[bold]修改文件[/bold]（{len(journal.files_changed)} 个）：")
+        for path in journal.files_changed:
+            console.print(f"  - {path}")
+    if journal.residual_risks:
+        console.print(f"\n[bold]残余风险[/bold]：")
+        for risk in journal.residual_risks:
+            console.print(f"  - {risk}")
+    if journal.metrics:
+        console.print("\n[bold]指标[/bold]：")
+        for key, value in journal.metrics.items():
+            console.print(f"  {key} = {value}")
+
+
 def _parse_tree_args(raw: str) -> tuple[str, int]:
     """解析 `/tree [路径] [深度]`，保留 Windows 路径中的空格和反斜杠。"""
     value = raw.strip()
@@ -949,6 +1082,8 @@ def run_chat_loop(
                     console.print(f"[bold green]已保存会话：{session.id}[/bold green]")
                 elif cmd == "/sessions":
                     _cmd_sessions(store)
+                elif cmd == "/runs":
+                    _cmd_runs(session, arg)
                 elif cmd == "/context":
                     _cmd_context(agent)
                 elif cmd == "/tree":

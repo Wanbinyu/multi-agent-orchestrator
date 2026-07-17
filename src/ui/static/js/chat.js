@@ -9,6 +9,7 @@
     rightbarTab: "context",
     projectTreeLoaded: false,
     turnLog: { toolCalls: [], filesWritten: [], engineering: [] },
+    runDetails: {},
   };
 
   const els = {
@@ -735,6 +736,7 @@
 
   function clearTurnLog() {
     state.turnLog = { toolCalls: [], filesWritten: [], engineering: [] };
+    state.runDetails = {};
     if (!els.turnLog) return;
     els.turnLog.innerHTML = '<div class="empty-item">发送消息后将显示工具调用和文件记录</div>';
   }
@@ -750,8 +752,15 @@
     const existing = state.turnLog.engineering.findIndex(
       (item) => item.run_id === engineering.run_id
     );
-    if (existing >= 0) state.turnLog.engineering[existing] = engineering;
-    else state.turnLog.engineering.push(engineering);
+    if (existing >= 0) {
+      // 状态变化后已缓存的详情可能过期，下次展开时重新加载。
+      if (state.turnLog.engineering[existing].status !== engineering.status) {
+        delete state.runDetails[engineering.run_id];
+      }
+      state.turnLog.engineering[existing] = engineering;
+    } else {
+      state.turnLog.engineering.push(engineering);
+    }
     renderTurnLog();
   }
 
@@ -825,6 +834,17 @@
       const verificationDetail = `验证门 ${Number(run.verification_count || 0)} 个 · 完成审计 ${
         auditLabels[audit.status] || audit.status || "进行中"
       }${auditGaps.length ? ` · 缺口 ${auditGaps.join("、")}` : ""}`;
+      const detailState = state.runDetails[run.run_id] || {};
+      let detailHtml = "";
+      if (detailState.open) {
+        if (detailState.loading) {
+          detailHtml = '<div class="run-detail-line">正在加载详情…</div>';
+        } else if (detailState.error) {
+          detailHtml = `<div class="run-detail-line error-text">${escapeHtml(detailState.error)}</div>`;
+        } else if (detailState.data) {
+          detailHtml = renderRunDetail(detailState.data);
+        }
+      }
       html += `
         <div class="turn-log-item engineering-run ${escapeHtml(run.status || "running")}">
           <div class="turn-log-title">${icon} 工程记录 · ${escapeHtml(labels[run.status] || run.status)}</div>
@@ -832,6 +852,10 @@
           <div class="turn-log-detail">${escapeHtml(intentDetail)}</div>
           <div class="turn-log-detail">${escapeHtml(evidenceDetail)}</div>
           <div class="turn-log-detail">${escapeHtml(verificationDetail)}</div>
+          <button type="button" class="run-detail-toggle" data-run-id="${escapeHtml(run.run_id)}">${
+            detailState.open ? "收起详情" : "展开详情"
+          }</button>
+          <div class="run-detail" ${detailState.open ? "" : "hidden"}>${detailHtml}</div>
         </div>
       `;
     });
@@ -860,6 +884,138 @@
       `;
     });
     els.turnLog.innerHTML = html;
+  }
+
+  async function toggleRunDetail(runId) {
+    if (!runId || !state.currentSessionId) return;
+    const entry =
+      state.runDetails[runId] ||
+      (state.runDetails[runId] = { open: false, loading: false, data: null, error: "" });
+    entry.open = !entry.open;
+    if (entry.open && !entry.data && !entry.loading) {
+      entry.loading = true;
+      entry.error = "";
+      renderTurnLog();
+      try {
+        entry.data = await api(
+          `/api/chat/sessions/${encodeURIComponent(state.currentSessionId)}/runs/${encodeURIComponent(runId)}`
+        );
+      } catch (err) {
+        entry.error = err.message || "加载失败";
+      } finally {
+        entry.loading = false;
+      }
+    }
+    renderTurnLog();
+  }
+
+  function renderRunDetail(run) {
+    const RUN_DETAIL_LIST_LIMIT = 50;
+    const sections = [];
+    const addSection = (title, lines) => {
+      const items = (lines || []).filter(Boolean);
+      if (!items.length) return;
+      sections.push(
+        `<div class="run-detail-section"><div class="run-detail-heading">${escapeHtml(title)}</div>` +
+          items.map((line) => `<div class="run-detail-line">${escapeHtml(line)}</div>`).join("") +
+          "</div>"
+      );
+    };
+    const bounded = (list, renderItem) => {
+      const lines = (list || []).slice(0, RUN_DETAIL_LIST_LIMIT).map(renderItem);
+      if ((list || []).length > RUN_DETAIL_LIST_LIMIT) {
+        lines.push(`… 其余 ${list.length - RUN_DETAIL_LIST_LIMIT} 条略`);
+      }
+      return lines;
+    };
+
+    if (run.objective) addSection("目标", [run.objective]);
+    if (run.intent) {
+      const intent = run.intent;
+      addSection("分类与边界", [
+        `类型 ${intent.kind || "unclassified"} · 风险 ${intent.risk_level || "unassessed"} · ${
+          intent.write_authorized ? "写入已授权" : "只读或写入未授权"
+        }`,
+      ]);
+    }
+    if (run.plan) {
+      const planLabels = {
+        pending: "待开始",
+        in_progress: "进行中",
+        completed: "已完成",
+        failed: "失败",
+        blocked: "受阻",
+      };
+      const steps = (run.plan.steps || []).map(
+        (step) =>
+          `[${planLabels[step.status] || step.status}] ${step.title}${step.note ? ` — ${step.note}` : ""}`
+      );
+      (run.plan.acceptance_criteria || []).forEach((criterion) =>
+        steps.push(`验收：${criterion}`)
+      );
+      addSection(`工作计划（${planLabels[run.plan.status] || run.plan.status}）`, steps);
+    }
+    addSection(
+      `证据（${(run.evidence || []).length} 条）`,
+      bounded(run.evidence, (item) => {
+        const mark = item.success ? "✓" : "✗";
+        return `[${item.kind}]${mark} ${item.claim}${item.path ? `（${item.path}）` : ""}`;
+      })
+    );
+    addSection(
+      `验证门（${(run.verification || []).length} 个）`,
+      bounded(run.verification, (gate) => {
+        const mark = gate.passed === true ? "✓" : gate.passed === false ? "✗" : "…";
+        return `${mark} [${gate.check_type}] ${gate.command_or_check}`;
+      })
+    );
+    const reqLabels = {
+      unverified: "未验证",
+      satisfied: "已满足",
+      failed: "未通过",
+      waived: "已豁免",
+    };
+    addSection(
+      `需求核对（${(run.requirements || []).length} 项）`,
+      (run.requirements || []).map(
+        (req) => `[${reqLabels[req.status] || req.status}] ${req.requirement}`
+      )
+    );
+    if (run.audit) {
+      const auditLabels = {
+        not_required: "无需工程验证",
+        passed: "已通过",
+        blocked: "未闭环",
+        failed: "运行失败",
+      };
+      const lines = [`状态：${auditLabels[run.audit.status] || run.audit.status}`];
+      if ((run.audit.missing_checks || []).length) {
+        lines.push(`缺失检查：${run.audit.missing_checks.join("、")}`);
+      }
+      if ((run.audit.failed_checks || []).length) {
+        lines.push(`失败检查：${run.audit.failed_checks.join("、")}`);
+      }
+      if (run.audit.summary) lines.push(`摘要：${run.audit.summary}`);
+      addSection("完成审计", lines);
+    }
+    addSection(
+      `决策（${(run.decisions || []).length} 条）`,
+      bounded(run.decisions, (decision) => `- ${decision}`)
+    );
+    addSection(
+      `修改文件（${(run.files_changed || []).length} 个）`,
+      (run.files_changed || []).map((path) => `- ${path}`)
+    );
+    addSection(
+      "残余风险",
+      (run.residual_risks || []).map((risk) => `- ${risk}`)
+    );
+    const metricLines = Object.entries(run.metrics || {}).map(([key, value]) => {
+      const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+      return `${key} = ${text.slice(0, 160)}`;
+    });
+    addSection("指标", metricLines);
+    return sections.join("") || '<div class="run-detail-line">暂无更多记录</div>';
   }
 
   function renderMessages(messages) {
@@ -1312,6 +1468,10 @@
   els.memorySearch?.addEventListener("input", (e) => searchMemoryFromInput(e.target.value));
   els.btnRefreshMemories?.addEventListener("click", () => loadMemories());
   els.btnRebuildIndex?.addEventListener("click", rebuildProjectIndex);
+  els.turnLog?.addEventListener("click", (event) => {
+    const button = event.target.closest(".run-detail-toggle");
+    if (button) toggleRunDetail(button.dataset.runId);
+  });
   els.btnSummarizeSession?.addEventListener("click", summarizeCurrentSession);
   els.chatInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
