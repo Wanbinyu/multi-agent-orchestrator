@@ -23,6 +23,7 @@
 
 - [`RELEASE_NOTES_v0.1.0-beta.1.md`](RELEASE_NOTES_v0.1.0-beta.1.md)
 - [`RELEASE_NOTES_v0.1.0-beta.2.md`](RELEASE_NOTES_v0.1.0-beta.2.md)
+- [`RELEASE_NOTES_v0.1.0-beta.3.md`](RELEASE_NOTES_v0.1.0-beta.3.md)
 - [`acceptance/发布验收记录.md`](acceptance/发布验收记录.md)
 
 ## 历史归档

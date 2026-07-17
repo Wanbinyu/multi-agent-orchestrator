@@ -215,15 +215,17 @@
 
 ## 6. B3.6 发布收口
 
-- [ ] 更新 `CHANGELOG.md`。
-- [ ] 更新版本号为 `0.1.0b3`。
-- [ ] 编写 `RELEASE_NOTES_v0.1.0-beta.3.md`。
-- [ ] 全量测试、compileall、JavaScript 语法和 diff hygiene 通过。
-- [ ] `pip-audit` 和 gitleaks 通过。
-- [ ] 构建 wheel/sdist，`twine check` 通过。
-- [ ] 空目录 pipx 安装与 `mao web /health` 通过。
+- [x] 更新 `CHANGELOG.md`。
+- [x] 更新版本号为 `0.1.0b3`。
+- [x] 编写 `RELEASE_NOTES_v0.1.0-beta.3.md`。
+- [x] 全量测试、compileall、JavaScript 语法和 diff hygiene 通过。（`558 passed, 1 warning`）
+- [x] `pip-audit` 通过（无已知漏洞）；gitleaks 由远端 CI 安全任务执行。
+- [x] 构建 wheel/sdist，`twine check` 通过。
+- [x] 空目录隔离安装与 `mao web /health` 通过（`scripts/verify_distribution.py`）。
 - [ ] 远端 Windows/Ubuntu CI 通过。
 - [ ] 所有者单独确认后才创建 Tag 和 GitHub pre-release。
+
+收口同时移除了 CLI 预设中指向第三方聚合 relay（`api.va11.icu`）的 `kimi` 条目；官方 moonshot.cn 由 Web 预设覆盖，`model_map` 机制测试改用中性示例地址。
 
 ## 7. 推荐提交边界
 
