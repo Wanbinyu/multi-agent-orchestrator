@@ -874,6 +874,37 @@ class Agent:
             total_cost += response.cost_usd
             self._record_usage_observation(response.input_tokens)
 
+            # 空响应守卫：首轮无文本且无工具调用时按失败处理，避免假完成；
+            # 工具轮之后的空响应保持原有收尾行为
+            if (
+                iterations == 0
+                and not response.content.strip()
+                and not self._has_tool_calls(response.content, response.content_blocks)
+            ):
+                engineering = self._finish_engineering_run(
+                    run_journal,
+                    "failed",
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    cost_usd=total_cost,
+                    residual_risks=["模型无响应或返回空内容"],
+                )
+                return AgentTurnResult(
+                    session_id=self.session.id,
+                    user_message=user_input,
+                    assistant_message=(
+                        "模型无响应或返回空内容。请检查 Provider 连接与模型 ID 是否正确，"
+                        "或换一个模型重试。"
+                    ),
+                    tool_calls=tool_calls,
+                    files_written=files_written,
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    cost_usd=total_cost,
+                    run_id=run_journal.run_id,
+                    engineering=engineering,
+                )
+
             self.session.add_message(
                 "assistant",
                 response.content,
@@ -1117,19 +1148,26 @@ class Agent:
                     provider_payload = chunk.provider_payload
 
             self._record_provider_trace(run_journal)
-            self.session.add_message(
-                "assistant",
-                self._strip_toolcall_artifacts(full_content),
-                response_blocks,
-                provider_payload,
-            )
             final_content = self._strip_toolcall_artifacts(full_content)
 
-            # 模型本轮返回了 token 但没有可解析文本，可能是原生 tool_use/reasoning 未捕获
-            if (
-                not full_content.strip()
-                and total_output > output_before
-            ):
+            # 空响应守卫：无可解析文本且无工具调用时按失败处理，避免假完成。
+            # 有 token 但无文本（任意轮）：可能是原生 tool_use/reasoning 未捕获；
+            # 首轮零 token：Provider 无响应或模型 ID 不被识别。
+            # 工具轮之后的零 token 空响应保持原有收尾行为。
+            tokens_returned = total_output > output_before
+            if not final_content.strip() and not self._has_tool_calls(
+                full_content, response_blocks
+            ) and (tokens_returned or iterations == 0):
+                empty_reason = (
+                    "模型未返回可解析文本"
+                    if tokens_returned
+                    else "模型无响应或返回空内容（0 token）"
+                )
+                empty_advice = (
+                    "模型未返回可解析文本（可能输出了原生工具调用或推理内容），请重试或换一个模型。"
+                    if tokens_returned
+                    else "模型无响应或返回空内容（0 token）。请检查 Provider 连接与模型 ID 是否正确，或换一个模型重试。"
+                )
                 engineering = await asyncio.to_thread(
                     self._finish_engineering_run,
                     run_journal,
@@ -1137,7 +1175,7 @@ class Agent:
                     input_tokens=total_input,
                     output_tokens=total_output,
                     cost_usd=total_cost,
-                    residual_risks=["模型未返回可解析文本"],
+                    residual_risks=[empty_reason],
                 )
                 yield ChatStreamEvent(
                     type="engineering_complete",
@@ -1145,9 +1183,16 @@ class Agent:
                 )
                 yield ChatStreamEvent(
                     type="error",
-                    error="模型未返回可解析文本（可能输出了原生工具调用或推理内容），请重试或换一个模型。",
+                    error=empty_advice,
                 )
                 return
+
+            self.session.add_message(
+                "assistant",
+                final_content,
+                response_blocks,
+                provider_payload,
+            )
 
             if not self._has_tool_calls(full_content, response_blocks):
                 break
