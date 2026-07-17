@@ -242,6 +242,8 @@ class StreamChunk(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    # Provider 未返回真实 usage 时为 True（本地粗略估算，不计入估算误差观测）
+    usage_estimated: bool = False
     # 故障切换信息
     from_model: str | None = None
     to_model: str | None = None

@@ -986,6 +986,20 @@ def _cmd_context(agent: Agent) -> dict[str, Any]:
         ),
         "说明：anthropic 表示兼容协议，不代表模型是 Claude。",
     ]
+    compaction_count = status.get("compaction_count", 0)
+    if compaction_count:
+        lines.append(f"已压缩：{compaction_count} 次")
+        for event in status.get("recent_compactions", [])[-1:]:
+            lines.append(
+                f"最近压缩：{event.get('at', '')}，"
+                f"{event.get('before_tokens', 0):,} → {event.get('after_tokens', 0):,} tokens，"
+                f"合并 {event.get('dropped_messages', 0)} 条消息"
+            )
+    for obs in status.get("usage_observations", [])[-1:]:
+        lines.append(
+            f"估算误差：{obs.get('error_pct', 0)}%"
+            f"（估算 {obs.get('estimated_input', 0):,} / 实际 {obs.get('actual_input', 0):,}）"
+        )
     lines.extend(f"警告：{warning}" for warning in status.get("warnings", []))
     console.print(Panel(Text("\n".join(lines)), title="上下文状态", border_style="cyan"))
     return status

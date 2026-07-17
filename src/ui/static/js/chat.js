@@ -40,6 +40,10 @@
     ctxBudgetRemaining: document.getElementById("ctx-budget-remaining"),
     ctxBudgetOutput: document.getElementById("ctx-budget-output"),
     ctxBudgetSource: document.getElementById("ctx-budget-source"),
+    ctxCompactionRow: document.getElementById("ctx-compaction-row"),
+    ctxCompaction: document.getElementById("ctx-compaction"),
+    ctxEstimateRow: document.getElementById("ctx-estimate-row"),
+    ctxEstimate: document.getElementById("ctx-estimate"),
     ctxBudgetWarning: document.getElementById("ctx-budget-warning"),
     btnSummarizeSession: document.getElementById("btn-summarize-session"),
     ctxSummarizeStatus: document.getElementById("ctx-summarize-status"),
@@ -355,6 +359,29 @@
       els.ctxBudgetRemaining.textContent = `${remaining.toLocaleString()} tokens`;
       els.ctxBudgetOutput.textContent = `${Number(data.output_reserve_tokens || 0).toLocaleString()} tokens`;
       els.ctxBudgetSource.textContent = data.context_window_source || "unverified";
+      const compactionCount = Number(data.compaction_count || 0);
+      if (els.ctxCompactionRow && els.ctxCompaction) {
+        els.ctxCompactionRow.classList.toggle("hidden", compactionCount === 0);
+        if (compactionCount > 0) {
+          const last = (data.recent_compactions || []).slice(-1)[0] || {};
+          els.ctxCompaction.textContent =
+            `${compactionCount} 次` +
+            (last.before_tokens
+              ? ` · 最近 ${Number(last.before_tokens).toLocaleString()} → ${Number(last.after_tokens || 0).toLocaleString()}`
+              : "");
+        }
+      }
+      const observations = data.usage_observations || [];
+      if (els.ctxEstimateRow && els.ctxEstimate) {
+        els.ctxEstimateRow.classList.toggle("hidden", observations.length === 0);
+        if (observations.length) {
+          const last = observations[observations.length - 1];
+          els.ctxEstimateRow.title =
+            `估算 ${Number(last.estimated_input || 0).toLocaleString()} / ` +
+            `实际 ${Number(last.actual_input || 0).toLocaleString()}`;
+          els.ctxEstimate.textContent = `${last.error_pct}%`;
+        }
+      }
       const warnings = data.warnings || [];
       els.ctxBudgetWarning.textContent = warnings.join("；");
       els.ctxBudgetWarning.classList.toggle("hidden", warnings.length === 0);

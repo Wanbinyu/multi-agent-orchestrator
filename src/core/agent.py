@@ -7,6 +7,7 @@ import re
 import threading
 import uuid
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -447,6 +448,21 @@ class Agent:
             "current_tokens": budget.current_input_tokens,
             "compaction_enabled": budget.input_budget_tokens > 0,
             "compaction_limit_tokens": budget.compaction_trigger_tokens,
+            "compaction_count": len(self.session.compaction_events),
+            "recent_compactions": self.session.compaction_events[-3:],
+            "usage_observations": [
+                {
+                    **obs,
+                    "error_pct": round(
+                        (obs["actual_input"] - obs["estimated_input"])
+                        / obs["actual_input"]
+                        * 100,
+                        1,
+                    ),
+                }
+                for obs in self.session.usage_observations[-3:]
+                if obs.get("actual_input")
+            ],
         })
         return status
 
@@ -482,9 +498,33 @@ class Agent:
         before = len(self.session.messages)
         new_messages = compactor.maybe_compact(self.session.messages)
         if len(new_messages) < before:
+            self.session.record_compaction_event(
+                {
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "before_tokens": count_messages_tokens(self.session.messages),
+                    "after_tokens": count_messages_tokens(new_messages),
+                    "dropped_messages": before - len(new_messages),
+                    "layer": "summary",
+                }
+            )
             self.session.messages = new_messages
             return True
         return False
+
+    def _record_usage_observation(self, actual_input_tokens: int) -> None:
+        """Provider 返回真实 usage 时，记录本地 token 估算的误差（有界）。"""
+        if actual_input_tokens <= 0:
+            return
+        estimated = count_messages_tokens(self.session.messages)
+        if estimated <= 0:
+            return
+        self.session.record_usage_observation(
+            {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "estimated_input": estimated,
+                "actual_input": actual_input_tokens,
+            }
+        )
 
     @staticmethod
     def _task_policy_prompt(intent: TaskIntent) -> str:
@@ -832,6 +872,7 @@ class Agent:
             total_input += response.input_tokens
             total_output += response.output_tokens
             total_cost += response.cost_usd
+            self._record_usage_observation(response.input_tokens)
 
             self.session.add_message(
                 "assistant",
@@ -876,6 +917,7 @@ class Agent:
                 total_input += response.input_tokens
                 total_output += response.output_tokens
                 total_cost += response.cost_usd
+                self._record_usage_observation(response.input_tokens)
                 self.session.add_message(
                     "assistant",
                     response.content,
@@ -922,6 +964,7 @@ class Agent:
             total_input += response.input_tokens
             total_output += response.output_tokens
             total_cost += response.cost_usd
+            self._record_usage_observation(response.input_tokens)
             concise_content = self._strip_toolcall_artifacts(response.content).strip()
             if concise_content:
                 final_content = concise_content
@@ -1049,6 +1092,7 @@ class Agent:
             response_blocks: list[MessageContentBlock] = []
             provider_payload: list[dict[str, Any]] = []
             output_before = total_output
+            usage_observed = False
             async for chunk in self.gateway.chat_with_main_model_stream(
                 messages=self.session.messages,
                 task_id=f"chat-{self.session.id}",
@@ -1062,6 +1106,9 @@ class Agent:
                         full_content += chunk.content or ""
                     yield event
                 if chunk.type == "usage":
+                    if not usage_observed and chunk.input_tokens > 0 and not chunk.usage_estimated:
+                        self._record_usage_observation(chunk.input_tokens)
+                        usage_observed = True
                     total_input += chunk.input_tokens
                     total_output += chunk.output_tokens
                     total_cost += chunk.cost_usd
@@ -1127,6 +1174,7 @@ class Agent:
                 full_content = ""
                 final_blocks: list[MessageContentBlock] = []
                 final_provider_payload: list[dict[str, Any]] = []
+                usage_observed = False
                 async for chunk in self.gateway.chat_with_main_model_stream(
                     messages=self.session.messages,
                     task_id=f"chat-{self.session.id}-finalize",
@@ -1140,6 +1188,9 @@ class Agent:
                             full_content += chunk.content or ""
                         yield event
                     if chunk.type == "usage":
+                        if not usage_observed and chunk.input_tokens > 0 and not chunk.usage_estimated:
+                            self._record_usage_observation(chunk.input_tokens)
+                            usage_observed = True
                         total_input += chunk.input_tokens
                         total_output += chunk.output_tokens
                         total_cost += chunk.cost_usd
@@ -1339,6 +1390,7 @@ class Agent:
             concise_content = ""
             concise_blocks: list[MessageContentBlock] = []
             concise_provider_payload: list[dict[str, Any]] = []
+            usage_observed = False
             async for chunk in self.gateway.chat_with_main_model_stream(
                 messages=self.session.messages,
                 task_id=f"chat-{self.session.id}-concise",
@@ -1351,6 +1403,9 @@ class Agent:
                         concise_content += chunk.content or ""
                     yield event
                 if chunk.type == "usage":
+                    if not usage_observed and chunk.input_tokens > 0 and not chunk.usage_estimated:
+                        self._record_usage_observation(chunk.input_tokens)
+                        usage_observed = True
                     total_input += chunk.input_tokens
                     total_output += chunk.output_tokens
                     total_cost += chunk.cost_usd

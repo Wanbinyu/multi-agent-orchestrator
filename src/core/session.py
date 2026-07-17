@@ -24,6 +24,8 @@ class Session(BaseModel):
     output_dir: str
     config_dir: str = "config"
     approval_mode: ApprovalMode = "auto"
+    compaction_events: list[dict[str, Any]] = Field(default_factory=list)
+    usage_observations: list[dict[str, Any]] = Field(default_factory=list)
 
     def add_message(
         self,
@@ -42,6 +44,18 @@ class Session(BaseModel):
         self.messages.append(msg)
         self.updated_at = datetime.now(timezone.utc).isoformat()
         return msg
+
+    def record_compaction_event(self, event: dict[str, Any]) -> None:
+        """记录一次上下文压缩事件，最多保留最近 20 条。"""
+        self.compaction_events.append(event)
+        del self.compaction_events[:-20]
+        self.updated_at = datetime.now(timezone.utc).isoformat()
+
+    def record_usage_observation(self, observation: dict[str, Any]) -> None:
+        """记录一次本地估算与 Provider 实际 usage 的对比，最多保留最近 20 条。"""
+        self.usage_observations.append(observation)
+        del self.usage_observations[:-20]
+        self.updated_at = datetime.now(timezone.utc).isoformat()
 
 
 class SessionStore:

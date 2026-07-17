@@ -230,6 +230,7 @@ class AnthropicProvider(BaseProvider):
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     cost_usd=self._calc_cost(input_tokens, output_tokens, model_config),
+                    usage_estimated=True,
                 )
 
             get_final_message = getattr(stream, "get_final_message", None)
@@ -480,6 +481,7 @@ class OpenAICompatibleProvider(BaseProvider):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost_usd=self._calc_cost(input_tokens, output_tokens, model_config),
+                usage_estimated=True,
             )
 
     @staticmethod

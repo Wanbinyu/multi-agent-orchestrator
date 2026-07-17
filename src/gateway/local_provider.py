@@ -153,4 +153,5 @@ class LocalLlamaCppProvider:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=self._calc_cost(model_config),
+            usage_estimated=not input_tokens,
         )
