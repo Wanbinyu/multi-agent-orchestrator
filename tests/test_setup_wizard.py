@@ -23,16 +23,6 @@ def test_build_provider_config_anthropic():
     assert env_var == "ANTHROPIC_API_KEY"
 
 
-def test_build_provider_config_kimi_has_model_map():
-    cfg, models, env_var = build_provider_config("kimi", "sk-test")
-    assert cfg["type"] == "anthropic"
-    assert cfg["base_url"] == "https://api.va11.icu/"
-    assert "model_map" in cfg
-    assert cfg["model_map"]["claude-sonnet-5"] == "kimi-for-coding"
-    assert "kimi-for-coding" in models
-    assert env_var == "KIMI_API_KEY"
-
-
 def test_build_provider_config_with_base_url_override():
     cfg, _, _ = build_provider_config("anthropic", "sk-test", base_url="https://proxy.example.com")
     assert cfg["base_url"] == "https://proxy.example.com"

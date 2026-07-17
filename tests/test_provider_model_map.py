@@ -9,7 +9,7 @@ def _kimi_config() -> ProviderConfig:
     return ProviderConfig(
         name="Kimi 转发服务",
         type="anthropic",
-        base_url="https://api.va11.icu/",
+        base_url="https://relay.example.com/",
         api_keys=["sk-test"],
         model_map={
             "claude-sonnet-5": "kimi-for-coding",

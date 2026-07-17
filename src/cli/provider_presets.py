@@ -78,30 +78,6 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
             },
         },
     },
-    "kimi": {
-        "name": "Kimi 转发服务（via CCswitch）",
-        "type": "anthropic",
-        "base_url": "https://api.va11.icu/",
-        "env_var": "KIMI_API_KEY",
-        # 这些 Claude 风格名称只用于兼容旧配置，始终在本地映射为 Kimi ID。
-        "model_map": {
-            "claude-sonnet-5": "kimi-for-coding",
-            "claude-sonnet-5-20251001": "kimi-for-coding",
-            "claude-opus-4-8": "kimi-for-coding",
-            "claude-opus-4-8-20251001": "kimi-for-coding",
-            "claude-haiku-4-5": "kimi-for-coding",
-            "claude-haiku-4-5-20251001": "kimi-for-coding",
-            "claude-fable-5": "kimi-for-coding",
-            "claude-fable-5-20251001": "kimi-for-coding",
-        },
-        "models": {
-            "kimi-for-coding": {
-                "model_id": "kimi-for-coding",
-                "input_price_per_1m": 1.0,
-                "output_price_per_1m": 1.0,
-            },
-        },
-    },
     "custom_anthropic": {
         "name": "自定义 Anthropic 兼容服务",
         "type": "anthropic",
