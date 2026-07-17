@@ -31,16 +31,12 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "base_url": "https://api.openai.com/v1",
         "env_var": "OPENAI_API_KEY",
         "models": {
-            "gpt-4o": {
-                "model_id": "gpt-4o",
-                "input_price_per_1m": 5.0,
-                "output_price_per_1m": 15.0,
-            },
-            "gpt-4o-mini": {
-                "model_id": "gpt-4o-mini",
-                "input_price_per_1m": 0.15,
-                "output_price_per_1m": 0.6,
-            },
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in (
+                "gpt-5",
+                "gpt-4o",
+                "gpt-4o-mini",
+            )
         },
     },
     "glm": {
@@ -49,16 +45,11 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
         "env_var": "GLM_API_KEY",
         "models": {
-            "glm-4": {
-                "model_id": "glm-4",
-                "input_price_per_1m": 1.0,
-                "output_price_per_1m": 1.0,
-            },
-            "glm-4-flash": {
-                "model_id": "glm-4-flash",
-                "input_price_per_1m": 0.1,
-                "output_price_per_1m": 0.1,
-            },
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in (
+                "glm-5",
+                "glm-4-flash",
+            )
         },
     },
     "deepseek": {
@@ -67,16 +58,11 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "base_url": "https://api.deepseek.com/v1",
         "env_var": "DEEPSEEK_API_KEY",
         "models": {
-            "deepseek-v3": {
-                "model_id": "deepseek-chat",
-                "input_price_per_1m": 0.3,
-                "output_price_per_1m": 1.2,
-            },
-            "deepseek-r1": {
-                "model_id": "deepseek-reasoner",
-                "input_price_per_1m": 1.0,
-                "output_price_per_1m": 4.0,
-            },
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in (
+                "deepseek-v4-pro",
+                "deepseek-v4-flash",
+            )
         },
     },
     "ark": {

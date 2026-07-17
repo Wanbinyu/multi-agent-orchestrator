@@ -22,6 +22,37 @@ def test_catalog_contains_common_models():
     assert "deepseek-chat" in catalog
 
 
+def test_catalog_covers_mainstream_providers():
+    """2026-07 扩充后，目录覆盖主流 Provider 的代表模型。"""
+    catalog = get_model_catalog()
+    for alias in (
+        "gpt-5",
+        "deepseek-v4-pro",
+        "kimi-k2.7-code",
+        "glm-5",
+        "minimax-m2.7",
+        "qwen3-coder-plus",
+        "doubao-seed",
+        "gemini-3.1-pro",
+    ):
+        assert alias in catalog, alias
+
+
+def test_expanded_models_stay_unverified():
+    """未逐项核实的扩充条目不声明已验证元数据。"""
+    for alias in ("gpt-5", "gemini-3.1-pro", "glm-5"):
+        entry = BUILTIN_MODELS[alias]
+        assert entry.metadata_source == "unverified"
+        assert set(entry.capability_status.values()) == {"unverified"}
+        assert entry.context_window_tokens == 0
+
+
+def test_all_template_models_exist_in_catalog():
+    for key, template in PROVIDER_TEMPLATES.items():
+        for alias in template["supported_models"]:
+            assert alias in BUILTIN_MODELS, f"{key}: {alias}"
+
+
 def test_model_entry_attributes():
     entry = BUILTIN_MODELS["glm-ark"]
     assert entry.alias == "glm-ark"

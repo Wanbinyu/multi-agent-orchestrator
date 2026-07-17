@@ -167,13 +167,16 @@ DEFAULT_MODELS = [
     "claude-fable-5",
     "claude-sonnet-5",
     "claude-haiku-4-5",
-    "gpt-4o",
+    "gpt-5",
     "gpt-4o-mini",
-    "glm-4",
+    "glm-5",
     "glm-4-flash",
     "glm-ark",
-    "deepseek-v3",
-    "deepseek-r1",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "kimi-k2.7-code",
+    "qwen3-coder-plus",
+    "gemini-3.1-pro",
 ]
 
 

@@ -47,8 +47,8 @@ def test_build_providers_yaml_multiple_providers():
 
     assert "glm" in data["providers"]
     assert "deepseek" in data["providers"]
-    assert "glm-4" in data["models"]
-    assert "deepseek-v3" in data["models"]
+    assert "glm-5" in data["models"]
+    assert "deepseek-v4-pro" in data["models"]
     assert env_vars == {"GLM_API_KEY": "glm-key", "DEEPSEEK_API_KEY": "ds-key"}
 
 

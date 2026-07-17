@@ -152,6 +152,7 @@ from src.ui.presets.builtin import (  # noqa: E402
     custom_anthropic,
     custom_openai,
     deepseek,
+    gemini,
     kimi,
     minimax,
     openai,

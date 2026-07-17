@@ -284,12 +284,18 @@ Worker 在执行任务时可以使用以下工具：
 ## 当前支持的模型
 
 - **Anthropic**: Fable 5 / Opus 4.8 / Sonnet 5 / Haiku 4.5
-- **OpenAI**: gpt-4o / gpt-4o-mini
-- **智谱 GLM**: glm-4 / glm-4-flash
-- **DeepSeek**: deepseek-v3 / deepseek-r1
-- **自定义 OpenAI 兼容服务**: 通过 `agent-setup` 配置
+- **OpenAI**: gpt-5 / gpt-4o / gpt-4o-mini
+- **智谱 GLM**: glm-5 / glm-4-flash
+- **DeepSeek**: deepseek-v4-pro / deepseek-v4-flash
+- **Kimi**: kimi-k2.7-code / kimi-k2.7 / kimi-k2.5
+- **阿里 Qwen**: qwen3-coder-plus / qwen3-235b-a22b
+- **MiniMax**: minimax-m2.7
+- **字节豆包**: doubao-seed（火山方舟 OpenAI 兼容）
+- **Google Gemini**: gemini-3.1-pro / gemini-3.5-flash / gemini-3-flash（OpenAI 兼容端点）
+- **本地模型**: Ollama / llama.cpp（见 `config/providers.yaml.example`）
+- **自定义 OpenAI / Anthropic 兼容服务**: 通过 `agent-setup` 配置
 
-> 实际可用模型取决于 `config/providers.yaml` 中的配置。`src/models/catalog.py` 内置了常见模型模板。
+> 实际可用模型取决于 `config/providers.yaml` 中的配置。`src/models/catalog.py` 是内置模型模板的单一真值源，CLI 与 Web 预设均由目录生成；未逐项核实的条目元数据保持 `unverified`，价格仅为占位。
 
 ## 当前功能
 

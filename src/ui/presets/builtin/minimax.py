@@ -1,3 +1,4 @@
+from src.models.catalog import BUILTIN_MODELS
 from src.ui.presets import register_preset
 
 register_preset(
@@ -8,12 +9,8 @@ register_preset(
         "base_url": "https://api.minimaxi.com/v1",
         "env_var": "MINIMAX_API_KEY",
         "models": {
-            "minimax-m2.7": {
-                "model_id": "MiniMax-M2.7",
-                "input_price_per_1m": 1.0,
-                "output_price_per_1m": 1.0,
-                "capabilities": ["coding", "tool_use", "reasoning"],
-            },
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in ("minimax-m2.7",)
         },
     },
 )

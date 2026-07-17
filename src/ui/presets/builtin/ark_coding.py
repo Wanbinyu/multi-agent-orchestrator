@@ -1,3 +1,4 @@
+from src.models.catalog import BUILTIN_MODELS
 from src.ui.presets import register_preset
 
 register_preset(
@@ -8,26 +9,11 @@ register_preset(
         "base_url": "https://ark.cn-beijing.volces.com/api/coding",
         "env_var": "ARK_CODING_API_KEY",
         "models": {
-            "glm-ark": {
-                "model_id": "ark-code-latest",
-                "input_price_per_1m": 1.0,
-                "output_price_per_1m": 1.0,
-                "capabilities": ["coding", "tool_use", "reasoning"],
-                "context_window_tokens": 0,
-                "max_output_tokens": 4096,
-                "context_window_source": "unverified_dynamic_alias",
-                "dynamic_model_alias": True,
-            },
-            "glm-chat": {
-                "model_id": "ark-chat-latest",
-                "input_price_per_1m": 1.0,
-                "output_price_per_1m": 1.0,
-                "capabilities": ["chat", "tool_use"],
-                "context_window_tokens": 0,
-                "max_output_tokens": 4096,
-                "context_window_source": "unverified_dynamic_alias",
-                "dynamic_model_alias": True,
-            },
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in (
+                "glm-ark",
+                "glm-chat",
+            )
         },
     },
 )
