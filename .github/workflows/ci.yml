@@ -44,7 +44,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[test]" build wheel
+          python -m pip install -e ".[test]" build wheel "setuptools>=77"
       # Private runtime configs are gitignored; seed examples so fresh clones
       # and CI match a first-time contributor checkout.
       - name: Seed example configs
