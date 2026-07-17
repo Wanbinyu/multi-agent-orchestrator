@@ -38,6 +38,40 @@ def test_write_action_wins_over_review_wording():
     assert intent.policy.allow_project_writes is True
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "我现在接了一个项目，让我做一个矿场智能检测系统，但是时间太紧了，所以我需要你帮我先做一个纯前端的界面，放在G:\\MAO_test，但是我需要把项目结构先简单搭建好，后面方便我直接进行后续工作和开发",
+        "我需要你帮我先做一个登录页面",
+        "帮我做一套数据看板",
+        "把项目结构搭建好",
+        "把首页布局做出来",
+    ],
+)
+def test_mid_sentence_build_phrasing_is_recognized(text):
+    """句中的"帮我做/把……搭建好"同样构成明确写入授权。"""
+    intent = TaskIntentClassifier().classify(text, "auto")
+
+    assert intent.kind == "build"
+    assert intent.policy.allow_project_writes is True
+    assert intent.write_authorized is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "帮我看看怎么做这个页面",
+        "帮我做版本对比",
+        "把项目搭建的事告诉我",
+    ],
+)
+def test_similar_readonly_phrasing_does_not_grant_writes(text):
+    """"怎么做/做对比/告诉我"类问法不得误判为写入。"""
+    intent = TaskIntentClassifier().classify(text, "auto")
+
+    assert intent.policy.allow_project_writes is False
+
+
 def test_explaining_how_to_write_a_file_stays_readonly():
     intent = TaskIntentClassifier().classify("解释如何写文件", "auto")
 
