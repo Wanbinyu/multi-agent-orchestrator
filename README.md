@@ -48,6 +48,15 @@ mao web
 
 浏览器默认打开 `http://127.0.0.1:8123`。首次可以先添加 Provider、测试连接并选择主模型；密钥只写入当前目录的 `.env`。旧命令 `mao-ui` 继续兼容。
 
+升级或卸载：
+
+```bash
+pipx upgrade multi-agent-orchestrator
+pipx uninstall multi-agent-orchestrator
+```
+
+如果最初使用 Git URL 安装，`pipx upgrade` 会继续使用已记录的 Git 来源。升级后可用 `mao --version` 检查当前版本。
+
 没有 `pipx` 时，可先安装：
 
 ```bash

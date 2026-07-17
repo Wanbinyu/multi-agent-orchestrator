@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -18,12 +19,22 @@ from src.ui.routers import chat, memory, providers
 from src.gateway.errors import ProviderError, provider_error_http_status
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时加载 Hooks + MCP 工具源"""
     from src.tools.extensions import load_extensions, shutdown_extensions
 
-    load_extensions()
+    extension_status = load_extensions()
+    app.state.extension_status = extension_status
+    if extension_status["diagnostics"]:
+        logger.warning(
+            "MAO skipped %d invalid optional extension entries; "
+            "see GET /api/diagnostics/extensions",
+            len(extension_status["diagnostics"]),
+        )
     try:
         yield
     finally:
@@ -58,3 +69,11 @@ async def index(request: Request):
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/diagnostics/extensions")
+async def extension_diagnostics() -> dict:
+    """Expose bounded optional-extension status without affecting health."""
+    from src.tools.extensions import get_extension_status
+
+    return get_extension_status()

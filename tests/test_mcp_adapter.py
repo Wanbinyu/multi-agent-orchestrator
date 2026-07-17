@@ -238,6 +238,24 @@ def test_execute_handles_mcp_error(monkeypatch):
         src.shutdown()
 
 
+def test_execute_redacts_runtime_exception_text():
+    def fail_safely(coro):
+        coro.close()
+        raise RuntimeError("API_KEY=SUPER_SECRET_VALUE")
+
+    src = MCPToolSource({"command": "npx", "args": ["srv"]})
+    src._session = MagicMock()
+    src._runner = MagicMock()
+    src._runner.run.side_effect = fail_safely
+
+    result = src.execute("secret_tool_name", {})
+
+    assert result.success is False
+    assert "RuntimeError" in result.error
+    assert "SUPER_SECRET_VALUE" not in result.error
+    assert "secret_tool_name" not in result.error
+
+
 # ---------- 配置加载 ----------
 
 
@@ -266,3 +284,26 @@ def test_load_mcp_sources_from_config(tmp_path):
     assert len(sources) == 2
     assert sources[0]._transport == "stdio"
     assert sources[1]._transport == "sse"
+
+
+def test_detailed_mcp_loader_reports_bad_entry_and_keeps_valid_source(tmp_path):
+    from src.tools.mcp_adapter import load_mcp_sources_from_config_detailed
+
+    cfg = tmp_path / "mcp.yaml"
+    cfg.write_text(
+        "servers:\n"
+        "  - name: bad\n"
+        "    env:\n"
+        "      API_KEY: SUPER_SECRET_VALUE\n"
+        "  - name: valid\n"
+        "    command: npx\n",
+        encoding="utf-8",
+    )
+
+    sources, diagnostics = load_mcp_sources_from_config_detailed(str(cfg))
+
+    assert len(sources) == 1
+    assert len(diagnostics) == 1
+    assert diagnostics[0]["entry"] == "servers[0]"
+    assert "SUPER_SECRET_VALUE" not in str(diagnostics)
+    assert str(tmp_path) not in str(diagnostics)

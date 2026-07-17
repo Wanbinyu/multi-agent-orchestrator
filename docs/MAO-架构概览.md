@@ -135,6 +135,8 @@ Provider 异常由 `src/gateway/errors.py` 统一分类为可安全展示的 `Pr
 
 工具由 `ToolRegistry` 统一注册，支持 Markdown 工具块和部分模型的原生 tool use。工具来源包括内置工具、贡献模块和 MCP。
 
+可选 Hook/MCP 扩展使用进程内幂等加载器。配置缺失时静默跳过；单个坏条目不会阻止合法条目或核心启动。加载结果最多保留 10 条脱敏诊断，只包含稳定错误码、固定说明、操作建议、配置文件名、条目索引和异常类型，不保留异常文本、完整路径、命令参数或环境变量。CLI 启动时显示简短摘要，Web 通过 `/api/diagnostics/extensions` 提供独立状态；可选扩展失败不会让 `/health` 变为不健康。
+
 权限有两层：
 
 - 会话模式：`auto`、`approve`、`readonly`。
@@ -149,6 +151,8 @@ Provider 异常由 `src/gateway/errors.py` 统一分类为可安全展示的 `Pr
 - `src/tools/search_tools.py`
 - `src/tools/web_tools.py`
 - `src/tools/mcp_adapter.py`
+- `src/tools/extensions.py`
+- `src/tools/extension_diagnostics.py`
 - `src/core/hooks.py`
 
 ## 8. 会话、上下文与记忆

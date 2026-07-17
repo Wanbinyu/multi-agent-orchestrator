@@ -6,6 +6,7 @@ import re
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import run
@@ -112,6 +113,29 @@ def test_default_cli_starts_chat_in_current_workspace(tmp_path, monkeypatch):
     run._run_default_cli(str(config_dir))
 
     launch_chat.assert_called_once_with(config_dir=str(config_dir))
+
+
+def test_default_cli_non_tty_clean_directory_exits_with_guidance(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(run.sys.stdin, "isatty", lambda: False)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        run._run_default_cli()
+
+    assert exc_info.value.exit_code == 2
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_default_cli_requires_console_output_for_first_run(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(run.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(run.sys.stdout, "isatty", lambda: False)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        run._run_default_cli()
+
+    assert exc_info.value.exit_code == 2
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_web_command_uses_shared_server(monkeypatch):

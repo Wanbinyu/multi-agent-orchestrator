@@ -38,6 +38,27 @@ class TestPages:
         assert res.status_code == 200
         assert res.json() == {"status": "ok"}
 
+    def test_extension_diagnostics_are_separate_from_health(self, client):
+        res = client.get("/api/diagnostics/extensions")
+        assert res.status_code == 200
+        data = res.json()
+        assert set(data) == {"hooks", "mcp_sources", "diagnostics"}
+
+    def test_clean_directory_starts_configuration_ui(self, tmp_path, monkeypatch):
+        from src.tools import extensions
+
+        monkeypatch.chdir(tmp_path)
+        extensions.reset_load_flag()
+        try:
+            with TestClient(app) as clean_client:
+                assert clean_client.get("/health").json() == {"status": "ok"}
+                page = clean_client.get("/")
+                assert page.status_code == 200
+                assert "模型连接配置" in page.text
+            assert not (tmp_path / "config" / "providers.yaml").exists()
+        finally:
+            extensions.reset_load_flag()
+
     def test_web_app_loads_dotenv_before_chat_router(self):
         source = Path("src/ui/app.py").read_text(encoding="utf-8")
         assert source.index("load_dotenv()") < source.index(

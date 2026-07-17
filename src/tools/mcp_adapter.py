@@ -21,6 +21,11 @@ from typing import Any
 
 from src.tools.registry import ToolSpec
 from src.tools.tool_result import ToolResult
+from src.tools.extension_diagnostics import (
+    ExtensionDiagnostic,
+    MAX_EXTENSION_DIAGNOSTICS,
+    make_extension_diagnostic,
+)
 
 
 class _AsyncLoopRunner:
@@ -115,8 +120,8 @@ class MCPToolSource:
                     self._session = session
                     self._ready.set()
                     await self._stop_event.wait()
-        except Exception as e:
-            self._init_error = f"MCP 连接失败：{e}"
+        except Exception as exc:
+            self._init_error = _safe_runtime_error("MCP 连接失败", exc)
             self._ready.set()
 
     def shutdown(self) -> None:
@@ -138,8 +143,8 @@ class MCPToolSource:
             return self._tools_cache
         try:
             self._tools_cache = self._runner.run(self._list_tools_async())  # type: ignore[union-attr]
-        except Exception as e:
-            self._init_error = f"列举 MCP 工具失败：{e}"
+        except Exception as exc:
+            self._init_error = _safe_runtime_error("列举 MCP 工具失败", exc)
             return []
         return self._tools_cache or []
 
@@ -166,8 +171,8 @@ class MCPToolSource:
             return ToolResult(success=False, error=self._init_error)
         try:
             return self._runner.run(self._execute_async(name, params))  # type: ignore[union-attr]
-        except Exception as e:
-            return ToolResult(success=False, error=f"MCP 调用 {name} 失败：{e}")
+        except Exception as exc:
+            return ToolResult(success=False, error=_safe_runtime_error("MCP 工具调用失败", exc))
 
     async def _execute_async(self, name: str, params: dict[str, Any]) -> ToolResult:
         result = await self._session.call_tool(name, params)
@@ -188,6 +193,11 @@ class MCPToolSource:
 def _noop_callable(**_: Any) -> ToolResult:
     """MCP 工具的占位 callable（实际执行走 execute()）"""
     return ToolResult(success=False, error="MCP 工具需通过 MCPToolSource.execute 调用")
+
+
+def _safe_runtime_error(message: str, exc: Exception) -> str:
+    """Describe the failure class without exposing command/env/exception text."""
+    return f"{message}（{type(exc).__name__}）"
 
 
 def _schema_to_params(input_schema: dict[str, Any]) -> dict[str, Any]:
@@ -235,3 +245,76 @@ def load_mcp_sources_from_config(config_path: str) -> list[MCPToolSource]:
         except Exception:
             continue
     return sources
+
+
+def load_mcp_sources_from_config_detailed(
+    config_path: str,
+) -> tuple[list[MCPToolSource], list[ExtensionDiagnostic]]:
+    """Load valid MCP servers independently with bounded, redacted diagnostics."""
+    from pathlib import Path
+
+    import yaml
+
+    path = Path(config_path)
+    if not path.exists():
+        return [], []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as exc:
+        return [], [
+            make_extension_diagnostic(
+                source="mcp",
+                code="mcp_config_error",
+                message="MCP 配置无法读取或解析",
+                action="检查 mcp.yaml 的 YAML 格式和文件权限",
+                config_path=path,
+                error=exc,
+            )
+        ]
+
+    if not isinstance(data, dict):
+        return [], [
+            make_extension_diagnostic(
+                source="mcp",
+                code="mcp_config_shape_error",
+                message="MCP 配置顶层必须是映射",
+                action="使用 servers 列表组织 mcp.yaml",
+                config_path=path,
+            )
+        ]
+
+    servers = data.get("servers", []) or []
+    if not isinstance(servers, list):
+        return [], [
+            make_extension_diagnostic(
+                source="mcp",
+                code="mcp_servers_error",
+                message="MCP 的 servers 配置必须是列表",
+                action="将 MCP Server 配置写成 YAML 列表",
+                config_path=path,
+                entry="servers",
+            )
+        ]
+
+    sources: list[MCPToolSource] = []
+    diagnostics: list[ExtensionDiagnostic] = []
+    for index, server in enumerate(servers):
+        try:
+            if not isinstance(server, dict):
+                raise TypeError("server entry must be a mapping")
+            sources.append(MCPToolSource(server, name=str(server.get("name", "mcp"))))
+        except Exception as exc:
+            if len(diagnostics) < MAX_EXTENSION_DIAGNOSTICS:
+                diagnostics.append(
+                    make_extension_diagnostic(
+                        source="mcp",
+                        code="mcp_server_error",
+                        message="MCP Server 配置无效，已跳过该条目",
+                        action="为 Server 提供 command 或 url，并检查字段类型",
+                        config_path=path,
+                        entry=f"servers[{index}]",
+                        error=exc,
+                    )
+                )
+    return sources, diagnostics

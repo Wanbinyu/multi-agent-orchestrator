@@ -877,7 +877,28 @@ def run_chat_loop(
     # 加载扩展（Hooks + MCP 工具源），幂等
     from src.tools.extensions import load_extensions
 
-    load_extensions()
+    extension_status = load_extensions()
+    diagnostics = extension_status["diagnostics"]
+    if diagnostics:
+        console.print(
+            Text(
+                f"扩展加载完成，但发现 {len(diagnostics)} 个配置问题；核心功能可继续使用。",
+                style="yellow",
+            )
+        )
+        for diagnostic in diagnostics[:3]:
+            location = diagnostic.get("config_path", "扩展配置")
+            entry = diagnostic.get("entry")
+            if entry:
+                location = f"{location} {entry}"
+            console.print(
+                Text(
+                    f"  - {location}: {diagnostic['message']}；{diagnostic['action']}",
+                    style="dim",
+                )
+            )
+        if len(diagnostics) > 3:
+            console.print(Text("  - 其余问题请在 Web 扩展诊断接口中查看。", style="dim"))
     agent = Agent(gateway, session, memory_store=memory_store)
 
     _print_welcome(session.id, mode_ref[0])

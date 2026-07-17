@@ -21,6 +21,11 @@ from typing import Any, Callable
 import yaml
 
 from src.tools.tool_result import ToolResult
+from src.tools.extension_diagnostics import (
+    ExtensionDiagnostic,
+    MAX_EXTENSION_DIAGNOSTICS,
+    make_extension_diagnostic,
+)
 
 
 class HookAbort(Exception):
@@ -161,3 +166,74 @@ def load_hooks_from_config(
         registry.add_post(_import_callable(str(dotted)))
         count += 1
     return count
+
+
+def load_hooks_from_config_detailed(
+    config_path: str | Path, registry: HookRegistry
+) -> tuple[int, list[ExtensionDiagnostic]]:
+    """Load valid hooks independently and return bounded, redacted diagnostics."""
+    path = Path(config_path)
+    if not path.exists():
+        return 0, []
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as exc:
+        return 0, [
+            make_extension_diagnostic(
+                source="hooks",
+                code="hook_config_error",
+                message="Hooks 配置无法读取或解析",
+                action="检查 hooks.yaml 的 YAML 格式和文件权限",
+                config_path=path,
+                error=exc,
+            )
+        ]
+
+    if not isinstance(data, dict):
+        return 0, [
+            make_extension_diagnostic(
+                source="hooks",
+                code="hook_config_shape_error",
+                message="Hooks 配置顶层必须是映射",
+                action="使用 pre 和 post 列表组织 hooks.yaml",
+                config_path=path,
+            )
+        ]
+
+    count = 0
+    diagnostics: list[ExtensionDiagnostic] = []
+    for hook_type, register in (("pre", registry.add_pre), ("post", registry.add_post)):
+        entries = data.get(hook_type, []) or []
+        if not isinstance(entries, list):
+            if len(diagnostics) < MAX_EXTENSION_DIAGNOSTICS:
+                diagnostics.append(
+                    make_extension_diagnostic(
+                        source="hooks",
+                        code="hook_list_error",
+                        message=f"Hooks 的 {hook_type} 配置必须是列表",
+                        action="将 Hook 路径写成 YAML 列表",
+                        config_path=path,
+                        entry=hook_type,
+                    )
+                )
+            continue
+        for index, dotted in enumerate(entries):
+            try:
+                register(_import_callable(str(dotted)))
+                count += 1
+            except Exception as exc:
+                if len(diagnostics) < MAX_EXTENSION_DIAGNOSTICS:
+                    diagnostics.append(
+                        make_extension_diagnostic(
+                            source="hooks",
+                            code="hook_import_error",
+                            message="Hook 无法导入，已跳过该条目",
+                            action="检查 Hook 的模块和函数路径",
+                            config_path=path,
+                            entry=f"{hook_type}[{index}]",
+                            error=exc,
+                        )
+                    )
+    return count, diagnostics

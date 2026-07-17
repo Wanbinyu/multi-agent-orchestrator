@@ -74,7 +74,7 @@ def _run_default_cli(config_dir: str = "config") -> None:
     """Make `mao` the normal interactive entry point, including first-run setup."""
     config_path = Path(config_dir) / "providers.yaml"
     if not config_path.exists():
-        if not sys.stdin.isatty():
+        if not _has_interactive_console():
             console.print(
                 "[yellow]尚未配置 Provider。请在交互式终端运行 `mao`，"
                 "或使用 `mao web` 打开配置界面。[/yellow]"
@@ -86,6 +86,14 @@ def _run_default_cli(config_dir: str = "config") -> None:
             console.print("[yellow]未生成 Provider 配置，已退出。[/yellow]")
             raise typer.Exit(code=1)
     _run_chat(config_dir=config_dir)
+
+
+def _has_interactive_console() -> bool:
+    """Require both input and output terminals before launching a prompt UI."""
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except (AttributeError, OSError):
+        return False
 
 
 @app.command()

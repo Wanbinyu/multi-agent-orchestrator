@@ -184,22 +184,34 @@
 - `src/tools/mcp_adapter.py`
 - `src/core/hooks.py`
 - `run.py`
-- `src/ui/cli.py`
+- `src/ui/app.py`
+- `scripts/verify_distribution.py`
 
 ### 任务
 
-- [ ] Hooks/MCP 加载错误形成有界诊断结果。
-- [ ] 没有扩展配置时保持安静。
-- [ ] 错误扩展不阻塞核心启动。
-- [ ] 干净目录验证 `mao` 首次向导。
-- [ ] 干净目录验证 `mao web` 配置与 `/health`。
-- [ ] 验证 pipx 安装、升级和卸载说明。
+- [x] Hooks/MCP 加载错误形成有界诊断结果。
+- [x] 没有扩展配置时保持安静。
+- [x] 错误扩展不阻塞核心启动。
+- [x] 干净目录验证 `mao` 首次向导。
+- [x] 干净目录验证 `mao web` 配置与 `/health`。
+- [x] 验证 pipx 安装、升级和卸载说明。
 
 ### 验收
 
 - [ ] Windows/Linux CI 通过。
-- [ ] wheel/sdist 元数据和归档内容通过。
-- [ ] 扩展错误不泄露环境变量。
+- [x] wheel/sdist 元数据和归档内容通过。
+- [x] 扩展错误不泄露环境变量。
+
+### 完成记录（2026-07-16）
+
+- Hook/MCP 配置改为逐条加载：坏条目生成固定错误码、操作建议、配置文件名和条目索引，合法条目继续注册；全局最多保留 10 条诊断。
+- 诊断不保存异常文本、完整配置路径、MCP command/args/env、请求头或 Key，只保留安全的异常类型；MCP 连接、列举和调用异常也不再回显原始异常。
+- CLI 仅在存在诊断时显示最多 3 条摘要；Web 保持 `/health` 为 `ok`，详细结果由 `/api/diagnostics/extensions` 独立提供。无扩展配置时没有新增启动噪音。
+- 修复 Windows console-script 在无控制台环境误进首次交互向导的问题：只有 stdin 和 stdout 都连接终端时才启动 Questionary，否则退出码为 2 并提示使用交互式 `mao` 或 `mao web`。
+- 新增 `scripts/verify_distribution.py`：构建并检查 wheel/sdist，确认开发测试和内部文档不进入发行包；在临时虚拟环境安装 wheel，验证空目录 `mao`、`mao --version`、帮助命令、Web 配置页和 `/health`。
+- README 已记录 `pipx install`、`pipx upgrade` 和 `pipx uninstall`。自动验收使用临时虚拟环境，不修改机器的全局 pipx 状态。
+- 本地验证：`python -m pytest -q` 为 `556 passed, 1 warning`；发行包与空目录首次使用验收通过。唯一警告仍是既有 Starlette/httpx 弃用提示。
+- 待完成：本批改动按要求尚未提交，远端 Windows/Linux CI 尚未触发；提交并通过矩阵后才可关闭该验收项并进入 B3.6。
 
 ## 6. B3.6 发布收口
 
@@ -226,4 +238,4 @@
 
 ## 8. 当前下一步
 
-从 **B3.5 扩展诊断和首次使用** 开始。先让 Hooks/MCP 加载错误形成有界、脱敏的诊断结果，再验证干净目录中的 `mao`、`mao web` 和 pipx 安装流程；没有所有者授权时不进行真实付费调用。
+先审阅 **B3.5 扩展诊断和首次使用** 的未提交差异。确认后按推荐边界提交并等待 Windows/Linux CI；矩阵通过后关闭 B3.5，进入 **B3.6 发布收口**。没有所有者授权时不进行真实付费调用、Tag 或 GitHub Release。
