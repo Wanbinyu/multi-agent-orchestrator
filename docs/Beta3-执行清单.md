@@ -198,7 +198,7 @@
 
 ### 验收
 
-- [ ] Windows/Linux CI 通过。
+- [x] Windows/Linux CI 通过。
 - [x] wheel/sdist 元数据和归档内容通过。
 - [x] 扩展错误不泄露环境变量。
 
@@ -211,7 +211,7 @@
 - 新增 `scripts/verify_distribution.py`：构建并检查 wheel/sdist，确认开发测试和内部文档不进入发行包；在临时虚拟环境安装 wheel，验证空目录 `mao`、`mao --version`、帮助命令、Web 配置页和 `/health`。
 - README 已记录 `pipx install`、`pipx upgrade` 和 `pipx uninstall`。自动验收使用临时虚拟环境，不修改机器的全局 pipx 状态。
 - 本地验证：`python -m pytest -q` 为 `556 passed, 1 warning`；发行包与空目录首次使用验收通过。唯一警告仍是既有 Starlette/httpx 弃用提示。
-- 待完成：本批改动按要求尚未提交，远端 Windows/Linux CI 尚未触发；提交并通过矩阵后才可关闭该验收项并进入 B3.6。
+- 提交记录（2026-07-17）：`2f9ee73` 提交本批改动；远端 CI 首轮在发行验收步骤失败，原因是托管环境 setuptools 版本过旧、不识别 PEP 639 的 `license = "MIT"`（本地 83.0.0 未暴露）；`ebd391a` 将构建要求提升为 `setuptools>=77` 并在 CI 安装步骤固定。修复后 Windows/Ubuntu × Python 3.11/3.12 矩阵与 pip-audit、gitleaks 全部通过。
 
 ## 6. B3.6 发布收口
 
@@ -238,4 +238,4 @@
 
 ## 8. 当前下一步
 
-先审阅 **B3.5 扩展诊断和首次使用** 的未提交差异。确认后按推荐边界提交并等待 Windows/Linux CI；矩阵通过后关闭 B3.5，进入 **B3.6 发布收口**。没有所有者授权时不进行真实付费调用、Tag 或 GitHub Release。
+B3.5 已提交并通过 Windows/Linux CI，进入 **B3.6 发布收口**：按第 6 节更新 CHANGELOG、版本号与 Release Notes，构建并用 `twine check` 验证发行包，空目录 pipx 安装验收；Tag 与 GitHub pre-release 必须等所有者单独确认。没有所有者授权时不进行真实付费调用。
