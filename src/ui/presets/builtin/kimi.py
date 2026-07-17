@@ -11,6 +11,7 @@ register_preset(
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
+                "kimi-k3",
                 "kimi-k2.7-code",
                 "kimi-k2.7",
                 "kimi-k2.5",

@@ -28,6 +28,7 @@ def test_catalog_covers_mainstream_providers():
     for alias in (
         "gpt-5",
         "deepseek-v4-pro",
+        "kimi-k3",
         "kimi-k2.7-code",
         "glm-5",
         "minimax-m2.7",

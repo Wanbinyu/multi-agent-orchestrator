@@ -287,7 +287,7 @@ Worker 在执行任务时可以使用以下工具：
 - **OpenAI**: gpt-5 / gpt-4o / gpt-4o-mini
 - **智谱 GLM**: glm-5 / glm-4-flash
 - **DeepSeek**: deepseek-v4-pro / deepseek-v4-flash
-- **Kimi**: kimi-k2.7-code / kimi-k2.7 / kimi-k2.5
+- **Kimi**: kimi-k3 / kimi-k2.7-code / kimi-k2.7 / kimi-k2.5
 - **阿里 Qwen**: qwen3-coder-plus / qwen3-235b-a22b
 - **MiniMax**: minimax-m2.7
 - **字节豆包**: doubao-seed（火山方舟 OpenAI 兼容）

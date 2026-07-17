@@ -174,6 +174,7 @@ DEFAULT_MODELS = [
     "glm-ark",
     "deepseek-v4-pro",
     "deepseek-v4-flash",
+    "kimi-k3",
     "kimi-k2.7-code",
     "qwen3-coder-plus",
     "gemini-3.1-pro",

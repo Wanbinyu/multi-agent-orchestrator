@@ -280,6 +280,19 @@ BUILTIN_MODELS: dict[str, ModelCatalogEntry] = {
         output_price_per_1m=1.2,
         description="DeepSeek V4 Flash，低成本通用",
     ),
+    "kimi-k3": ModelCatalogEntry(
+        alias="kimi-k3",
+        name="Kimi K3",
+        provider_type="openai",
+        default_model_id="kimi-k3",
+        capabilities=["coding", "reasoning", "tool_use", "vision"],
+        input_price_per_1m=3.0,
+        output_price_per_1m=15.0,
+        description="Moonshot Kimi K3 旗舰（2026-07-16 发布），1M 上下文；元数据来自发布报道，未逐项核实",
+        context_window_tokens=1_048_576,
+        max_output_tokens=131_072,
+        context_window_source="unverified_press_2026-07",
+    ),
     "kimi-k2.7-code": ModelCatalogEntry(
         alias="kimi-k2.7-code",
         name="Kimi K2.7 Code",
@@ -439,7 +452,7 @@ PROVIDER_TEMPLATES: dict[str, dict[str, Any]] = {
         "base_url": "https://api.moonshot.cn/v1",
         "timeout": 120,
         "rpm_limit": 60,
-        "supported_models": ["kimi-k2.7-code", "kimi-k2.7", "kimi-k2.5", "kimi-for-coding"],
+        "supported_models": ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7", "kimi-k2.5", "kimi-for-coding"],
     },
     "deepseek": {
         "name": "DeepSeek",
