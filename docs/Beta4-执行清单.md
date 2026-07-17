@@ -1,6 +1,6 @@
 # v0.1.0-beta.4 执行清单
 
-**状态**：进行中，B4.1 已完成，B4.2 进行中
+**状态**：进行中，B4.1-B4.2 已完成，B4.3 进行中
 
 **目标**：工程透明度、会话恢复与长任务上下文——用户无需询问模型，就能看懂任务计划、执行证据、验证结果、阻塞原因和上下文行为
 
@@ -63,14 +63,25 @@ CLI 与 Web 无需调用模型即可展开查看 WorkPlan、Evidence、Verificat
 
 ### 任务
 
-- [ ] 压缩事件持久化（时间、前后 token 估算、丢弃消息数、使用层级），有界保存在会话侧。
-- [ ] `get_context_status` 暴露压缩次数与最近事件；Provider 返回 usage 时记录估算 vs 实际 prompt token 误差（有界）。
-- [ ] CLI `/context` 与 Web context 端点展示上述字段。
+- [x] 压缩事件持久化（时间、前后 token 估算、丢弃消息数、使用层级），有界保存在会话侧。
+- [x] `get_context_status` 暴露压缩次数与最近事件；Provider 返回 usage 时记录估算 vs 实际 prompt token 误差（有界）。
+- [x] CLI `/context` 与 Web context 端点展示上述字段。
 
 ### 验收
 
-- [ ] 触发一次压缩后事件记录与消息数变化一致；事件不写入会话消息流。
-- [ ] 无压缩时界面无新增噪音。
+- [x] 触发一次压缩后事件记录与消息数变化一致；事件不写入会话消息流。
+- [x] 无压缩时界面无新增噪音。
+
+### B4.2 完成记录（2026-07-17）
+
+- `Session` 新增 `compaction_events` 与 `usage_observations`（各有界 20 条），旧会话 YAML 无此字段时按默认空表加载。
+- Agent 在每次实际压缩时记录时间、前后 token 估算、合并消息数和层级（当前为 `summary`，B4.4 分层后扩展）；事件只进会话观测字段，不写入消息流。
+- `StreamChunk` 新增 `usage_estimated`：Anthropic/OpenAI/llama.cpp 的兜底估算置为 True，真实 Provider usage 保持 False；同步 3 处、流式 3 处在收到真实 usage 时记录估算 vs 实际 prompt token，同一请求只记一次。
+- `get_context_status` 暴露 `compaction_count`、`recent_compactions`（最近 3 条）和 `usage_observations`（最近 3 条，含 `error_pct`）。
+- CLI `/context` 仅在存在压缩或观测时追加对应行；Web 上下文面板新增"压缩"与"估算误差"两行，无数据时隐藏（悬停显示估算/实际值）。
+- 测试：`test_context_observability.py` 新增 8 个用例（有界性、旧会话兼容、压缩事件、真实 usage 观测、StreamChunk 默认值、状态暴露、无噪音）。
+- 验证：`python -m pytest -q` 为 `570 passed, 1 warning`；`compileall`、`node --check` 和 `git diff --check` 通过。
+- 剩余风险：估算误差依赖 Provider 返回真实 usage；本地模型（llama.cpp）的 input usage 为 0 时不产生观测。
 
 ## 3. B4.3 会话恢复确认
 
@@ -193,4 +204,4 @@ Reviewer 对照需求与证据独立验证，不阅读 Worker 自述。
 
 ## 9. 当前下一步
 
-B4.1 已完成（Web 可展开工程详情 + CLI `/runs`，`562 passed`）。执行 **B4.2 压缩事件与上下文透明度**：压缩事件持久化、`get_context_status` 暴露压缩次数与最近事件、CLI `/context` 与 Web context 端点展示。
+B4.1（工程记录可视化）与 B4.2（压缩事件与上下文透明度）已完成，`570 passed`。执行 **B4.3 会话恢复确认**：检测 `running`/`blocked` 运行与未完成计划，CLI `/load` 与 Web 打开会话时显示恢复横幅，用户显式确认后才继续，决策写入 RunJournal。
