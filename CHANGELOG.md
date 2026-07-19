@@ -4,6 +4,39 @@ All notable changes are documented here. MAO follows Semantic Versioning; beta r
 
 ## [Unreleased]
 
+Target release: `v0.1.0-beta.4` (release candidate; Tag and GitHub pre-release require owner confirmation).
+
+### Added
+
+- Hierarchical project rules from `AGENTS.md`, `CLAUDE.md`, `.mao/rules`, and compatible Grok/Claude/Cursor rule directories, with bounded loading and RunJournal provenance.
+- Deterministic user/project permission rules with `deny > ask > allow > session default`, canonical path matching, compound-command coverage, and shared Agent/Worker enforcement.
+- Permission rules can declare human-readable justifications and load-time `match`/`not_match` examples; a rule that fails its examples is ignored with a diagnostic.
+- RunJournal v3 records observed project mutations and a separate effective intent. One real project write triggers standard change verification; multiple files, dependency manifests, or new directories trigger deep build verification without widening the original tool permission boundary.
+- Portable project verification now discovers real package/Python commands, executes one argument-array command with a structured `cwd`, records bounded command metadata, detects missing script dependencies, and supports cleaned temporary Vite build output.
+- High-risk frontend builds use a fixed architecture/scaffold, pages, data/API and integration contract. The contract declares entrypoints, routes, dependencies, ownership, verification commands and smoke paths; integration success requires deterministic import/route closure plus real successful command evidence.
+- RunJournal collaboration metrics expose planned roles and actual models for Orchestrator, Workers and Reviewer; Reviewer receives the original request, file list, acceptance evidence and command/runtime evidence.
+- Controlled Playwright frontend smoke starts a structured local server on a dynamic loopback port, cleans its process tree, and verifies login, routes, console/page errors, non-empty data/canvas content, horizontal overflow and declared overlap pairs at desktop and mobile viewports. Its real tool result creates the required smoke VerificationGate.
+- Deterministic session/today delivery reports aggregate every local RunJournal with run/evidence provenance, deduplicate repeated facts, separate creation/modification/verification/pending/user steps, and calculate per-role usage, success, first-pass runnable, rework, misdiagnosis and token-per-delivery metrics. CLI `/report`, Web and explicit natural-language report requests use the same zero-Provider path.
+- A sanitized smart-mining stability fixture and replay gate exercise classification, multi-model frontend contracts, dependency closure, real local commands, browser smoke, completion audit, and delivery reporting in CI without Provider calls. Positive and intentionally broken variants lock completed/blocked behavior.
+- Interrupted sessions now require an explicit local recovery decision when the latest run is running, blocked, or has unfinished plan steps. CLI `/resume` and the Web recovery banner prevent sync/stream execution until confirmation; continuation creates a new run with a one-time unfinished-step checkpoint and never auto-replays completed work.
+- Context compaction now uses L0 artifact references, an L1 structured summary, and L2 recent full messages. It safely deduplicates plain history, preserves native tool pairs and a deterministic RunJournal checkpoint, records schema fallback/entity retention/relevance metrics, and ships a zero-Provider 32K/64K/128K/200K three-compaction benchmark.
+- Project index v2 persists the normalized root, stable tree paths, file summaries, symbols and SHA-256 hashes. Incremental refresh performs zero content reads for unchanged projects, reparses only hash-changing files, recovers corrupt/cross-root caches, and backs `project_tree` plus path-aware `search_project_files` with auditable cache metadata.
+- Reviewer input defaults to `restricted`: original requirements, plans, files and direct engineering evidence are available while Worker response bodies are excluded. Configurable `full` mode remains compatible, the actual mode is journaled, and neither mode can override failed Workers or deterministic completion audits.
+- Persistent Plan mode across CLI and Web, including revision, approval handoff, cancellation, and a tool-free four-role multi-model planning council.
+
+### Fixed
+
+- Permission modes now control tool execution consistently: `auto` may execute non-read tools without a second gate, `approve` asks only for non-read tools, and `readonly` permits reads while rejecting writes and commands. Unclassified requests follow the session mode without being misreported as engineering changes, and natural follow-ups such as `帮我创建好` are recognized as build requests.
+- Plan mode and explicit task read-only boundaries are enforced at tool execution, including Worker calls; project rules and `allow` rules cannot override them.
+- Natural requests such as `现在给我做一个纯前端项目` and `在 G:\\path 中做一个项目` classify as high-risk builds, while instructional questions remain read-only. Session output `response.md` no longer counts as a project mutation.
+- Command preflight failures no longer masquerade as failed tests. Inline `cd`, shell composition, invalid cwd, allowlist and permission failures return actionable alternatives and permit at most one correction attempt.
+- Windows command execution resolves wrappers such as `npm.CMD` after a direct `shell=False` launch reports `FileNotFoundError`; first-pass runnable metrics now require every targeted, integration, full, and smoke gate to pass.
+- Live permission requests are removed after resolution and unknown request IDs are rejected; Web prevents concurrent requests or deletion for one active session and persists mode changes on the live Session.
+- Recovery seals contradictory completed runs with unfinished plan steps as blocked. Native tool block entities participate in compaction, and plain-text fallback artifacts no longer use a JSON extension.
+- Reviewer output fields are type-checked, failed parsing still records usage, and collaboration plans are capped at 24 tasks to prevent unbounded model fan-out.
+- Frontend closure and smoke gates reject malformed dependency sections, resources outside the project root, HTTP error pages, incomplete viewport results and inline interpreter server code. Offline replay cannot complete when a deterministic precondition fails.
+- Distribution acceptance installs dependencies in a clean virtual environment without inherited system packages; CI verifies the official gitleaks checksum before execution.
+
 ## [0.1.0-beta.3] - 2026-07-17
 
 ### Added

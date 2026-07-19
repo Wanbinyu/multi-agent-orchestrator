@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB)
-![Status](https://img.shields.io/badge/status-v0.1.0--beta.3-f59e0b)
+![Status](https://img.shields.io/badge/status-v0.1.0--beta.4%20RC-f59e0b)
 
 MAO 面向需要接入多个模型服务的开发者：它在 CLI 和 WebUI 中执行工程任务，并用明确的读写边界、工具证据、验证门和有界 Worker 协作约束模型行为。核心目标不是单纯增加并发，而是在选择不同模型能力与成本的同时，让使用者知道系统做了什么、为什么能结束、还有哪些风险。
 
-当前公开版本为 [`v0.1.0-beta.3`](https://github.com/Wanbinyu/multi-agent-orchestrator/releases/tag/v0.1.0-beta.3)。它适合在可信本机和可审查项目中试用，不是 Claude Code、Codex 或容器沙箱的完整替代品。
+当前公开版本为 [`v0.1.0-beta.3`](https://github.com/Wanbinyu/multi-agent-orchestrator/releases/tag/v0.1.0-beta.3)；当前源码为 `v0.1.0-beta.4` release candidate，等待远端 CI 与所有者发布确认。它适合在可信本机和可审查项目中试用，不是 Claude Code、Codex 或容器沙箱的完整替代品。
 
 ## 为什么做 MAO
 
@@ -196,6 +196,11 @@ python run.py chat
 | `/context` | 本地显示模型映射、上下文预算、当前估算和自动压缩阈值，不调用模型 |
 | `/tree [路径] [深度]` | 本地显示项目结构，不调用模型、不产生 token |
 | `/plan <需求>` | 调用 Orchestrator 执行一次性任务计划 |
+| `/plan enter [目标]` | 进入持久化只读 Plan 模式 |
+| `/plan show` | 查看当前方案、状态和修订版本 |
+| `/plan revise <意见>` | 记录修订意见并生成新版方案 |
+| `/plan approve` | 批准方案并交给正常多模型执行链 |
+| `/plan cancel` | 取消 Plan 模式 |
 | `/tools` | 显示当前可用工具 |
 | `/exit` | 退出 |
 
@@ -205,17 +210,23 @@ python run.py chat
 
 Agent 系统提示会注入当前模型别名、上游请求模型 ID、本地上下文预算和自动压缩阈值。配置中的 `anthropic` 表示兼容协议，不代表实际模型是 Claude；需要查看实时估算时使用 `/context`，不要让模型自行猜测运行配置。
 
-每轮请求会分类为问答、解释、诊断、修改、构建、审查、方案或监控，并将类型、风险和写入状态记录到工程日志。只读任务即使处于 auto 模式也不会获得项目写权限；只有明确要求修改或实现时才进入可写策略。
+每轮请求会分类为问答、解释、诊断、修改、构建、审查、方案或监控，并将类型、风险和写入状态记录到工程日志。`auto` 对未明确分类或可写任务直接开放写入与命令工具；`approve` 自动读取，但每个写入或命令调用都需要用户确认；`readonly` 自动读取并拒绝写入和命令。明确的“只读、不要修改、只做方案”等边界在任何模式下都优先，分类器不会因为 `auto` 而覆盖用户的禁止修改要求。若真实工具行为与初始分类不一致，RunJournal 会保留初始权限边界，同时按实际项目写入生成更严格的有效类型和验证门；自动归档的 `response.md` 不计项目变更。
 
 项目检查会先获取精简结构和只读 Git 状态，再按文档、依赖、入口、核心代码与测试进行有界抽样。真实工具结果会自动写入可追溯 Evidence；缓存读取不会重复计证据，CLI/Web 的本轮记录会显示证据条数和项目侦察覆盖。
 
 工程修改在结束前执行确定性完成审计：普通修改需要针对性测试和相邻模块回归，高风险构建还需要集成、全量和 smoke 验证。缺少直接证据时运行状态会保留为 `blocked`，最终答复会列出验证缺口；Reviewer 的模型输出不能覆盖该审计结果。
 
+项目验证先通过 `discover_project_commands` 读取实际存在的 npm/pnpm/yarn/Python 命令，再用 `run_command` 的独立 `cwd` 执行。命令不经过 shell 拼接，`cd &&`、管道和重定向会被拒绝；轨迹记录参数、cwd、退出码、耗时和截断状态。Vite build 可使用自动清理的临时输出目录，参数或权限失败最多修正一次。
+
 多模型协作任务声明只读/写入/验证模式、依赖、验收标准、并行安全和共享绝对路径所有权。Worker 相对写入隔离在独立目录，越界写入会被拒绝；瞬时失败只重试目标任务，所有尝试的工具与验证结果都会进入主工程日志。
+
+MAO 会从目标项目按层级加载 `AGENTS.md`、`CLAUDE.md`、`.mao/rules/*.md`，并兼容 Grok/Claude/Cursor 的规则目录；来源和截断诊断写入 RunJournal。用户级 `config/permissions.yaml` 与项目级 `.mao/permissions.yaml` 支持 `deny / ask / allow`，固定按 `deny > ask > allow > 会话默认` 决策，主 Agent 和 Worker 使用同一引擎。规则可用 `justification` 说明理由，并用 `match` / `not_match` 示例在加载时自检；失败规则会被忽略并报告诊断。示例见 `config/permissions.yaml.example`。
+
+持久化 Plan 模式在批准前强制全链路只读。主 Agent 取得真实侦察证据后，由证据检查、架构规划、风险审查和最终综合四个模型角色形成唯一方案；辅助模型不获得工具。设计与后续路线见 [`docs/Grok-Build行为契约融合.md`](docs/Grok-Build行为契约融合.md)。
 
 后续上下文能力将按“模型窗口真值 → 动态安全预算 → 分层压缩 → 持久项目上下文 → 长任务基准”推进，详见 [`docs/上下文扩展与长任务稳定性计划.md`](docs/上下文扩展与长任务稳定性计划.md)。在上游限制未经确认前，默认预算保持 32K。
 
-项目已通过公开发布验收并发布 `v0.1.0-beta.3`。`beta.4`（工程透明度、会话恢复与长任务上下文）和 `beta.5`（模型路由、执行深度与真实基准）的范围已确定，预设模型目录已覆盖主流 Provider；详细执行顺序见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)，跨设备恢复入口见 [`docs/项目进度与关键操作.md`](docs/项目进度与关键操作.md)。
+公开版 `v0.1.0-beta.3` 已发布；当前 `beta.4` release candidate 已完成工程透明度、真实前端稳定性、会话恢复、分层压缩、增量项目索引与受限 Reviewer 的本地实现，等待远端 CI 和所有者发布确认。后续版本范围见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)，跨设备恢复入口见 [`docs/项目进度与关键操作.md`](docs/项目进度与关键操作.md)。
 
 ### 6. 打开 Web 对话页面
 
@@ -231,6 +242,7 @@ python scripts/run_ui.py
 - 支持 Markdown、代码块、工具调用结果和生成文件展示。
 - 主模型自动调用 `read_file` / `write_file` / `run_command` 工具。
 - 旧的同步接口 `POST /api/chat/sessions/{id}/messages` 仍然保留；新增流式接口 `POST /api/chat/sessions/{id}/messages/stream`。
+- 顶部 `Plan` 控件可进入全链路只读规划，查看方案后可修订、批准并实施或取消；状态会随会话持久化。
 
 ### 7. 切换总指挥模型
 
@@ -335,4 +347,4 @@ Worker 在执行任务时可以使用以下工具：
 
 ## 后续计划
 
-当前按 `beta.3` 至 `beta.6` 顺序推进，见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)。产品原则见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)，当前执行清单见 [`docs/Beta3-执行清单.md`](docs/Beta3-执行清单.md)。
+当前按 `beta.4` 至 `beta.6` 顺序推进，见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)。产品原则见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)，当前执行清单见 [`docs/Beta4-执行清单.md`](docs/Beta4-执行清单.md)。
