@@ -1,6 +1,6 @@
 # v0.1.0-beta.4 执行清单
 
-**状态**：本地 release candidate 已完成；等待所有者发布门（提交/推送、远端 CI、Tag 和 GitHub pre-release）
+**状态**：已完成；2026-07-19 发布 `v0.1.0-beta.4` pre-release
 
 **目标**：工程透明度、会话恢复与长任务上下文——用户无需询问模型，就能看懂任务计划、执行证据、验证结果、阻塞原因和上下文行为
 
@@ -260,8 +260,8 @@ Reviewer 对照需求与证据独立验证，不阅读 Worker 自述。
 - [x] 更新 `CHANGELOG.md`、版本号 `0.1.0b4`、`RELEASE_NOTES_v0.1.0-beta.4.md`。
 - [x] 全量测试、compileall、JavaScript 语法、diff hygiene、pip-audit、gitleaks 通过。
 - [x] 构建 wheel/sdist 并 `twine check`；空目录隔离安装与 `/health` 通过。
-- [ ] 远端 Windows/Ubuntu CI 通过。
-- [ ] 所有者单独确认后才创建 Tag 和 GitHub pre-release。
+- [x] 远端 Windows/Ubuntu CI 通过。
+- [x] 所有者确认后创建 Tag 和 GitHub pre-release。
 
 ### B4.7 本地完成记录（2026-07-18，2026-07-19 发布前复审）
 
@@ -272,7 +272,8 @@ Reviewer 对照需求与证据独立验证，不阅读 Worker 自述。
 - `scripts/verify_distribution.py` 通过：wheel/sdist 内容合同、`twine check`、不继承系统包的干净虚拟环境依赖安装、空目录 CLI 和 Web `/health` 均通过。
 - `pip-audit -r requirements.txt` 未发现已知漏洞。gitleaks 8.24.3 官方 SHA-256 校验通过；60 个历史提交、当前 tracked diff 以及新增源码/脚本/测试/文档/权限示例均未发现泄露。
 - Python compileall、JavaScript 语法和 `git diff --check` 已通过；版本与文档收口后的最终快速复验也已通过。
-- 远端 CI 尚未运行，因为 B4 工作树尚未提交和推送；此项不能以本地结果代替。
+- 首轮远端 CI 在 Ubuntu 暴露路径分隔符断言差异，在 Windows 3.12 暴露系统浏览器冷启动超时；`c0caecb` 统一诊断路径、固定安装 Chromium 并放宽公开回放的动作超时。
+- 修复后的 [CI 29672684859](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29672684859) 在 Windows/Ubuntu、Python 3.11/3.12 和 security job 全部通过。
 
 ### 发布前差异复审修复（2026-07-19）
 
@@ -293,7 +294,7 @@ Reviewer 对照需求与证据独立验证，不阅读 Worker 自述。
 
 ## 9. 当前下一步
 
-B4.1-B4.7、Grok Build 基础行为契约、上游吸收首切片和 B4.S1-B4.S6 的实现、发布前差异复审与本地验收已完成，最终基线为 `722 passed, 1 warning`。下一步由所有者确认提交边界并授权提交/推送；推送后等待远端 Windows/Ubuntu CI，全绿且再次确认后才创建 Tag 和 GitHub pre-release。
+B4.1-B4.7、Grok Build 基础行为契约、上游吸收首切片和 B4.S1-B4.S6 均已完成并发布。下一步进入 [`Beta5-执行清单.md`](Beta5-执行清单.md) 的 B5.1：先建立可复现基准合同和离线 harness，不先写未经数据验证的路由策略。
 
 ## 10. 使用反馈修复记录（2026-07-17 至 2026-07-18）
 

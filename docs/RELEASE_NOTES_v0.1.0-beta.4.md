@@ -1,6 +1,6 @@
 # MAO v0.1.0-beta.4 Release Notes
 
-This release candidate focuses on one outcome: multi-model engineering work should remain understandable, recoverable and verifiable across long sessions and real frontend builds.
+This release focuses on one outcome: multi-model engineering work should remain understandable, recoverable and verifiable across long sessions and real frontend builds.
 
 ## Highlights
 
@@ -16,7 +16,7 @@ This release candidate focuses on one outcome: multi-model engineering work shou
 
 ## Install
 
-After the owner publishes the tag:
+Install directly from the published tag:
 
 ```bash
 pipx install git+https://github.com/Wanbinyu/multi-agent-orchestrator.git@v0.1.0-beta.4
@@ -36,7 +36,7 @@ Python 3.11 or 3.12 is required. Runtime configuration, keys, sessions and index
 - `pip-audit -r requirements.txt` reports no known vulnerabilities. The checksum-verified gitleaks 8.24.3 scan reports no leaks across 60 historical commits, the tracked diff, or the new source, scripts, tests, documentation and permission example.
 - Python compileall, JavaScript syntax checks and diff hygiene pass locally.
 - Real paid Provider calls were not made during unattended acceptance.
-- Remote Windows/Ubuntu CI, Tag and GitHub pre-release remain owner-controlled release gates.
+- [Remote CI 29672684859](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29672684859) passed on Windows/Ubuntu with Python 3.11/3.12 plus the security job. The release fix pins the Playwright Chromium runtime and keeps diagnostic paths platform-independent.
 
 ## Known Limitations
 

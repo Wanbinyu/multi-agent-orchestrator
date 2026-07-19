@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB)
-![Status](https://img.shields.io/badge/status-v0.1.0--beta.4%20RC-f59e0b)
+![Status](https://img.shields.io/badge/status-v0.1.0--beta.4-2ea44f)
 
 MAO 面向需要接入多个模型服务的开发者：它在 CLI 和 WebUI 中执行工程任务，并用明确的读写边界、工具证据、验证门和有界 Worker 协作约束模型行为。核心目标不是单纯增加并发，而是在选择不同模型能力与成本的同时，让使用者知道系统做了什么、为什么能结束、还有哪些风险。
 
-当前公开版本为 [`v0.1.0-beta.3`](https://github.com/Wanbinyu/multi-agent-orchestrator/releases/tag/v0.1.0-beta.3)；当前源码为 `v0.1.0-beta.4` release candidate，等待远端 CI 与所有者发布确认。它适合在可信本机和可审查项目中试用，不是 Claude Code、Codex 或容器沙箱的完整替代品。
+当前公开版本为 [`v0.1.0-beta.4`](https://github.com/Wanbinyu/multi-agent-orchestrator/releases/tag/v0.1.0-beta.4)；主分支开始进入 `beta.5` 的可复现基准与模型路由阶段。它适合在可信本机和可审查项目中试用，不是 Claude Code、Codex 或容器沙箱的完整替代品。
 
 ## 为什么做 MAO
 
@@ -226,7 +226,7 @@ MAO 会从目标项目按层级加载 `AGENTS.md`、`CLAUDE.md`、`.mao/rules/*.
 
 后续上下文能力将按“模型窗口真值 → 动态安全预算 → 分层压缩 → 持久项目上下文 → 长任务基准”推进，详见 [`docs/上下文扩展与长任务稳定性计划.md`](docs/上下文扩展与长任务稳定性计划.md)。在上游限制未经确认前，默认预算保持 32K。
 
-公开版 `v0.1.0-beta.3` 已发布；当前 `beta.4` release candidate 已完成工程透明度、真实前端稳定性、会话恢复、分层压缩、增量项目索引与受限 Reviewer 的本地实现，等待远端 CI 和所有者发布确认。后续版本范围见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)，跨设备恢复入口见 [`docs/项目进度与关键操作.md`](docs/项目进度与关键操作.md)。
+公开版 `v0.1.0-beta.4` 已完成工程透明度、真实前端稳定性、会话恢复、分层压缩、增量项目索引与受限 Reviewer；Windows/Ubuntu、Python 3.11/3.12 和安全 CI 全部通过。下一阶段先建立可复现工程基准，再基于证据实现执行深度与模型路由。后续版本范围见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)，跨设备恢复入口见 [`docs/项目进度与关键操作.md`](docs/项目进度与关键操作.md)。
 
 ### 6. 打开 Web 对话页面
 
@@ -347,4 +347,4 @@ Worker 在执行任务时可以使用以下工具：
 
 ## 后续计划
 
-当前按 `beta.4` 至 `beta.6` 顺序推进，见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)。产品原则见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)，当前执行清单见 [`docs/Beta4-执行清单.md`](docs/Beta4-执行清单.md)。
+当前按 `beta.5`、`beta.6` 顺序推进，见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)。产品原则见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)，当前执行清单见 [`docs/Beta5-执行清单.md`](docs/Beta5-执行清单.md)。

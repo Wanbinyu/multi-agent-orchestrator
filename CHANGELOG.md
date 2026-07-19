@@ -4,7 +4,9 @@ All notable changes are documented here. MAO follows Semantic Versioning; beta r
 
 ## [Unreleased]
 
-Target release: `v0.1.0-beta.4` (release candidate; Tag and GitHub pre-release require owner confirmation).
+Next target: `v0.1.0-beta.5` (routing, execution depth, and reproducible benchmarks).
+
+## [0.1.0-beta.4] - 2026-07-19
 
 ### Added
 
