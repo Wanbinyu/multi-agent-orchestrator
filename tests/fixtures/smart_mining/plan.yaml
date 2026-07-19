@@ -55,7 +55,7 @@ frontend_contract:
     layout_pairs:
       - {first_selector: aside, second_selector: main}
     startup_timeout_seconds: 10
-    action_timeout_seconds: 3
+    action_timeout_seconds: 8
 tasks:
   - id: architecture
     type: architect

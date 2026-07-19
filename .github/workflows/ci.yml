@@ -45,6 +45,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]" build wheel "setuptools>=77"
+      - name: Install browser runtime
+        run: |
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            python -m playwright install --with-deps chromium
+          else
+            python -m playwright install chromium
+          fi
       # Private runtime configs are gitignored; seed examples so fresh clones
       # and CI match a first-time contributor checkout.
       - name: Seed example configs

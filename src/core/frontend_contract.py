@@ -209,14 +209,17 @@ def _reachable_source_files(
         try:
             content = current.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            issues.append(f"无法读取源码 {current.relative_to(root)}：{exc}")
+            issues.append(
+                f"无法读取源码 {current.relative_to(root).as_posix()}：{exc}"
+            )
             continue
         for match in _IMPORT_PATTERN.finditer(content):
             import_path = match.group("path")
             resolved = _resolve_local_import(current.parent, import_path)
             if resolved is None or not _is_relative_to(resolved, root):
                 issues.append(
-                    f"错误导入：{current.relative_to(root)} -> {import_path}"
+                    "错误导入："
+                    f"{current.relative_to(root).as_posix()} -> {import_path}"
                 )
             else:
                 queue.append(resolved)
@@ -254,7 +257,9 @@ def _check_html_references(root: Path, html_file: Path, issues: list[str]) -> No
     try:
         parser.feed(html_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
-        issues.append(f"无法读取 HTML {html_file.relative_to(root)}：{exc}")
+        issues.append(
+            f"无法读取 HTML {html_file.relative_to(root).as_posix()}：{exc}"
+        )
         return
     for reference in parser.references:
         if reference.startswith(("http://", "https://", "//", "data:", "#")):
@@ -264,10 +269,14 @@ def _check_html_references(root: Path, html_file: Path, issues: list[str]) -> No
         resolved = target.resolve()
         if not _is_relative_to(resolved, root):
             issues.append(
-                f"HTML 资源越出项目根：{html_file.relative_to(root)} -> {reference}"
+                "HTML 资源越出项目根："
+                f"{html_file.relative_to(root).as_posix()} -> {reference}"
             )
         elif not resolved.is_file():
-            issues.append(f"HTML 资源不存在：{html_file.relative_to(root)} -> {reference}")
+            issues.append(
+                "HTML 资源不存在："
+                f"{html_file.relative_to(root).as_posix()} -> {reference}"
+            )
 
 
 def _within_root(root: Path, relative: str) -> Path | None:

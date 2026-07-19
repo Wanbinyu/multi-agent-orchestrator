@@ -148,7 +148,7 @@ def test_frontend_closure_reports_missing_page_and_wrong_import(tmp_path):
     issues = verify_frontend_closure(_contract(str(tmp_path)))
 
     assert "路由 /monitor 的目标不存在：src/pages/Monitor.tsx" in issues
-    assert "错误导入：src\\main.tsx -> ./MissingApp" in issues
+    assert "错误导入：src/main.tsx -> ./MissingApp" in issues
     assert "package.json 缺少合同依赖：react" in issues
 
 
