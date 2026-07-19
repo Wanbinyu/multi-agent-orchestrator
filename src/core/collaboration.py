@@ -7,6 +7,9 @@ from pathlib import Path
 from src.models.schemas import Task, TaskPlan
 
 
+MAX_COLLABORATION_TASKS = 24
+
+
 class CollaborationPlanError(ValueError):
     """协作计划违反确定性执行边界。"""
 
@@ -27,6 +30,10 @@ def normalize_task_contract(task: Task) -> Task:
 def validate_collaboration_plan(plan: TaskPlan) -> None:
     """拒绝重复 ID、无效依赖、依赖环和并行文件所有权冲突。"""
     tasks = plan.tasks
+    if len(tasks) > MAX_COLLABORATION_TASKS:
+        raise CollaborationPlanError(
+            f"协作计划包含 {len(tasks)} 个子任务，超过上限 {MAX_COLLABORATION_TASKS}"
+        )
     ids = [task.id for task in tasks]
     duplicates = sorted({task_id for task_id in ids if ids.count(task_id) > 1})
     if duplicates:

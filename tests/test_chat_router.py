@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from src.core.engineering import RunJournalStore, WorkPlan, WorkPlanStep
 from src.gateway.errors import ProviderError
 from src.models.schemas import ChatResponse, ModelConfig
 from src.ui.app import app
@@ -46,6 +47,117 @@ def test_chat_page(client):
     assert 'id="tab-files"' in r.text
     assert 'id="project-tree"' in r.text
     assert 'id="file-preview"' in r.text
+    assert 'id="btn-plan-mode"' in r.text
+    assert 'id="plan-mode-panel"' in r.text
+    assert 'id="recovery-banner"' in r.text
+    assert 'id="btn-recovery-continue"' in r.text
+
+
+def test_permission_response_rejects_unknown_request(client):
+    agent = MagicMock()
+    agent.respond_to_permission.return_value = False
+    chat_router.active_agents["active-session"] = agent
+    try:
+        response = client.post(
+            "/api/chat/sessions/active-session/permission/missing",
+            json={"approved": True},
+        )
+    finally:
+        chat_router.active_agents.pop("active-session", None)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "权限请求不存在或已经处理"
+
+
+def test_plan_mode_api_persists_revision_and_approval_handoff(client):
+    created = client.post("/api/chat/sessions", json={"title": "plan"}).json()
+    session_id = created["session_id"]
+    endpoint = f"/api/chat/sessions/{session_id}/plan"
+
+    entered = client.post(
+        endpoint, json={"action": "enter", "objective": "refactor auth"}
+    )
+    assert entered.status_code == 200
+    assert entered.json()["state"] == "pending"
+    assert client.get(endpoint).json()["artifact"]["objective"] == "refactor auth"
+
+    session = chat_router.store.load(session_id)
+    session.activate_plan_mode()
+    session.save_plan_artifact("1. inspect\n2. implement\n3. test")
+    chat_router.store.save(session)
+
+    revised = client.post(
+        endpoint, json={"action": "revise", "feedback": "add rollback"}
+    )
+    assert revised.status_code == 200
+    assert revised.json()["state"] == "active"
+
+    session = chat_router.store.load(session_id)
+    session.save_plan_artifact("final approved plan")
+    chat_router.store.save(session)
+    approved = client.post(endpoint, json={"action": "approve"})
+
+    assert approved.status_code == 200
+    payload = approved.json()
+    assert payload["state"] == "inactive"
+    assert "final approved plan" in payload["implementation_request"]
+
+
+def test_plan_mode_api_rejects_invalid_transition(client):
+    created = client.post("/api/chat/sessions", json={"title": "plan"}).json()
+    response = client.post(
+        f"/api/chat/sessions/{created['session_id']}/plan",
+        json={"action": "approve"},
+    )
+    assert response.status_code == 409
+
+
+def test_interrupted_web_session_requires_explicit_recovery_without_provider(client):
+    created = client.post("/api/chat/sessions", json={"title": "recovery"}).json()
+    session_id = created["session_id"]
+    session = chat_router.store.load(session_id)
+    runs = RunJournalStore.from_output_dir(session.output_dir)
+    interrupted = runs.create(session_id, "build app", "auto")
+    interrupted.plan = WorkPlan(
+        objective="build app",
+        status="in_progress",
+        steps=[
+            WorkPlanStep(id="done", title="shell", status="completed"),
+            WorkPlanStep(id="todo", title="routes", status="in_progress"),
+        ],
+    )
+    interrupted.files_changed = ["src/shell.js"]
+    runs.save(interrupted)
+
+    detail = client.get(f"/api/chat/sessions/{session_id}")
+    blocked_send = client.post(
+        f"/api/chat/sessions/{session_id}/messages", json={"message": "继续"}
+    )
+    blocked_stream = client.post(
+        f"/api/chat/sessions/{session_id}/messages/stream", json={"message": "继续"}
+    )
+
+    assert detail.json()["recovery"]["required"] is True
+    assert detail.json()["recovery"]["unfinished_step_count"] == 1
+    assert blocked_send.status_code == 409
+    assert blocked_stream.status_code == 409
+    chat_router.gateway.chat_with_main_model.assert_not_called()
+
+    confirmed = client.post(
+        f"/api/chat/sessions/{session_id}/recovery", json={"action": "continue"}
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["recovery"]["required"] is False
+    chat_router.gateway.chat_with_main_model.assert_not_called()
+
+    continued = client.post(
+        f"/api/chat/sessions/{session_id}/messages", json={"message": "继续完成路由"}
+    )
+    assert continued.status_code == 200
+    latest = runs.load(continued.json()["run_id"])
+    assert latest.metrics["recovery"]["completed_step_ids"] == ["done"]
+    assert latest.metrics["recovery"]["unfinished_step_ids"] == ["todo"]
+    assert chat_router.gateway.chat_with_main_model.call_count == 1
 
 
 def test_project_directory_is_sorted_and_ignores_heavy_directories(client, tmp_path):
@@ -187,7 +299,9 @@ def test_send_message(client):
     assert data["input_tokens"] == 10
     assert data["run_id"]
     assert data["engineering"]["intent"]["kind"] == "unclassified"
-    assert data["engineering"]["intent"]["policy"]["allow_project_writes"] is False
+    policy = data["engineering"]["intent"]["policy"]
+    assert policy["allow_project_writes"] is False
+    assert policy["permission_follows_session"] is True
 
     runs = client.get(f"/api/chat/sessions/{session_id}/runs")
     detail = client.get(
@@ -269,6 +383,25 @@ def test_run_journal_routes_report_missing_records(client):
     assert missing_session.status_code == 404
 
 
+def test_delivery_report_route_aggregates_all_session_runs_locally(client):
+    created = client.post("/api/chat/sessions", json={"title": "report"}).json()
+    session_id = created["session_id"]
+    session = chat_router.store.load(session_id)
+    run_store = RunJournalStore.from_output_dir(session.output_dir)
+    journal = run_store.create(session_id, "检查项目", "auto")
+    journal.finish("completed", metrics={"input_tokens": 12, "output_tokens": 3})
+    run_store.save(journal)
+
+    response = client.get(f"/api/chat/sessions/{session_id}/report?scope=session")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scope"] == "session"
+    assert payload["run_count"] == 1
+    assert payload["metrics"]["input_tokens"] == 12
+    assert payload["runs"][0]["run_id"] == journal.run_id
+
+
 def test_send_message_not_found(client):
     r = client.post(
         "/api/chat/sessions/nonexistent/messages",
@@ -292,3 +425,46 @@ def test_delete_session(client):
 def test_delete_session_not_found(client):
     r = client.delete("/api/chat/sessions/nonexistent")
     assert r.status_code == 404
+
+
+def test_active_session_rejects_parallel_messages_and_delete(client):
+    created = client.post("/api/chat/sessions", json={"title": "active"}).json()
+    session_id = created["session_id"]
+    chat_router.active_agents[session_id] = MagicMock()
+    try:
+        sync_response = client.post(
+            f"/api/chat/sessions/{session_id}/messages",
+            json={"message": "second"},
+        )
+        stream_response = client.post(
+            f"/api/chat/sessions/{session_id}/messages/stream",
+            json={"message": "second"},
+        )
+        delete_response = client.delete(f"/api/chat/sessions/{session_id}")
+    finally:
+        chat_router.active_agents.pop(session_id, None)
+
+    assert sync_response.status_code == 409
+    assert stream_response.status_code == 409
+    assert delete_response.status_code == 409
+    assert chat_router.store.exists(session_id)
+
+
+def test_mode_update_persists_on_active_agent_session(client):
+    created = client.post("/api/chat/sessions", json={"title": "mode"}).json()
+    session_id = created["session_id"]
+    active = MagicMock()
+    active.session = chat_router.store.load(session_id)
+    chat_router.active_agents[session_id] = active
+    try:
+        response = client.post(
+            f"/api/chat/sessions/{session_id}/mode",
+            json={"mode": "auto"},
+        )
+    finally:
+        chat_router.active_agents.pop(session_id, None)
+
+    assert response.status_code == 200
+    assert active.approval_mode == "auto"
+    assert active.session.approval_mode == "auto"
+    assert chat_router.store.load(session_id).approval_mode == "auto"

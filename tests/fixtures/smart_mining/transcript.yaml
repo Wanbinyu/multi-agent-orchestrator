@@ -1,0 +1,18 @@
+fixture_id: smart-mining-public-v1
+request: 我现在接了一个智慧矿区的项目，现在给我做一个纯前端的项目。
+expected_intent:
+  kind: build
+  risk_level: high
+  verification_depth: deep
+expected_routes:
+  - /overview
+  - /monitor
+  - /alerts
+  - /devices
+  - /architecture
+  - /events
+  - /timeline
+redaction:
+  contains_private_paths: false
+  contains_credentials: false
+  contains_provider_payloads: false

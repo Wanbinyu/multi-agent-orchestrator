@@ -88,6 +88,7 @@ def test_send_message_stream(client):
         intent = engineering[0]["engineering"]["intent"]
         assert intent["kind"] == "unclassified"
         assert intent["policy"]["allow_project_writes"] is False
+        assert intent["policy"]["permission_follows_session"] is True
 
         done = [d for e, d in events if e == "done"][0]
         assert done["assistant_message"] == "收到"

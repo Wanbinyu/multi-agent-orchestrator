@@ -53,6 +53,10 @@ jobs:
           test -f config/workers.yaml || cp config/workers.yaml.example config/workers.yaml
       - name: Tests
         run: python -m pytest -q
+      - name: Offline smart-mining stability gate
+        run: python scripts/replay_smart_mining.py
+      - name: Offline layered-context benchmark
+        run: python scripts/bench_compaction.py
       - name: Python syntax
         run: python -m compileall -q src tests scripts run.py
       - name: JavaScript syntax
@@ -92,7 +96,10 @@ jobs:
         run: |
           set -euo pipefail
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          checksums="gitleaks_${GITLEAKS_VERSION}_checksums.txt"
           curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "${archive}"
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${checksums}" -o "${checksums}"
+          grep " ${archive}$" "${checksums}" | sha256sum -c -
           tar -xzf "${archive}" gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version

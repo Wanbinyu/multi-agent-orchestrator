@@ -120,3 +120,33 @@ def test_load_missing_session_raises(tmp_path):
     store = SessionStore(base_dir=str(tmp_path))
     with pytest.raises(FileNotFoundError):
         store.load("not-exist")
+
+
+def test_plan_mode_state_persists_and_requires_approval(tmp_path):
+    store = SessionStore(base_dir=str(tmp_path))
+    session = store.create("plan")
+
+    session.enter_plan_mode("refactor auth")
+    session.activate_plan_mode()
+    session.save_plan_artifact("1. inspect\n2. implement\n3. test")
+    store.save(session)
+    loaded = store.load(session.id)
+
+    assert loaded.plan_mode == "awaiting_approval"
+    assert loaded.plan_artifact is not None
+    assert loaded.plan_artifact.revision == 1
+    assert loaded.approve_plan().startswith("1. inspect")
+    assert loaded.plan_mode == "inactive"
+
+
+def test_plan_revision_returns_to_active_state(tmp_path):
+    store = SessionStore(base_dir=str(tmp_path))
+    session = store.create("plan")
+    session.enter_plan_mode("build")
+    session.save_plan_artifact("draft")
+
+    session.request_plan_revision("add rollback")
+
+    assert session.plan_mode == "active"
+    assert session.plan_artifact is not None
+    assert session.plan_artifact.feedback == "add rollback"

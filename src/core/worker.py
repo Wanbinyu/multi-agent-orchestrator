@@ -4,24 +4,37 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, MutableMapping
 
 import yaml
 
 from src.core.collaboration import is_write_path_allowed
 from src.core.config_paths import resolve_workers_config_path
+from src.core.engineering.evidence import file_mutation_metadata
+from src.core.frontend_contract import (
+    validate_integration_tool_evidence,
+    verify_frontend_closure,
+)
 from src.core.native_content import (
     attach_tool_use_ids,
     native_tool_specs,
     tool_result_blocks,
 )
+from src.core.permission_rules import PermissionRuleEngine
 from src.gateway.client import GatewayClient
 from src.models.schemas import ChatMessage, Task, TaskResult
+from src.models.schemas import ApprovalMode
 from src.tools.file_tools import write_text_file
 from src.tools.read_cache import build_read_cache_key, should_invalidate_read_cache
 from src.tools.registry import tool_registry
 from src.tools.tool_result import ToolResult
-from src.tools.worker_tools import execute_tool_call
+from src.tools.worker_tools import (
+    COMMAND_PERMISSION_GUIDANCE,
+    command_correction_exhausted,
+    command_correction_limit_result,
+    execute_tool_call,
+    record_command_preflight_failure,
+)
 
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]
@@ -30,10 +43,21 @@ ProgressCallback = Callable[[str, dict[str, Any]], None]
 class Worker:
     """执行单一子任务"""
 
-    def __init__(self, gateway: GatewayClient, workers_config: dict, max_tool_iterations: int = 5):
+    def __init__(
+        self,
+        gateway: GatewayClient,
+        workers_config: dict,
+        max_tool_iterations: int = 5,
+        project_rules: str = "",
+        permission_engine: PermissionRuleEngine | None = None,
+        approval_mode: ApprovalMode = "auto",
+    ):
         self.gateway = gateway
         self.workers_config = workers_config
         self.max_tool_iterations = max_tool_iterations
+        self.project_rules = project_rules.strip()
+        self.permission_engine = permission_engine or PermissionRuleEngine()
+        self.approval_mode = approval_mode
 
     def execute(
         self,
@@ -54,6 +78,8 @@ class Worker:
             )
 
         system_prompt = worker_cfg.get("system_prompt", "")
+        if self.project_rules:
+            system_prompt = f"{system_prompt}\n\n{self.project_rules}".strip()
         tools = _expand_legacy_read_tools(worker_cfg.get("tools", ["write_file"]))
         if task.execution_mode == "read":
             tools = [
@@ -92,6 +118,16 @@ class Worker:
 执行模式：{task.execution_mode}
 共享绝对路径所有权：{", ".join(task.owned_paths) or "无；只允许写入隔离任务目录"}
 """
+        if task.frontend_contract is not None:
+            user_content += (
+                "\n前端构建合同（必须逐项验证，不能用文字自述代替命令证据）：\n"
+                + json.dumps(
+                    task.frontend_contract.model_dump(),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n"
+            )
         if context:
             context_lines = ["\n前置任务输出（供参考）："]
             for dep_id, dep_content in context.items():
@@ -110,6 +146,7 @@ class Worker:
 - 分析项目时先用 project_tree 获取精简结构，再读取入口、依赖、配置、核心模块和测试文件；默认最多读取 12 个不同文件，禁止无差别读取全部文件。
 - 项目分析文本默认控制在 3000 个汉字以内，必须完整覆盖结构、发现、实施阶段、风险和验收；宁可压缩细节也不能中途结束，证据不足的内容标记为“待确认”。
 - 工具执行结果会返回给你；收到结果后必须继续完成任务，不能停在工具调用。
+- 执行项目命令前先用 discover_project_commands 发现真实脚本；run_command 使用独立 cwd，禁止 cd &&、管道、重定向或 head。参数/权限失败后最多修正一次。
 - 任务需要创建或修改文件时，必须使用 write_file/edit_file，并使用有意义的文件名。
 - 只能写入当前隔离任务目录，或 owned_paths 明确声明的共享绝对路径；禁止修改其他 Worker 的文件。
 - 禁止只在正文中输出代码块代替写文件；正文代码块不会自动生成项目文件。
@@ -134,6 +171,7 @@ class Worker:
             requires_file_output = _task_requires_file_output(task)
             read_cache: dict[str, ToolResult] = {}
             tool_trace: list[dict[str, Any]] = []
+            command_state: dict[str, Any] = {"preflight_failures": 0}
 
             while True:
                 response = self.gateway.chat(
@@ -156,6 +194,9 @@ class Worker:
                     allowed_tools=tools,
                     read_cache=read_cache,
                     task=task,
+                    permission_engine=self.permission_engine,
+                    approval_mode=self.approval_mode,
+                    command_state=command_state,
                 )
                 native_specs = native_tool_specs(response.content_blocks)
                 attach_tool_use_ids(tool_results, native_specs)
@@ -274,6 +315,40 @@ class Worker:
                     acceptance_evidence=_acceptance_evidence(files_written, tool_trace),
                 )
 
+            acceptance_evidence = _acceptance_evidence(files_written, tool_trace)
+            if task.frontend_stage == "integration":
+                if task.frontend_contract is None:
+                    return TaskResult(
+                        task=task,
+                        success=False,
+                        content=final_content,
+                        error="integration Worker 缺少 frontend_contract，不能完成验收",
+                        response=aggregate_response,
+                        files_written=files_written,
+                        tool_calls=tool_trace,
+                        acceptance_evidence=acceptance_evidence,
+                    )
+                integration_issues = [
+                    *verify_frontend_closure(task.frontend_contract),
+                    *validate_integration_tool_evidence(
+                        task.frontend_contract, tool_trace
+                    ),
+                ]
+                if integration_issues:
+                    return TaskResult(
+                        task=task,
+                        success=False,
+                        content=final_content,
+                        error="前端集成验收失败：" + "；".join(integration_issues),
+                        response=aggregate_response,
+                        files_written=files_written,
+                        tool_calls=tool_trace,
+                        acceptance_evidence=acceptance_evidence,
+                    )
+                acceptance_evidence.append(
+                    "前端闭包通过：入口、路由、依赖和相对导入均可解析"
+                )
+
             return TaskResult(
                 task=task,
                 success=True,
@@ -281,7 +356,7 @@ class Worker:
                 response=aggregate_response,
                 files_written=files_written,
                 tool_calls=tool_trace,
-                acceptance_evidence=_acceptance_evidence(files_written, tool_trace),
+                acceptance_evidence=acceptance_evidence,
             )
         except Exception as e:
             return TaskResult(
@@ -331,7 +406,14 @@ def _expand_legacy_read_tools(tools: list[str]) -> list[str]:
     """旧配置已授予读取能力时，补齐新的只读目录工具。"""
     expanded = list(dict.fromkeys(tools))
     if any(name in expanded for name in ("read_file", "search_project_files", "search_memory")):
-        for name in ("project_tree", "list_dir", "glob_files", "grep_content", "read_file"):
+        for name in (
+            "project_tree",
+            "list_dir",
+            "glob_files",
+            "grep_content",
+            "read_file",
+            "discover_project_commands",
+        ):
             if name not in expanded:
                 expanded.append(name)
     return expanded
@@ -398,6 +480,9 @@ def process_tool_calls(
     allowed_tools: list[str] | None = None,
     read_cache: dict[str, ToolResult] | None = None,
     task: Task | None = None,
+    permission_engine: PermissionRuleEngine | None = None,
+    approval_mode: ApprovalMode = "auto",
+    command_state: MutableMapping[str, Any] | None = None,
 ) -> tuple[str, list[dict]]:
     """解析并执行工具调用，返回处理后的内容和工具结果列表"""
     pattern = r"```tool:(\w+)\n(.*?)(?:```|<\|tool_calls_section_end\|>|$)"
@@ -427,10 +512,37 @@ def process_tool_calls(
             })
             return f"\n[工具调用参数解析失败：{e}]\n"
 
+        if tool_name == "run_command" and command_correction_exhausted(command_state):
+            result = command_correction_limit_result(str(params.get("cwd", ".")))
+            tool_results.append({
+                "tool": tool_name,
+                "params": params,
+                "success": False,
+                "output": result.output,
+                "error": result.error,
+                "cached": False,
+                "metadata": result.metadata,
+            })
+            return f"\n[工具 {tool_name} 被拒绝：{result.error}]\n"
+
         tool_spec = tool_registry.get(tool_name)
         category = tool_spec.category if tool_spec else "unknown"
-        if task is not None and task.execution_mode == "read" and category != "read":
-            error = f"只读子任务禁止执行 {category} 工具：{tool_name}"
+        engine = permission_engine or PermissionRuleEngine(workspace=base_dir)
+        decision = engine.decide(
+            tool_name,
+            params,
+            category=category,
+            approval_mode=approval_mode,
+            hard_read_only=(task is not None and task.execution_mode == "read"),
+        )
+        if decision.action != "allow":
+            error = (
+                f"权限规则拒绝：{decision.reason}"
+                if decision.action == "deny"
+                else f"权限规则要求用户确认，Worker 不得自行批准：{decision.reason}"
+            )
+            if tool_name == "run_command":
+                error = f"{error}；{COMMAND_PERMISSION_GUIDANCE}"
             tool_results.append({
                 "tool": tool_name,
                 "params": params,
@@ -438,7 +550,13 @@ def process_tool_calls(
                 "output": "",
                 "error": error,
                 "cached": False,
+                "permission": decision.summary(),
+                "metadata": {"error_code": "permission_denied"},
             })
+            if tool_name == "run_command":
+                record_command_preflight_failure(
+                    command_state, {"error_code": "permission_denied"}
+                )
             return f"\n[工具 {tool_name} 被拒绝：{error}]\n"
         if (
             task is not None
@@ -458,6 +576,7 @@ def process_tool_calls(
 
         cache_key = build_read_cache_key(tool_name, params, base_dir)
         cached = bool(read_cache is not None and cache_key in read_cache)
+        mutation_metadata = file_mutation_metadata(tool_name, params, base_dir)
         if cached:
             result = read_cache[cache_key]  # type: ignore[index]
         else:
@@ -466,6 +585,7 @@ def process_tool_calls(
                 read_cache[cache_key] = result
             if read_cache is not None and should_invalidate_read_cache(tool_name):
                 read_cache.clear()
+        cached = cached or bool(result.metadata.get("cached"))
         tool_results.append({
             "tool": tool_name,
             "params": params,
@@ -473,7 +593,12 @@ def process_tool_calls(
             "output": result.output,
             "error": result.error,
             "cached": cached,
+            "mutation_metadata": mutation_metadata,
+            "metadata": result.metadata,
+            "permission": decision.summary(),
         })
+        if tool_name == "run_command" and not result.success:
+            record_command_preflight_failure(command_state, result.metadata)
 
         output_lines = [f"\n[工具 {tool_name} 执行结果]"]
         if result.success:
@@ -492,11 +617,18 @@ def _acceptance_evidence(
 ) -> list[str]:
     evidence = [f"写入文件：{path}" for path in files_written]
     for call in tool_trace:
+        if call.get("tool") == "frontend_smoke" and call.get("success"):
+            evidence.append("浏览器 smoke 通过：桌面与移动视口")
+            continue
         if call.get("tool") != "run_command" or not call.get("success"):
             continue
         command = str((call.get("params") or {}).get("command", ""))
+        cwd = str((call.get("metadata") or {}).get("cwd", ""))
         output = str(call.get("output", "")).strip().replace("\n", " ")[:200]
-        evidence.append(f"验证命令通过：{command}" + (f" | {output}" if output else ""))
+        command_label = f"{command} (cwd: {cwd})" if cwd else command
+        evidence.append(
+            f"验证命令通过：{command_label}" + (f" | {output}" if output else "")
+        )
     return evidence
 
 

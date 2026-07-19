@@ -84,7 +84,25 @@ class VerificationTracker:
         cached: bool = False,
         skipped: bool = False,
     ) -> bool:
-        if cached or skipped or tool_name != "run_command":
+        if cached or skipped or tool_name not in {"run_command", "frontend_smoke"}:
+            return False
+        if tool_name == "frontend_smoke":
+            evidence_ids = [
+                item.id
+                for item in journal.evidence
+                if item.tool_name == tool_name
+            ][-1:]
+            return self._add_gate(
+                journal,
+                "smoke",
+                "frontend_smoke",
+                result,
+                evidence_ids=evidence_ids,
+            )
+        if (
+            result.metadata.get("error_code")
+            and result.metadata.get("exit_code") is None
+        ):
             return False
         command = str(params.get("command", ""))
         check_type = classify_test_command(command)
@@ -95,12 +113,16 @@ class VerificationTracker:
             for item in journal.evidence
             if item.tool_name == tool_name and item.command == command
         ][-1:]
+        resolved_cwd = str(result.metadata.get("cwd") or params.get("cwd") or "")
+        command_record = (
+            f"{command} (cwd: {resolved_cwd})" if resolved_cwd else command
+        )
         changed = self._add_gate(
-            journal, check_type, command, result, evidence_ids=evidence_ids
+            journal, check_type, command_record, result, evidence_ids=evidence_ids
         )
         if check_type == "targeted" and _has_adjacent_targets(command):
             changed = self._add_gate(
-                journal, "adjacent", command, result, evidence_ids=evidence_ids
+                journal, "adjacent", command_record, result, evidence_ids=evidence_ids
             ) or changed
         return changed
 
@@ -120,7 +142,11 @@ class VerificationTracker:
             VerificationGate(
                 requirement=verification_label(check_type),
                 command_or_check=command,
-                expected="命令退出码为 0",
+                expected=(
+                    "浏览器 smoke 报告通过"
+                    if check_type == "smoke" and command == "frontend_smoke"
+                    else "命令退出码为 0"
+                ),
                 actual=actual,
                 passed=result.success,
                 check_type=check_type,

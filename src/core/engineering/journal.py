@@ -41,7 +41,7 @@ class RunJournalStore:
         if resolved_intent.kind == "unclassified":
             decision = (
                 f"Phase 7.1 未能稳定分类；按会话权限模式 {approval_mode} "
-                "和保守只读策略记录边界。"
+                "决定工具执行，工程验证仍按未分类边界记录。"
             )
         else:
             access = (

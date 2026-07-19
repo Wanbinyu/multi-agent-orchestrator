@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -10,7 +10,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.core.agent import Agent, AgentTurnResult
-from src.core.engineering import RunJournalStore
+from src.core.engineering import (
+    DeliveryReportBuilder,
+    RecoveryConfirmationRequired,
+    RunJournalStore,
+    SessionRecoveryManager,
+    load_today_journals,
+)
 from src.core.session import Session, SessionStore
 from src.gateway.client import GatewayClient
 from src.gateway.errors import ProviderError
@@ -65,6 +71,16 @@ class UpdateModeForm(BaseModel):
 
 class PermissionResponseForm(BaseModel):
     approved: bool
+
+
+class UpdatePlanModeForm(BaseModel):
+    action: Literal["enter", "revise", "approve", "cancel"]
+    objective: str = ""
+    feedback: str = ""
+
+
+class UpdateRecoveryForm(BaseModel):
+    action: Literal["continue", "abandon"]
 
 
 class ProjectDirectoryForm(BaseModel):
@@ -213,13 +229,39 @@ def get_session(session_id: str) -> dict[str, Any]:
         session = store.load(session_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    recovery = SessionRecoveryManager(session).inspect()
     return {
         "id": session.id,
         "title": session.title,
         "created_at": session.created_at,
         "updated_at": session.updated_at,
         "approval_mode": session.approval_mode,
+        "plan_mode": session.plan_mode,
+        "plan_artifact": session.plan_artifact.model_dump() if session.plan_artifact else None,
+        "recovery": recovery.public_payload(),
         "messages": [m.model_dump() for m in session.messages],
+    }
+
+
+@router.post("/api/chat/sessions/{session_id}/recovery")
+def update_session_recovery(
+    session_id: str, form: UpdateRecoveryForm
+) -> dict[str, Any]:
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if session_id in active_agents:
+        raise HTTPException(status_code=409, detail="会话仍有活跃请求，不能执行恢复决定")
+    manager = SessionRecoveryManager(session)
+    try:
+        manager.decide(form.action)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    store.save(session)
+    return {
+        "success": True,
+        "recovery": manager.inspect().public_payload(),
     }
 
 
@@ -266,13 +308,41 @@ def get_session_run(session_id: str, run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/api/chat/sessions/{session_id}/report")
+def get_session_delivery_report(
+    session_id: str,
+    scope: Literal["session", "today"] = "session",
+) -> dict[str, Any]:
+    """Return a local evidence report without invoking a Provider."""
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if scope == "today":
+        sessions_root = Path(session.output_dir).resolve().parent.parent
+        journals = load_today_journals(sessions_root)
+        report = DeliveryReportBuilder().build(journals, scope="today")
+    else:
+        journals = RunJournalStore.from_output_dir(session.output_dir).list()
+        report = DeliveryReportBuilder().build(
+            journals, scope="session", session_id=session.id
+        )
+    return report.model_dump()
+
+
 @router.post("/api/chat/sessions/{session_id}/messages")
 def send_message(session_id: str, form: SendMessageForm) -> dict[str, Any]:
     try:
         session = store.load(session_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    if session_id in active_agents:
+        raise HTTPException(status_code=409, detail="会话已有活跃请求，请等待其结束")
 
+    try:
+        SessionRecoveryManager(session).require_ready()
+    except RecoveryConfirmationRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     agent = Agent(_get_gateway(), session)
     try:
         result = agent.run_turn(form.message)
@@ -289,7 +359,13 @@ async def send_message_stream(session_id: str, form: SendMessageForm):
         session = store.load(session_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    if session_id in active_agents:
+        raise HTTPException(status_code=409, detail="会话已有活跃请求，请等待其结束")
 
+    try:
+        SessionRecoveryManager(session).require_ready()
+    except RecoveryConfirmationRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     agent = Agent(_get_gateway(), session)
     active_agents[session_id] = agent
 
@@ -334,8 +410,56 @@ def update_mode(session_id: str, form: UpdateModeForm) -> dict[str, Any]:
     agent = active_agents.get(session_id)
     if agent is not None:
         agent.approval_mode = form.mode
+        agent.session.approval_mode = form.mode
 
     return {"success": True, "mode": form.mode}
+
+
+@router.get("/api/chat/sessions/{session_id}/plan")
+def get_plan_mode(session_id: str) -> dict[str, Any]:
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "state": session.plan_mode,
+        "artifact": session.plan_artifact.model_dump() if session.plan_artifact else None,
+    }
+
+
+@router.post("/api/chat/sessions/{session_id}/plan")
+def update_plan_mode(session_id: str, form: UpdatePlanModeForm) -> dict[str, Any]:
+    implementation_request = ""
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        if form.action == "enter":
+            session.enter_plan_mode(form.objective)
+        elif form.action == "revise":
+            session.request_plan_revision(form.feedback)
+        elif form.action == "approve":
+            approved_plan = session.approve_plan()
+            implementation_request = (
+                "请严格按照下面已经批准的方案开始实施；遵守当前项目规则和权限规则，"
+                "完成后运行与风险匹配的验证。\n\n" + approved_plan
+            )
+        else:
+            session.cancel_plan_mode()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    store.save(session)
+    active = active_agents.get(session_id)
+    if active is not None:
+        active.session.plan_mode = session.plan_mode
+        active.session.plan_artifact = session.plan_artifact
+    return {
+        "success": True,
+        "state": session.plan_mode,
+        "artifact": session.plan_artifact.model_dump() if session.plan_artifact else None,
+        "implementation_request": implementation_request,
+    }
 
 
 @router.post("/api/chat/sessions/{session_id}/permission/{request_id}")
@@ -347,7 +471,8 @@ def respond_to_permission(
     if agent is None:
         raise HTTPException(status_code=410, detail="会话当前没有活跃流式请求")
 
-    agent.respond_to_permission(request_id, form.approved)
+    if not agent.respond_to_permission(request_id, form.approved):
+        raise HTTPException(status_code=404, detail="权限请求不存在或已经处理")
     return {"success": True, "approved": form.approved}
 
 
@@ -355,6 +480,7 @@ def respond_to_permission(
 def delete_session(session_id: str) -> dict[str, Any]:
     if not store.exists(session_id):
         raise HTTPException(status_code=404, detail="会话不存在")
+    if session_id in active_agents:
+        raise HTTPException(status_code=409, detail="会话仍有活跃请求，不能删除")
     store.delete(session_id)
-    active_agents.pop(session_id, None)
     return {"success": True}

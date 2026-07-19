@@ -9,7 +9,11 @@ import yaml
 from src.gateway.client import GatewayClient
 from src.core.collaboration import normalize_task_contract, validate_collaboration_plan
 from src.core.config_paths import resolve_workers_config_path
-from src.models.schemas import ChatMessage, Task, TaskPlan
+from src.core.frontend_contract import (
+    bind_and_validate_frontend_contract,
+    is_high_risk_frontend_request,
+)
+from src.models.schemas import ChatMessage, FrontendBuildContract, Task, TaskPlan
 
 
 # 场景特定的任务拆分指导，会追加到 orchestrator system_prompt 后面
@@ -34,6 +38,21 @@ SCENARIO_INSTRUCTIONS: dict[str, str] = {
 8. 对不能安全并行的迁移、集成和共享配置任务设置 parallel_safe=false。
 """,
 }
+
+HIGH_RISK_FRONTEND_INSTRUCTION = """
+【高风险前端多模型构建合同】
+这是项目级前端构建，必须输出 frontend_contract，并固定拆成四个 Worker 阶段：
+1. architecture_scaffold：architect，负责架构、脚手架、入口、路由和依赖清单。
+2. pages：frontend_dev，负责所有页面与页面级组件，依赖 architecture_scaffold。
+3. data_api：frontend_dev，负责数据模型、Mock/真实 API 和状态层，依赖 architecture_scaffold。
+4. integration：tester，execution_mode=verify，直接依赖以上全部实现任务，最后执行。
+Reviewer 是系统内置第五职责，不要把 Reviewer 伪造成子任务。
+每个任务填写 frontend_stage。frontend_contract 必须包含 project_root、entrypoints、routes(path/target)、dependencies、ownership、verification_commands、smoke_paths 和 smoke。
+ownership 必须逐任务精确等于 owned_paths；并行 pages 与 data_api 不得拥有重叠路径。smoke_paths 必须都在 routes 中。
+smoke.start_command 使用 argv 数组且必须包含 {port}，routes 为每个 smoke_path 声明 visible/text/table_rows/canvas_nonblank/not_visible 断言；可选 login 和 layout_pairs。
+integration 会确定性检查入口、路由目标、相对 import、package.json 依赖，并要求每条 verification_commands 都有真实成功的 run_command 证据及成功的 frontend_smoke 证据；Worker 自述不能代替工具证据。
+在可用模型允许时，为不同职责选择至少两个合适模型；模型不可用时保持职责分离并使用已配置回退。
+"""
 
 
 def _detect_scenario(user_request: str) -> str:
@@ -60,7 +79,13 @@ def _detect_scenario(user_request: str) -> str:
 class Orchestrator:
     """需求分析与任务拆分"""
 
-    def __init__(self, gateway: GatewayClient, config_path: str = "config/workers.yaml", model_override: str | None = None):
+    def __init__(
+        self,
+        gateway: GatewayClient,
+        config_path: str = "config/workers.yaml",
+        model_override: str | None = None,
+        project_rules: str = "",
+    ):
         self.gateway = gateway
         self.config = self._load_config(config_path)
         preferred = (
@@ -71,6 +96,8 @@ class Orchestrator:
         )
         self.model = gateway.resolve_model(preferred)
         self.system_prompt = self.config.get("orchestrator", {}).get("system_prompt", "")
+        self.project_rules = project_rules.strip()
+        self.last_response = None
 
     def _load_config(self, path: str) -> dict:
         with resolve_workers_config_path(path).open("r", encoding="utf-8") as f:
@@ -81,8 +108,13 @@ class Orchestrator:
         scenario = _detect_scenario(user_request)
         scenario_instruction = SCENARIO_INSTRUCTIONS.get(scenario, "")
         system_prompt = f"{self.system_prompt}\n{scenario_instruction}".strip()
+        high_risk_frontend = is_high_risk_frontend_request(user_request)
+        if high_risk_frontend:
+            system_prompt = f"{system_prompt}\n{HIGH_RISK_FRONTEND_INSTRUCTION}".strip()
         if memory_context:
             system_prompt = f"{system_prompt}\n\n{memory_context}".strip()
+        if self.project_rules:
+            system_prompt = f"{system_prompt}\n\n{self.project_rules}".strip()
 
         messages = [
             ChatMessage(role="system", content=system_prompt),
@@ -109,7 +141,17 @@ class Orchestrator:
                 )
                 task.assigned_model = self.gateway.resolve_model(default_model)
 
-        plan = TaskPlan(summary=plan_data.get("summary", ""), tasks=tasks)
+        raw_contract = plan_data.get("frontend_contract")
+        plan = TaskPlan(
+            summary=plan_data.get("summary", ""),
+            tasks=tasks,
+            frontend_contract=(
+                FrontendBuildContract(**raw_contract) if raw_contract else None
+            ),
+        )
+        self.last_response = response
+        if high_risk_frontend:
+            bind_and_validate_frontend_contract(plan)
         validate_collaboration_plan(plan)
         return plan
 

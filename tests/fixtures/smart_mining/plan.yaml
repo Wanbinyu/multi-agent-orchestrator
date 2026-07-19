@@ -1,0 +1,93 @@
+summary: 智慧矿区公开离线验收夹具
+frontend_contract:
+  project_root: "{{PROJECT_ROOT}}"
+  entrypoints: [src/main.js]
+  routes:
+    - {path: /overview, target: src/pages/overview.js}
+    - {path: /monitor, target: src/pages/monitor.js}
+    - {path: /alerts, target: src/pages/alerts.js}
+    - {path: /devices, target: src/pages/devices.js}
+    - {path: /architecture, target: src/pages/architecture.js}
+    - {path: /events, target: src/pages/events.js}
+    - {path: /timeline, target: src/pages/timeline.js}
+  dependencies: [react]
+  ownership:
+    architecture: ["{{PROJECT_ROOT}}"]
+    pages: ["{{PROJECT_ROOT}}/src/pages"]
+    data: ["{{PROJECT_ROOT}}/src/data"]
+    integration: []
+  verification_commands:
+    - npm run build
+    - npm run test:targeted
+    - npm run test:integration
+    - npm test
+  smoke_paths:
+    - /overview
+    - /monitor
+    - /alerts
+    - /devices
+    - /architecture
+    - /events
+    - /timeline
+  smoke:
+    start_command: [python, fixture_server.py, "{port}"]
+    ready_path: /login
+    login:
+      path: /login
+      fields:
+        - {selector: "#user", value: demo}
+        - {selector: "#password", value: demo}
+      submit_selector: "#login"
+      success_selector: ".shell main"
+    routes:
+      - path: /overview
+        assertions: &route_assertions
+          - {selector: h1, check: text}
+          - {selector: table, check: table_rows}
+          - {selector: canvas, check: canvas_nonblank}
+          - {selector: .skeleton, check: not_visible}
+      - {path: /monitor, assertions: *route_assertions}
+      - {path: /alerts, assertions: *route_assertions}
+      - {path: /devices, assertions: *route_assertions}
+      - {path: /architecture, assertions: *route_assertions}
+      - {path: /events, assertions: *route_assertions}
+      - {path: /timeline, assertions: *route_assertions}
+    layout_pairs:
+      - {first_selector: aside, second_selector: main}
+    startup_timeout_seconds: 10
+    action_timeout_seconds: 3
+tasks:
+  - id: architecture
+    type: architect
+    title: 架构与脚手架
+    input: 固定入口、路由、依赖和目录边界
+    assigned_model: fixture-reasoner
+    owned_paths: ["{{PROJECT_ROOT}}"]
+    parallel_safe: false
+    frontend_stage: architecture_scaffold
+  - id: pages
+    type: frontend_dev
+    title: 页面模块
+    input: 实现全部七个页面
+    assigned_model: fixture-coder
+    depends_on: [architecture]
+    owned_paths: ["{{PROJECT_ROOT}}/src/pages"]
+    frontend_stage: pages
+  - id: data
+    type: frontend_dev
+    title: 数据与 API
+    input: 实现 Mock 数据边界
+    assigned_model: fixture-reasoner
+    depends_on: [architecture]
+    owned_paths: ["{{PROJECT_ROOT}}/src/data"]
+    frontend_stage: data_api
+  - id: integration
+    type: tester
+    title: 集成验收
+    input: 运行全部确定性验证
+    assigned_model: fixture-reasoner
+    depends_on: [architecture, pages, data]
+    execution_mode: verify
+    owned_paths: []
+    parallel_safe: false
+    frontend_stage: integration

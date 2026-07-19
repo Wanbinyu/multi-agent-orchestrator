@@ -722,6 +722,125 @@ body::before {
   margin: 0;
 }
 
+.chat-mode-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#btn-plan-mode.active {
+  color: var(--accent);
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.plan-mode-panel {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid rgba(56, 189, 248, 0.28);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.28);
+  background: rgba(56, 189, 248, 0.055);
+}
+
+.recovery-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid rgba(251, 191, 36, 0.38);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.recovery-banner-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.recovery-banner-copy strong {
+  color: var(--warning);
+  font-size: 0.86rem;
+}
+
+.recovery-steps {
+  color: var(--text);
+}
+
+.recovery-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.recovery-banner.hidden {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .recovery-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recovery-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .recovery-actions .btn {
+    min-width: 0;
+    white-space: normal;
+  }
+}
+
+.plan-mode-head,
+.plan-revision-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.plan-mode-head {
+  justify-content: space-between;
+  margin-bottom: 0.45rem;
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.plan-mode-content {
+  max-height: 210px;
+  overflow-y: auto;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.plan-mode-content > :first-child {
+  margin-top: 0;
+}
+
+.plan-mode-content > :last-child {
+  margin-bottom: 0;
+}
+
+.plan-revision-controls {
+  margin-top: 0.65rem;
+}
+
+.plan-revision-controls.hidden {
+  display: none;
+}
+
+.plan-revision-controls .input-sm {
+  flex: 1;
+  min-width: 0;
+}
+
 .chat-sidebar {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
@@ -1197,6 +1316,57 @@ body::before {
 
 .project-browser-option input {
   accent-color: var(--accent);
+}
+
+.report-scope {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.report-scope-button {
+  min-width: 48px;
+  min-height: 26px;
+  border: 0;
+  border-right: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.report-scope-button:last-child {
+  border-right: 0;
+}
+
+.report-scope-button.active {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.delivery-report {
+  display: grid;
+  gap: 6px;
+}
+
+.delivery-report-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.delivery-report-line strong {
+  color: var(--text-primary);
+  text-align: right;
+  font-weight: 600;
 }
 
 .project-tree-status {

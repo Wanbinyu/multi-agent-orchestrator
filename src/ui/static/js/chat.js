@@ -10,6 +10,10 @@
     projectTreeLoaded: false,
     turnLog: { toolCalls: [], filesWritten: [], engineering: [] },
     runDetails: {},
+    planMode: "inactive",
+    planArtifact: null,
+    recovery: null,
+    reportScope: "session",
   };
 
   const els = {
@@ -25,6 +29,20 @@
     btnCancelSessionSecondary: document.getElementById("btn-cancel-session-secondary"),
     chatStatus: document.getElementById("chat-status"),
     modeIndicator: document.getElementById("mode-indicator"),
+    btnPlanMode: document.getElementById("btn-plan-mode"),
+    planModePanel: document.getElementById("plan-mode-panel"),
+    planModeState: document.getElementById("plan-mode-state"),
+    planModeContent: document.getElementById("plan-mode-content"),
+    planRevisionControls: document.getElementById("plan-revision-controls"),
+    planRevisionInput: document.getElementById("plan-revision-input"),
+    btnPlanRevise: document.getElementById("btn-plan-revise"),
+    btnPlanApprove: document.getElementById("btn-plan-approve"),
+    btnPlanCancel: document.getElementById("btn-plan-cancel"),
+    recoveryBanner: document.getElementById("recovery-banner"),
+    recoverySummary: document.getElementById("recovery-summary"),
+    recoverySteps: document.getElementById("recovery-steps"),
+    btnRecoveryContinue: document.getElementById("btn-recovery-continue"),
+    btnRecoveryAbandon: document.getElementById("btn-recovery-abandon"),
     chatRightbar: document.getElementById("chat-rightbar"),
     btnToggleRightbar: document.getElementById("btn-toggle-rightbar"),
     btnCloseRightbar: document.getElementById("btn-close-rightbar"),
@@ -58,6 +76,9 @@
     btnRebuildIndex: document.getElementById("btn-rebuild-index"),
     ctxIndexMsg: document.getElementById("ctx-index-msg"),
     turnLog: document.getElementById("turn-log"),
+    deliveryReport: document.getElementById("delivery-report"),
+    btnReportSession: document.getElementById("btn-report-session"),
+    btnReportToday: document.getElementById("btn-report-today"),
     tabContext: document.getElementById("tab-context"),
     tabFiles: document.getElementById("tab-files"),
     rightbarContextPanel: document.getElementById("rightbar-context-panel"),
@@ -87,6 +108,7 @@
 
   async function setMode(mode) {
     if (!MODES.includes(mode)) return;
+    const previousMode = currentMode;
     currentMode = mode;
     updateModeIndicator();
     if (!state.currentSessionId) return;
@@ -96,7 +118,126 @@
         body: JSON.stringify({ mode }),
       });
     } catch (err) {
+      currentMode = previousMode;
+      updateModeIndicator();
       console.error("切换模式失败", err);
+      showStatus(err.message, true);
+    }
+  }
+
+  function renderPlanState(stateName, artifact) {
+    state.planMode = stateName || "inactive";
+    state.planArtifact = artifact || null;
+    const active = state.planMode !== "inactive";
+    els.btnPlanMode?.classList.toggle("active", active);
+    els.btnPlanMode?.setAttribute("aria-pressed", active ? "true" : "false");
+    els.planModePanel?.classList.toggle("hidden", !active);
+    if (!active) return;
+    const revision = artifact?.revision ? ` · revision ${artifact.revision}` : "";
+    if (els.planModeState) els.planModeState.textContent = `Plan · ${state.planMode}${revision}`;
+    if (els.planModeContent) {
+      els.planModeContent.innerHTML = artifact?.content
+        ? renderMarkdown(artifact.content)
+        : "发送需求后将生成只读方案。";
+    }
+    const awaiting = state.planMode === "awaiting_approval";
+    els.planRevisionControls?.classList.toggle("hidden", !awaiting);
+  }
+
+  function renderRecoveryState(recovery) {
+    state.recovery = recovery || null;
+    const required = Boolean(recovery?.required);
+    els.recoveryBanner?.classList.toggle("hidden", !required);
+    if (els.chatInput) els.chatInput.disabled = required;
+    if (els.btnSend) els.btnSend.disabled = required;
+    if (!required) return;
+    if (els.recoverySummary) {
+      els.recoverySummary.textContent = `${recovery.run_status} · ${recovery.reason}`;
+    }
+    if (els.recoverySteps) {
+      const count = recovery.unfinished_step_count || 0;
+      const titles = (recovery.unfinished_steps || []).map((item) => item.title).join("、");
+      els.recoverySteps.textContent = titles
+        ? `未完成 ${count} 项：${titles}`
+        : "上次运行没有结构化步骤，仍需确认是否继续。";
+    }
+  }
+
+  async function decideRecovery(action) {
+    if (!state.currentSessionId || !state.recovery?.required) return;
+    els.btnRecoveryContinue.disabled = true;
+    els.btnRecoveryAbandon.disabled = true;
+    try {
+      await api(`/api/chat/sessions/${encodeURIComponent(state.currentSessionId)}/recovery`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      await loadSession(state.currentSessionId);
+      showStatus(
+        action === "continue"
+          ? "已确认继续；下一条消息只携带未完成步骤检查点。"
+          : "已放弃中断任务；没有回滚或重放既有文件。"
+      );
+    } catch (err) {
+      showStatus(err.message, true);
+    } finally {
+      els.btnRecoveryContinue.disabled = false;
+      els.btnRecoveryAbandon.disabled = false;
+    }
+  }
+
+  async function updatePlanState(action, payload = {}) {
+    if (!state.currentSessionId || state.isLoading) return null;
+    const data = await api(
+      `/api/chat/sessions/${encodeURIComponent(state.currentSessionId)}/plan`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action, ...payload }),
+      }
+    );
+    renderPlanState(data.state, data.artifact);
+    return data;
+  }
+
+  async function refreshPlanState() {
+    if (!state.currentSessionId) return;
+    const data = await api(
+      `/api/chat/sessions/${encodeURIComponent(state.currentSessionId)}/plan`
+    );
+    renderPlanState(data.state, data.artifact);
+  }
+
+  async function togglePlanMode() {
+    try {
+      await updatePlanState(state.planMode === "inactive" ? "enter" : "cancel");
+      if (state.planMode !== "inactive") els.chatInput?.focus();
+    } catch (err) {
+      showStatus(err.message, true);
+    }
+  }
+
+  async function approvePlanAndImplement() {
+    try {
+      const data = await updatePlanState("approve");
+      if (data?.implementation_request) {
+        els.chatInput.value = data.implementation_request;
+        await sendMessage();
+      }
+    } catch (err) {
+      showStatus(err.message, true);
+    }
+  }
+
+  async function revisePlan() {
+    const feedback = els.planRevisionInput?.value.trim();
+    if (!feedback) return;
+    try {
+      await updatePlanState("revise", { feedback });
+      els.planRevisionInput.value = "";
+      els.chatInput.value = "请根据已记录的修订意见重新生成方案。";
+      await sendMessage();
+    } catch (err) {
+      showStatus(err.message, true);
     }
   }
 
@@ -316,6 +457,8 @@
     if (data.approval_mode && MODES.includes(data.approval_mode)) {
       currentMode = data.approval_mode;
     }
+    renderPlanState(data.plan_mode, data.plan_artifact);
+    renderRecoveryState(data.recovery);
     updateModeIndicator();
     renderSessionList();
     renderMessages(data.messages || []);
@@ -335,8 +478,50 @@
   }
 
   async function loadContextSidebar() {
-    await Promise.all([loadContextBudget(), loadMemories(), loadIndexStatus()]);
+    await Promise.all([
+      loadContextBudget(), loadMemories(), loadIndexStatus(), loadDeliveryReport("session"),
+    ]);
     clearTurnLog();
+  }
+
+  async function loadDeliveryReport(scope = state.reportScope) {
+    if (!state.currentSessionId || !els.deliveryReport) return;
+    state.reportScope = scope === "today" ? "today" : "session";
+    els.btnReportSession?.classList.toggle("active", state.reportScope === "session");
+    els.btnReportToday?.classList.toggle("active", state.reportScope === "today");
+    els.deliveryReport.innerHTML = '<div class="empty-item">正在汇总…</div>';
+    try {
+      const report = await api(
+        `/api/chat/sessions/${encodeURIComponent(state.currentSessionId)}/report?scope=${state.reportScope}`
+      );
+      renderDeliveryReport(report);
+    } catch (err) {
+      els.deliveryReport.innerHTML = `<div class="empty-item error-text">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderDeliveryReport(report) {
+    if (!els.deliveryReport) return;
+    const status = report.status_counts || {};
+    const metrics = report.metrics || {};
+    const operationCount = [
+      ...(report.created_files || []),
+      ...(report.modified_files || []),
+      ...(report.other_changes || []),
+    ].length;
+    const passed = (report.verification_passed || []).length;
+    const failed = (report.verification_failed || []).length;
+    const pending = (report.pending_checks || []).length;
+    const cost = Number(metrics.cost_usd || 0).toFixed(4);
+    els.deliveryReport.innerHTML = `
+      <div class="delivery-report-line"><span>运行</span><strong>${Number(report.run_count || 0)}</strong></div>
+      <div class="delivery-report-line"><span>完成 / 受阻 / 失败</span><strong>${Number(status.completed || 0)} / ${Number(status.blocked || 0)} / ${Number(status.failed || 0)}</strong></div>
+      <div class="delivery-report-line"><span>变更</span><strong>${operationCount}</strong></div>
+      <div class="delivery-report-line"><span>验证 通过 / 失败 / 待确认</span><strong>${passed} / ${failed} / ${pending}</strong></div>
+      <div class="delivery-report-line"><span>Token 输入 / 输出</span><strong>${Number(metrics.input_tokens || 0).toLocaleString()} / ${Number(metrics.output_tokens || 0).toLocaleString()}</strong></div>
+      <div class="delivery-report-line"><span>成本</span><strong>$${cost}</strong></div>
+      <div class="delivery-report-line"><span>有效交付 / 返工</span><strong>${Number(metrics.effective_deliveries || 0)} / ${Number(metrics.user_rework_runs || 0)}</strong></div>
+    `;
   }
 
   async function loadContextBudget() {
@@ -808,6 +993,8 @@
       };
       const icon = run.status === "completed" ? "✓" : run.status === "running" ? "●" : "!";
       const intent = run.intent || {};
+      const effectiveIntent = run.effective_intent || {};
+      const displayIntent = Object.keys(effectiveIntent).length ? effectiveIntent : intent;
       const policy = intent.policy || {};
       const kindLabels = {
         unclassified: "未分类",
@@ -827,13 +1014,17 @@
         high: "高风险",
         external: "外部状态",
       };
-      const writeState = policy.allow_project_writes
-        ? (intent.write_authorized ? "写入已授权" : "写入需批准")
-        : "只读";
+      const toolCanWrite = Boolean(
+        policy.allow_project_writes || policy.permission_follows_session
+      );
+      const writeState = !toolCanWrite || currentMode === "readonly"
+        ? "只读"
+        : (intent.write_authorized ? "写入已授权" : "写入需批准");
       const intentDetail = [
-        kindLabels[intent.kind] || intent.kind,
-        riskLabels[intent.risk_level] || intent.risk_level,
+        kindLabels[displayIntent.kind] || displayIntent.kind,
+        riskLabels[displayIntent.risk_level] || displayIntent.risk_level,
         writeState,
+        Object.keys(effectiveIntent).length ? "按实际写入升级" : "",
       ].filter(Boolean).join(" · ");
       const recon = run.reconnaissance || {};
       const reconLabels = {
@@ -959,10 +1150,24 @@
     if (run.objective) addSection("目标", [run.objective]);
     if (run.intent) {
       const intent = run.intent;
+      const policy = intent.policy || {};
+      const followsSession = Boolean(policy.permission_follows_session);
+      const writeState = intent.write_authorized
+        ? "写入已授权"
+        : (followsSession ? "权限跟随会话" : "只读或写入未授权");
       addSection("分类与边界", [
         `类型 ${intent.kind || "unclassified"} · 风险 ${intent.risk_level || "unassessed"} · ${
-          intent.write_authorized ? "写入已授权" : "只读或写入未授权"
+          writeState
         }`,
+      ]);
+    }
+    if (run.effective_intent) {
+      const intent = run.effective_intent;
+      const mutation = run.observed_mutation || {};
+      addSection("实际写入后的有效分类", [
+        `类型 ${intent.kind || "unclassified"} · 风险 ${intent.risk_level || "unassessed"} · 验证 ${
+          (intent.policy || {}).verification_depth || "targeted"
+        } · 项目文件 ${Number(mutation.project_file_count || 0)} 个`,
       ]);
     }
     if (run.plan) {
@@ -1431,7 +1636,7 @@
 
   async function sendMessage() {
     const text = els.chatInput.value.trim();
-    if (!text || !state.currentSessionId || state.isLoading) return;
+    if (!text || !state.currentSessionId || state.isLoading || state.recovery?.required) return;
 
     appendMessage("user", text);
     els.chatInput.value = "";
@@ -1466,6 +1671,8 @@
         appendTurnLog(doneEvent.tool_calls, doneEvent.files_written);
       });
       await loadSessions();
+      await refreshPlanState();
+      await loadDeliveryReport(state.reportScope);
     } catch (err) {
       contentEl.innerHTML = `<span class="error-text">${escapeHtml(err.message)}</span>`;
       showStatus(err.message, true);
@@ -1477,6 +1684,18 @@
 
   // 事件绑定
   els.btnSend.addEventListener("click", sendMessage);
+  els.btnPlanMode?.addEventListener("click", togglePlanMode);
+  els.btnPlanCancel?.addEventListener("click", () => updatePlanState("cancel"));
+  els.btnPlanApprove?.addEventListener("click", approvePlanAndImplement);
+  els.btnPlanRevise?.addEventListener("click", revisePlan);
+  els.btnRecoveryContinue?.addEventListener("click", () => decideRecovery("continue"));
+  els.btnRecoveryAbandon?.addEventListener("click", () => decideRecovery("abandon"));
+  els.planRevisionInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      revisePlan();
+    }
+  });
   els.btnToggleRightbar?.addEventListener("click", toggleRightbar);
   els.btnCloseRightbar?.addEventListener("click", () => setRightbarOpen(false));
   els.tabContext?.addEventListener("click", () => setRightbarTab("context"));
@@ -1495,6 +1714,8 @@
   els.memorySearch?.addEventListener("input", (e) => searchMemoryFromInput(e.target.value));
   els.btnRefreshMemories?.addEventListener("click", () => loadMemories());
   els.btnRebuildIndex?.addEventListener("click", rebuildProjectIndex);
+  els.btnReportSession?.addEventListener("click", () => loadDeliveryReport("session"));
+  els.btnReportToday?.addEventListener("click", () => loadDeliveryReport("today"));
   els.turnLog?.addEventListener("click", (event) => {
     const button = event.target.closest(".run-detail-toggle");
     if (button) toggleRunDetail(button.dataset.runId);

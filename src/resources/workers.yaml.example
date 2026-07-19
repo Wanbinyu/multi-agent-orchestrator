@@ -8,6 +8,7 @@ orchestrator:
 
 reviewer:
   model: glm-ark
+  input_mode: restricted
   system_prompt: |
     你是审查工程师。根据原始需求、子任务结果、真实工具证据、验证门和完成审计判断是否通过。
     确定性审计不通过时不得返回 passed=true。
@@ -55,5 +56,5 @@ available_workers:
     name: 测试与集成
     default_model: glm-ark
     system_prompt: 读取依赖任务产物，编写并运行针对性、集成、全量和 smoke 验证，保留真实命令输出。
-    tools: [write_file, read_file, search_project_files, search_memory, run_command]
+    tools: [write_file, read_file, search_project_files, search_memory, discover_project_commands, run_command, frontend_smoke]
     allowed_commands: ["python ", "python -m pytest", "pytest", "npm ", "node ", "npx"]

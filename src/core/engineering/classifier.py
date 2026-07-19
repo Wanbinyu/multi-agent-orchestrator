@@ -26,7 +26,7 @@ class _PolicyPreset:
 
 _POLICIES: dict[TaskKind, _PolicyPreset] = {
     "unclassified": _PolicyPreset(
-        "medium", False, False, "targeted", False, ("保守只读答复",)
+        "medium", False, False, "targeted", False, ("按会话权限处理",)
     ),
     "answer": _PolicyPreset("low", False, False, "none", False, ("直接答复",)),
     "explain": _PolicyPreset(
@@ -73,6 +73,7 @@ _BUILD_PATTERNS = (
     r"新增(功能|页面|接口|模块|能力)", r"添加(功能|页面|接口|模块|能力)", r"创建(项目|系统|应用|网站|页面|接口|模块)",
     r"搭建", r"从零", r"做一个", r"做一套", r"写一个", r"写个", r"^写(入)?文件(?:$|[\s：:，,])", r"重做",
     r"做一?(出来|起来|好|完)",
+    r"创建一?(好|完|出来|起来|下)$",
 )
 _CHANGE_PATTERNS = (
     r"修复", r"修改", r"改代码", r"调整", r"优化", r"重构", r"更新", r"升级", r"替换", r"删除", r"完善", r"补齐",
@@ -90,11 +91,14 @@ _EXPLAIN_PATTERNS = (
 )
 _ANSWER_PATTERNS = (
     r"是什么", r"是多少", r"是否", r"能不能", r"可以吗", r"怎么", r"如何", r"告诉我", r"现在.*吗", r"有哪些", r"有没有",
+    r"对比",
 )
 _EXPLICIT_WRITE_PATTERNS = (
     r"^(修复|修改|调整|优化|重构|更新|升级|替换|删除|完善|补齐)",
     r"^(开发|实现|新增|添加|创建|搭建|从零|做一个|做一套|写一个|写个|写文件|写入文件|重做)",
     r"^(请|请帮我|帮我)(修复|修改|调整|优化|重构|更新|升级|替换|删除|完善|补齐|开发|实现|新增|添加|创建|搭建|写)",
+    r"(?:现在)?给我(?:直接)?(做|搭建|开发|创建|写)一?(个|套|份)",
+    r"^在\s*[A-Za-z]:[\\/][^，。；;？?]{1,80}(?:中|下)?\s*(做|创建|搭建|开发)一?(个|套)项目",
     r"(开始|执行|直接|现在进行|现在开始)(修复|修改|调整|优化|重构|更新|升级|替换|删除|开发|实现|创建|搭建)",
     r"并(修复|修改|调整|优化|重构|更新|替换|删除|实现)",
     r"可以改代码", r"把.+(改成|修改为|替换为|删除|做成|做一个|实现为|开发成)", r"综合.*做",
@@ -170,6 +174,8 @@ class TaskIntentClassifier:
             return "diagnose", 0.96, "命中只读故障诊断请求"
         if no_write and _matches(text, _REVIEW_PATTERNS):
             return "review", 0.96, "命中只读项目审查请求"
+        if no_write:
+            return "review", 0.95, "命中明确只读或不修改边界"
 
         if question_like and not explicit_write:
             if _matches(text, _DIAGNOSE_PATTERNS):
@@ -208,6 +214,7 @@ class TaskIntentClassifier:
         preset = _POLICIES[kind]
         policy = TaskExecutionPolicy(
             allow_project_writes=preset.allow_project_writes,
+            permission_follows_session=(kind == "unclassified"),
             requires_plan=preset.requires_plan,
             verification_depth=preset.verification_depth,
             collaboration_allowed=preset.collaboration_allowed,
@@ -217,7 +224,8 @@ class TaskIntentClassifier:
             scope=scope,
             risk_level=preset.risk_level,
             write_authorized=(
-                preset.allow_project_writes and approval_mode == "auto"
+                (preset.allow_project_writes or kind == "unclassified")
+                and approval_mode == "auto"
             ),
             deliverables=list(preset.deliverables),
             policy=policy,

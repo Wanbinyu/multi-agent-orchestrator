@@ -96,7 +96,7 @@ def test_run_journal_store_rejects_unsafe_id_and_missing_run(tmp_path):
         store.load("missing")
 
 
-def test_unclassified_store_default_stays_readonly_even_in_auto_mode(tmp_path):
+def test_unclassified_store_default_without_classifier_stays_readonly(tmp_path):
     store = RunJournalStore(tmp_path / "runs")
 
     journal = store.create("session-1", "继续处理", "auto")
@@ -104,6 +104,19 @@ def test_unclassified_store_default_stays_readonly_even_in_auto_mode(tmp_path):
     assert journal.intent.kind == "unclassified"
     assert journal.intent.write_authorized is False
     assert journal.intent.policy.allow_project_writes is False
+
+
+def test_unclassified_classifier_decision_records_session_permission_boundary(tmp_path):
+    from src.core.engineering import TaskIntentClassifier
+
+    store = RunJournalStore(tmp_path / "runs")
+    intent = TaskIntentClassifier().classify("处理一下", "auto")
+
+    journal = store.create("session-1", "处理一下", "auto", intent=intent)
+
+    assert intent.policy.permission_follows_session is True
+    assert "按会话权限模式 auto 决定工具执行" in journal.decisions[0]
+    assert "保守只读策略" not in journal.decisions[0]
 
 
 def test_tool_evidence_drives_reconnaissance_without_double_counting(tmp_path):

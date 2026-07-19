@@ -72,6 +72,22 @@ def test_plan_returns_task_plan(tmp_path):
     assert call_kwargs["task_id"] == "orchestrator"
 
 
+def test_plan_injects_project_rules_into_system_prompt(tmp_path):
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text(_sample_workers_yaml(), encoding="utf-8")
+    gateway = _mock_gateway('{"summary": "ok", "tasks": []}')
+
+    orchestrator = Orchestrator(
+        gateway,
+        config_path=str(config_path),
+        project_rules="PROJECT RULE SENTINEL",
+    )
+    orchestrator.plan("inspect")
+
+    messages = gateway.chat.call_args.kwargs["messages"]
+    assert "PROJECT RULE SENTINEL" in messages[0].content
+
+
 def test_plan_fills_missing_assigned_model_from_worker_default(tmp_path):
     config_path = tmp_path / "workers.yaml"
     config_path.write_text(_sample_workers_yaml(), encoding="utf-8")
@@ -270,3 +286,74 @@ def test_plan_rejects_parallel_file_ownership_conflict(tmp_path):
 
     with pytest.raises(ValueError, match="文件所有权冲突"):
         Orchestrator(gateway, config_path=str(config_path)).plan("写项目")
+
+
+def test_high_risk_frontend_plan_enforces_fixed_contract(tmp_path):
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text(_sample_workers_yaml(), encoding="utf-8")
+    root = "G:/MAO_test"
+    plan_data = {
+        "summary": "智慧矿区前端",
+        "frontend_contract": {
+            "project_root": root,
+            "entrypoints": ["src/main.tsx"],
+            "routes": [{"path": "/", "target": "src/pages/Home.tsx"}],
+            "dependencies": ["react"],
+            "ownership": {
+                "architecture": [root],
+                "pages": [f"{root}/src/pages"],
+                "data": [f"{root}/src/api"],
+                "integration": [],
+            },
+            "verification_commands": ["npm run build"],
+            "smoke_paths": ["/"],
+            "smoke": {
+                "start_command": [
+                    "npm", "run", "dev", "--", "--host", "127.0.0.1",
+                    "--port", "{port}",
+                ],
+                "routes": [
+                    {"path": "/", "assertions": [{"selector": "#root"}]}
+                ],
+            },
+        },
+        "tasks": [
+            {
+                "id": "architecture", "type": "architect", "title": "架构脚手架",
+                "input": "", "assigned_model": "glm-ark", "owned_paths": [root],
+                "parallel_safe": False, "frontend_stage": "architecture_scaffold",
+            },
+            {
+                "id": "pages", "type": "frontend_dev", "title": "页面",
+                "input": "", "assigned_model": "kimi", "depends_on": ["architecture"],
+                "owned_paths": [f"{root}/src/pages"], "frontend_stage": "pages",
+            },
+            {
+                "id": "data", "type": "frontend_dev", "title": "数据 API",
+                "input": "", "assigned_model": "glm-ark", "depends_on": ["architecture"],
+                "owned_paths": [f"{root}/src/api"], "frontend_stage": "data_api",
+            },
+            {
+                "id": "integration", "type": "tester", "title": "集成验证",
+                "input": "", "assigned_model": "glm-ark",
+                "depends_on": ["architecture", "pages", "data"],
+                "execution_mode": "verify", "owned_paths": [],
+                "parallel_safe": False, "frontend_stage": "integration",
+            },
+        ],
+    }
+    gateway = _mock_gateway(json.dumps(plan_data, ensure_ascii=False))
+
+    plan = Orchestrator(gateway, config_path=str(config_path)).plan(
+        "我现在接了一个智慧矿区的项目，现在给我做一个纯前端项目"
+    )
+
+    assert {task.frontend_stage for task in plan.tasks} == {
+        "architecture_scaffold", "pages", "data_api", "integration",
+    }
+    integration = next(task for task in plan.tasks if task.frontend_stage == "integration")
+    assert integration.frontend_contract == plan.frontend_contract
+    assert set(integration.depends_on) == {"architecture", "pages", "data"}
+    prompt = gateway.chat.call_args.kwargs["messages"][0].content
+    assert "高风险前端多模型构建合同" in prompt
+    assert "Worker 自述不能代替工具证据" in prompt

@@ -6,6 +6,133 @@ from pydantic import BaseModel, Field, field_validator
 
 TaskExecutionMode = Literal["read", "write", "verify"]
 CapabilityState = Literal["supported", "unsupported", "unverified"]
+FrontendBuildStage = Literal[
+    "architecture_scaffold",
+    "pages",
+    "data_api",
+    "integration",
+]
+FrontendSmokeCheck = Literal[
+    "visible",
+    "text",
+    "table_rows",
+    "canvas_nonblank",
+    "not_visible",
+]
+
+
+class FrontendSmokeField(BaseModel):
+    """One deterministic field fill used by a test-only login flow."""
+
+    selector: str = Field(..., min_length=1)
+    value: str
+
+
+class FrontendLoginSmoke(BaseModel):
+    """Optional mock/test login flow for browser smoke."""
+
+    path: str = Field(default="/", min_length=1)
+    fields: list[FrontendSmokeField] = Field(..., min_length=1)
+    submit_selector: str = Field(..., min_length=1)
+    success_selector: str = Field(..., min_length=1)
+
+
+class FrontendSmokeAssertion(BaseModel):
+    """A visible-content assertion executed against one route."""
+
+    selector: str = Field(..., min_length=1)
+    check: FrontendSmokeCheck = "visible"
+    min_count: int = Field(default=1, ge=1, le=10_000)
+
+
+class FrontendSmokeRoute(BaseModel):
+    """Browser checks required for one public or authenticated route."""
+
+    path: str = Field(..., min_length=1)
+    assertions: list[FrontendSmokeAssertion] = Field(..., min_length=1)
+
+
+class FrontendLayoutPair(BaseModel):
+    """Visible elements that must not cover each other."""
+
+    first_selector: str = Field(..., min_length=1)
+    second_selector: str = Field(..., min_length=1)
+
+
+class FrontendSmokeContract(BaseModel):
+    """Bounded Playwright contract for frontend runtime acceptance."""
+
+    start_command: list[str] = Field(..., min_length=1)
+    ready_path: str = Field(default="/", min_length=1)
+    login: FrontendLoginSmoke | None = None
+    routes: list[FrontendSmokeRoute] = Field(..., min_length=1)
+    layout_pairs: list[FrontendLayoutPair] = Field(default_factory=list)
+    startup_timeout_seconds: float = Field(default=30.0, ge=1.0, le=120.0)
+    action_timeout_seconds: float = Field(default=10.0, ge=1.0, le=30.0)
+
+    @field_validator("start_command")
+    @classmethod
+    def validate_start_command(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values if value.strip()]
+        if not normalized:
+            raise ValueError("smoke start_command 不能为空")
+        if not any("{port}" in value for value in normalized):
+            raise ValueError("smoke start_command 必须包含 {port} 占位符")
+        return normalized
+
+
+class FrontendRoute(BaseModel):
+    """A route declared by a high-risk frontend build plan."""
+
+    path: str = Field(..., min_length=1)
+    target: str = Field(..., min_length=1)
+
+    @field_validator("path", "target")
+    @classmethod
+    def normalize_route_fields(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("route path/target 不能为空")
+        return normalized
+
+
+class FrontendBuildContract(BaseModel):
+    """Deterministic hand-off contract shared by frontend build workers."""
+
+    project_root: str = Field(..., min_length=1)
+    entrypoints: list[str] = Field(..., min_length=1)
+    routes: list[FrontendRoute] = Field(..., min_length=1)
+    dependencies: list[str] = Field(..., min_length=1)
+    ownership: dict[str, list[str]] = Field(..., min_length=1)
+    verification_commands: list[str] = Field(..., min_length=1)
+    smoke_paths: list[str] = Field(..., min_length=1)
+    smoke: FrontendSmokeContract
+
+    @field_validator(
+        "entrypoints", "dependencies", "verification_commands", "smoke_paths"
+    )
+    @classmethod
+    def normalize_contract_lists(cls, values: list[str]) -> list[str]:
+        normalized = list(
+            dict.fromkeys(value.strip() for value in values if value.strip())
+        )
+        if not normalized:
+            raise ValueError("frontend_contract 列表清洗后不能为空")
+        return normalized
+
+    @field_validator("ownership")
+    @classmethod
+    def normalize_ownership(cls, values: dict[str, list[str]]) -> dict[str, list[str]]:
+        normalized = {
+            task_id.strip(): list(
+                dict.fromkeys(path.strip() for path in paths if path.strip())
+            )
+            for task_id, paths in values.items()
+            if task_id.strip()
+        }
+        if not normalized:
+            raise ValueError("frontend_contract ownership 不能为空")
+        return normalized
 
 
 class Task(BaseModel):
@@ -27,6 +154,14 @@ class Task(BaseModel):
     )
     parallel_safe: bool = Field(default=True, description="是否允许与同层任务并行")
     max_retries: int = Field(default=1, ge=0, le=3, description="瞬时失败定向重试次数")
+    frontend_stage: FrontendBuildStage | None = Field(
+        default=None,
+        description="高风险前端构建中的固定职责阶段",
+    )
+    frontend_contract: FrontendBuildContract | None = Field(
+        default=None,
+        description="仅集成 Worker 持有的前端闭包与验证合同",
+    )
 
     @field_validator("depends_on", "owned_paths")
     @classmethod
@@ -38,6 +173,10 @@ class TaskPlan(BaseModel):
     """Orchestrator 输出的任务计划"""
     summary: str = Field(default="", description="任务总览")
     tasks: list[Task] = Field(default_factory=list, description="子任务列表")
+    frontend_contract: FrontendBuildContract | None = Field(
+        default=None,
+        description="高风险前端项目的跨 Worker 构建合同",
+    )
 
 
 class ProviderConfig(BaseModel):

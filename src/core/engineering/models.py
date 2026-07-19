@@ -21,7 +21,7 @@ TaskKind = Literal[
 ]
 RiskLevel = Literal["unassessed", "low", "medium", "high", "external"]
 VerificationDepth = Literal["none", "targeted", "standard", "deep", "continuous"]
-ClassificationSource = Literal["rules", "inherited", "fallback"]
+ClassificationSource = Literal["rules", "inherited", "fallback", "observed"]
 EvidenceKind = Literal[
     "structure",
     "git",
@@ -57,6 +57,7 @@ class TaskExecutionPolicy(BaseModel):
     """任务类型对应的执行边界。"""
 
     allow_project_writes: bool = False
+    permission_follows_session: bool = False
     requires_plan: bool = False
     verification_depth: VerificationDepth = "targeted"
     collaboration_allowed: bool = False
@@ -74,6 +75,20 @@ class TaskIntent(BaseModel):
     classification_source: ClassificationSource = "fallback"
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     classification_note: str = ""
+
+
+class ObservedMutation(BaseModel):
+    """真实工具写入形成的动态风险信号，与初始权限分类分离。"""
+
+    project_files: list[str] = Field(default_factory=list)
+    ignored_files: list[str] = Field(default_factory=list)
+    dependency_files: list[str] = Field(default_factory=list)
+    new_directories: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    project_file_count: int = 0
+    original_kind: TaskKind | None = None
+    effective_kind: TaskKind | None = None
+    observed_at: str | None = None
 
 
 class WorkPlanStep(BaseModel):
@@ -274,7 +289,7 @@ class CompletionAudit(BaseModel):
 class RunJournal(BaseModel):
     """单轮工程运行的可持久化记录。"""
 
-    version: int = 2
+    version: int = 3
     run_id: str
     session_id: str
     objective: str = Field(..., min_length=1)
@@ -283,11 +298,15 @@ class RunJournal(BaseModel):
     updated_at: str = Field(default_factory=utc_now)
     completed_at: str | None = None
     intent: TaskIntent = Field(default_factory=TaskIntent)
+    effective_intent: TaskIntent | None = None
+    observed_mutation: ObservedMutation = Field(default_factory=ObservedMutation)
     plan: WorkPlan | None = None
     evidence: list[Evidence] = Field(default_factory=list)
     hypotheses: list[Hypothesis] = Field(default_factory=list)
     reconnaissance: ProjectReconnaissance = Field(default_factory=ProjectReconnaissance)
     decisions: list[str] = Field(default_factory=list)
+    rule_context: dict[str, Any] = Field(default_factory=dict)
+    permission_context: dict[str, Any] = Field(default_factory=dict)
     files_changed: list[str] = Field(default_factory=list)
     verification: list[VerificationGate] = Field(default_factory=list)
     requirements: list[RequirementCheck] = Field(default_factory=list)
@@ -418,6 +437,10 @@ class RunJournal(BaseModel):
             "status": self.status,
             "objective": self.objective,
             "intent": self.intent.model_dump(),
+            "effective_intent": (
+                self.effective_intent.model_dump() if self.effective_intent else None
+            ),
+            "observed_mutation": self.observed_mutation.model_dump(),
             "plan": self.plan.model_dump() if self.plan else None,
             "evidence_count": len(self.evidence),
             "evidence_preview": [
@@ -436,6 +459,8 @@ class RunJournal(BaseModel):
                 for status in ("untested", "supported", "refuted", "inconclusive")
             },
             "reconnaissance": self.reconnaissance.model_dump(),
+            "rule_context": self.rule_context,
+            "permission_context": self.permission_context,
             "verification_count": len(self.verification),
             "verification_summary": {
                 "passed": sum(item.passed is True for item in self.verification),

@@ -1,7 +1,7 @@
 """CLI `/runs` 本地工程记录查看命令测试"""
 from types import SimpleNamespace
 
-from src.cli.chat_command import _cmd_runs
+from src.cli.chat_command import _cmd_report, _cmd_runs
 from src.core.engineering.journal import RunJournalStore
 from src.core.engineering.models import (
     CompletionAudit,
@@ -46,7 +46,7 @@ def _make_session_with_runs(tmp_path):
     journal.residual_risks = ["未做真实 smoke"]
     journal.metrics = {"tool_calls": 3}
     store.save(journal)
-    return SimpleNamespace(output_dir=str(output_dir)), journal.run_id
+    return SimpleNamespace(output_dir=str(output_dir), id="session-x"), journal.run_id
 
 
 def test_cmd_runs_lists_recent_journals(tmp_path, capsys):
@@ -80,6 +80,25 @@ def test_cmd_runs_reports_missing_run(tmp_path, capsys):
 
 
 def test_cmd_runs_empty_session(tmp_path, capsys):
-    session = SimpleNamespace(output_dir=str(tmp_path / "out"))
+    session = SimpleNamespace(output_dir=str(tmp_path / "out"), id="empty")
     _cmd_runs(session, "")
     assert "暂无工程运行记录" in capsys.readouterr().out
+
+
+def test_cmd_report_aggregates_session_without_model_call(tmp_path, capsys):
+    session, run_id = _make_session_with_runs(tmp_path)
+
+    _cmd_report(session, "session")
+
+    out = capsys.readouterr().out
+    assert "本会话工程报告" in out
+    assert run_id in out
+    assert "未调用模型" in out
+
+
+def test_cmd_report_rejects_unknown_scope(tmp_path, capsys):
+    session = SimpleNamespace(output_dir=str(tmp_path / "out"), id="empty")
+
+    _cmd_report(session, "all")
+
+    assert "用法：/report [session|today]" in capsys.readouterr().out

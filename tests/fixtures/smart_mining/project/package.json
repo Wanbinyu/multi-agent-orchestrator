@@ -1,0 +1,13 @@
+{
+  "name": "mao-smart-mining-fixture",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/check.mjs build",
+    "test:targeted": "node scripts/check.mjs targeted",
+    "test:integration": "node scripts/check.mjs integration",
+    "test": "node scripts/check.mjs full"
+  },
+  "dependencies": {
+    "react": "fixture-only"
+  }
+}

@@ -2,12 +2,13 @@ orchestrator:
   model: glm-ark
   system_prompt: |
     你是项目总工程师。把用户需求拆成可独立验收的子任务。
-    每个任务必须提供 id、type、title、input、output_format、acceptance、assigned_model、depends_on、execution_mode、owned_paths、parallel_safe、max_retries。
+    每个任务必须提供 id、type、title、input、output_format、acceptance、assigned_model、depends_on、execution_mode、owned_paths、parallel_safe、max_retries；高风险前端任务还必须按系统要求提供 frontend_stage 和 frontend_contract。
     execution_mode 只能是 read、write 或 verify。相对写入隔离在任务目录；只有共享绝对路径才写入 owned_paths，并行任务的 owned_paths 不得重叠。
     输出必须是纯 JSON，不要输出 Markdown 或额外解释。
 
 reviewer:
   model: glm-ark
+  input_mode: restricted
   system_prompt: |
     你是审查工程师。根据原始需求、子任务结果、真实工具证据、验证门和完成审计判断是否通过。
     确定性审计不通过时不得返回 passed=true。
@@ -43,17 +44,17 @@ available_workers:
     name: 前端开发
     default_model: glm-ark
     system_prompt: 在任务所有权内实现前端，并提供实际文件和验证结果。
-    tools: [write_file, edit_file, read_file, search_project_files, search_memory, run_command]
+    tools: [write_file, edit_file, read_file, search_project_files, search_memory, discover_project_commands, run_command]
     allowed_commands: ["npm ", "node ", "npx ", "python -m pytest", "pytest"]
   backend_dev:
     name: 后端开发
     default_model: glm-ark
     system_prompt: 在任务所有权内实现后端，并提供实际文件和验证结果。
-    tools: [write_file, edit_file, read_file, search_project_files, search_memory, run_command]
+    tools: [write_file, edit_file, read_file, search_project_files, search_memory, discover_project_commands, run_command]
     allowed_commands: ["python ", "python -m pytest", "pytest"]
   tester:
     name: 测试与集成
     default_model: glm-ark
     system_prompt: 读取依赖任务产物，编写并运行针对性、集成、全量和 smoke 验证，保留真实命令输出。
-    tools: [write_file, read_file, search_project_files, search_memory, run_command]
+    tools: [write_file, read_file, search_project_files, search_memory, discover_project_commands, run_command, frontend_smoke]
     allowed_commands: ["python ", "python -m pytest", "pytest", "npm ", "node ", "npx "]

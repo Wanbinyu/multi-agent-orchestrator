@@ -174,6 +174,17 @@ def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
         "运行时 smoke 验证",
         "使用说明",
     ]
+    assert engineering["metrics"]["collaboration"]["distinct_roles"] >= 2
+    assert engineering["metrics"]["collaboration"]["reviewer_input_mode"] == "restricted"
+    assert {
+        item["role"]
+        for item in engineering["metrics"]["collaboration"]["roles"]
+    } >= {"orchestrator", "frontend", "backend", "reviewer"}
+    reviewer_role = next(
+        item for item in engineering["metrics"]["collaboration"]["roles"]
+        if item["role"] == "reviewer"
+    )
+    assert reviewer_role["input_mode"] == "restricted"
 
     # 最终答案应被追加到会话历史
     assert session.messages[-1].role == "assistant"

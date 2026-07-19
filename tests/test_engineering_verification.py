@@ -6,6 +6,7 @@ import pytest
 from src.core.engineering import (
     CompletionAuditor,
     Evidence,
+    MutationRiskEscalator,
     RunJournalStore,
     TaskIntentClassifier,
     ToolEvidenceRecorder,
@@ -129,6 +130,101 @@ def test_readonly_task_does_not_require_engineering_verification(tmp_path):
     assert journal.requirements == []
 
 
+def _unclassified_journal(tmp_path):
+    intent = TaskIntentClassifier().classify("处理一下", "auto")
+    return RunJournalStore(tmp_path / "runs").create(
+        "session-1", "处理一下", "auto", intent=intent
+    )
+
+
+def _record_write(journal, path: str, *, metadata: dict | None = None):
+    ToolEvidenceRecorder().record(
+        journal,
+        "write_file",
+        {"path": path, "content": "x"},
+        ToolResult(success=True, output=f"已写入文件：{path}"),
+        metadata=metadata,
+    )
+
+
+def test_observed_single_project_write_escalates_unclassified_audit(tmp_path):
+    journal = _unclassified_journal(tmp_path)
+    _record_write(journal, "src/app.py")
+
+    changed = MutationRiskEscalator(tmp_path / "output").observe(journal)
+    audit = CompletionAuditor().audit(journal, "completed")
+
+    assert changed is True
+    assert journal.intent.kind == "unclassified"
+    assert journal.effective_intent is not None
+    assert journal.effective_intent.kind == "change"
+    assert journal.effective_intent.risk_level == "medium"
+    assert journal.effective_intent.policy.verification_depth == "standard"
+    assert journal.observed_mutation.project_file_count == 1
+    assert audit.status == "blocked"
+    assert audit.status != "not_required"
+    assert audit.missing_checks == ["针对性验证", "相邻模块回归"]
+
+
+def test_two_observed_project_writes_escalate_to_deep_build(tmp_path):
+    journal = _unclassified_journal(tmp_path)
+    _record_write(journal, "src/app.py")
+    _record_write(journal, "src/router.py")
+
+    MutationRiskEscalator(tmp_path / "output").observe(journal)
+    audit = CompletionAuditor().audit(journal, "completed")
+
+    assert journal.effective_intent is not None
+    assert journal.effective_intent.kind == "build"
+    assert journal.effective_intent.risk_level == "high"
+    assert journal.effective_intent.policy.verification_depth == "deep"
+    assert journal.effective_intent.policy.requires_plan is True
+    assert journal.effective_intent.policy.collaboration_allowed is True
+    assert journal.observed_mutation.project_file_count == 2
+    assert audit.status == "blocked"
+    assert audit.required_checks == ["targeted", "integration", "full", "smoke"]
+
+
+@pytest.mark.parametrize(
+    ("path", "metadata"),
+    [
+        ("package.json", None),
+        (
+            "features/login/page.tsx",
+            {"created_new_directory": True},
+        ),
+    ],
+)
+def test_dependency_or_new_directory_write_escalates_to_build(
+    tmp_path, path, metadata
+):
+    journal = _unclassified_journal(tmp_path)
+    _record_write(journal, path, metadata=metadata)
+
+    MutationRiskEscalator(tmp_path / "output").observe(journal)
+
+    assert journal.effective_intent is not None
+    assert journal.effective_intent.kind == "build"
+    assert journal.effective_intent.policy.verification_depth == "deep"
+
+
+def test_session_response_archive_is_not_a_project_mutation(tmp_path):
+    output_dir = tmp_path / "sessions" / "demo" / "output"
+    response_path = output_dir / "response.md"
+    journal = _unclassified_journal(tmp_path)
+
+    changed = MutationRiskEscalator(output_dir).observe(
+        journal, files_changed=[str(response_path)]
+    )
+    audit = CompletionAuditor().audit(journal, "completed")
+
+    assert changed is True
+    assert journal.effective_intent is None
+    assert journal.observed_mutation.project_file_count == 0
+    assert journal.observed_mutation.ignored_files == [str(response_path.resolve())]
+    assert audit.status == "not_required"
+
+
 def test_verification_tracker_deduplicates_cached_result(tmp_path):
     journal = _change_journal(tmp_path)
     params = {"command": "pytest tests/test_agent.py"}
@@ -143,6 +239,71 @@ def test_verification_tracker_deduplicates_cached_result(tmp_path):
     ) is False
     assert len(journal.verification) == 1
     assert journal.verification[0].evidence_ids
+
+
+def test_command_preflight_rejection_is_not_a_failed_test_gate(tmp_path):
+    journal = _change_journal(tmp_path)
+    params = {"command": "npm test", "cwd": "project"}
+    result = ToolResult(
+        success=False,
+        error="工作目录不存在",
+        metadata={
+            "error_code": "cwd_not_found",
+            "cwd": "project",
+            "exit_code": None,
+            "truncated": False,
+        },
+    )
+
+    ToolEvidenceRecorder().record(journal, "run_command", params, result)
+    changed = VerificationTracker().record(journal, "run_command", params, result)
+
+    assert changed is False
+    assert journal.verification == []
+    assert journal.evidence[0].kind == "runtime"
+    assert journal.evidence[0].claim == "命令未执行：cwd_not_found"
+
+
+def test_verification_gate_records_structured_cwd(tmp_path):
+    journal = _change_journal(tmp_path)
+    params = {"command": "npm test", "cwd": "frontend"}
+    result = ToolResult(
+        success=True,
+        output="tests passed",
+        metadata={
+            "cwd": str((tmp_path / "frontend").resolve()),
+            "exit_code": 0,
+            "truncated": False,
+        },
+    )
+
+    ToolEvidenceRecorder().record(journal, "run_command", params, result)
+    VerificationTracker().record(journal, "run_command", params, result)
+
+    assert journal.verification[0].command_or_check == (
+        f"npm test (cwd: {(tmp_path / 'frontend').resolve()})"
+    )
+
+
+def test_frontend_smoke_tool_creates_required_smoke_gate(tmp_path):
+    journal = _change_journal(tmp_path)
+    result = ToolResult(
+        success=True,
+        output='{"passed": true}',
+        metadata={"check_type": "smoke", "server_cleaned": True},
+    )
+
+    ToolEvidenceRecorder().record(
+        journal, "frontend_smoke", {"project_root": str(tmp_path)}, result
+    )
+    changed = VerificationTracker().record(
+        journal, "frontend_smoke", {"project_root": str(tmp_path)}, result
+    )
+
+    assert changed is True
+    assert journal.verification[-1].check_type == "smoke"
+    assert journal.verification[-1].passed is True
+    assert journal.verification[-1].expected == "浏览器 smoke 报告通过"
 
 
 def test_deep_build_requires_usage_documentation_evidence(tmp_path):
@@ -209,7 +370,7 @@ def test_verification_matrix_and_audit_survive_journal_round_trip(tmp_path):
 
     loaded = store.load(journal.run_id)
 
-    assert loaded.version == 2
+    assert loaded.version == 3
     assert loaded.audit is not None
     assert loaded.audit.status == "passed"
     assert len(loaded.verification) == 2

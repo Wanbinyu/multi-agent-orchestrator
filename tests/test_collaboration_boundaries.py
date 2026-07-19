@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from src.core.collaboration import (
+    MAX_COLLABORATION_TASKS,
     CollaborationPlanError,
     is_write_path_allowed,
     normalize_task_contract,
@@ -43,6 +44,15 @@ def test_plan_rejects_duplicate_missing_self_and_cyclic_dependencies():
         validate_collaboration_plan(
             TaskPlan(tasks=[_task("a", depends_on=["missing"])])
         )
+
+
+def test_plan_rejects_unbounded_task_fanout():
+    plan = TaskPlan(
+        tasks=[_task(f"task-{index}") for index in range(MAX_COLLABORATION_TASKS + 1)]
+    )
+
+    with pytest.raises(CollaborationPlanError, match="超过上限"):
+        validate_collaboration_plan(plan)
     with pytest.raises(CollaborationPlanError, match="依赖自身"):
         validate_collaboration_plan(TaskPlan(tasks=[_task("a", depends_on=["a"])]))
     with pytest.raises(CollaborationPlanError, match="依赖环"):

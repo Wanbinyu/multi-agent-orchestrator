@@ -8,6 +8,35 @@ from src.core.engineering.models import Evidence, EvidenceKind, RunJournal
 from src.tools.tool_result import ToolResult
 
 
+def file_mutation_metadata(
+    tool_name: str, params: dict[str, Any], base_dir: str | Path
+) -> dict[str, Any]:
+    """在写工具执行前捕获文件与父目录状态，供动态风险判断。"""
+    if tool_name not in {"write_file", "edit_file"}:
+        return {}
+    raw_path = str(params.get("path", "")).strip()
+    if not raw_path:
+        return {}
+    try:
+        target = Path(raw_path).expanduser()
+        if not target.is_absolute():
+            target = Path(base_dir) / target
+        target = target.resolve(strict=False)
+        resolved_base = Path(base_dir).expanduser().resolve(strict=False)
+        return {
+            "resolved_path": str(target),
+            "file_existed_before": target.exists(),
+            "parent_existed_before": target.parent.exists(),
+            "created_new_directory": (
+                tool_name == "write_file"
+                and target.parent != resolved_base
+                and not target.parent.exists()
+            ),
+        }
+    except (OSError, RuntimeError, ValueError):
+        return {}
+
+
 _EXCERPT_LIMIT = 800
 _DOC_NAMES = {"readme", "agents.md", "contributing.md", "architecture.md"}
 _DEPENDENCY_NAMES = {
@@ -47,7 +76,12 @@ def _excerpt(result: ToolResult) -> str:
 
 
 def _path(params: dict[str, Any]) -> str:
-    value = params.get("path") or params.get("root") or ""
+    value = (
+        params.get("path")
+        or params.get("root")
+        or params.get("project_root")
+        or ""
+    )
     return str(value)
 
 
@@ -88,7 +122,11 @@ class ToolEvidenceRecorder:
             command=command,
             success=result.success,
             cached=cached,
-            metadata={"skipped": skipped, **(metadata or {})},
+            metadata={
+                "skipped": skipped,
+                **(result.metadata or {}),
+                **(metadata or {}),
+            },
         )
         _, added = journal.add_evidence(evidence)
         reconnaissance_changed = self._update_reconnaissance(
@@ -118,9 +156,18 @@ class ToolEvidenceRecorder:
         if tool_name in {"glob_files", "grep_content"}:
             action = "已完成" if result.success else "执行失败"
             return "search", f"{action}代码检索：{path or '.'}"
+        if (
+            tool_name == "run_command"
+            and result.metadata.get("error_code")
+            and result.metadata.get("exit_code") is None
+        ):
+            return "runtime", f"命令未执行：{result.metadata['error_code']}"
         if tool_name == "run_command" and is_test_command(command):
             outcome = "通过" if result.success else "失败"
             return "test", f"测试命令执行{outcome}：{command}"
+        if tool_name == "frontend_smoke":
+            outcome = "通过" if result.success else "失败"
+            return "test", f"前端浏览器 smoke {outcome}"
         if tool_name in {"write_file", "edit_file"}:
             action = "已修改" if result.success else "修改失败"
             return "change", f"{action}文件：{path}"

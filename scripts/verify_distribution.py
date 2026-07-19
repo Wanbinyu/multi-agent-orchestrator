@@ -94,9 +94,9 @@ def _wait_for_json(url: str, timeout: float = 30.0) -> dict:
 
 def _smoke_installed_wheel(wheel: Path, temp_root: Path) -> None:
     venv_dir = temp_root / "venv"
-    venv.EnvBuilder(with_pip=True, system_site_packages=True).create(venv_dir)
+    venv.EnvBuilder(with_pip=True, system_site_packages=False).create(venv_dir)
     python = _entrypoint(venv_dir, "python")
-    _run([str(python), "-m", "pip", "install", "--no-deps", "--force-reinstall", str(wheel)])
+    _run([str(python), "-m", "pip", "install", "--force-reinstall", str(wheel)])
 
     mao = _entrypoint(venv_dir, "mao")
     clean_dir = temp_root / "clean-workspace"
@@ -158,8 +158,12 @@ def main() -> None:
         wheel = next(dist_dir.glob("*.whl"))
         sdist = next(dist_dir.glob("*.tar.gz"))
         _assert_archive_contract(wheel, sdist)
+        _run([sys.executable, "-m", "twine", "check", str(wheel), str(sdist)])
         _smoke_installed_wheel(wheel, temp_root)
-    print("Distribution acceptance passed: archives, clean CLI, and Web health are valid.")
+    print(
+        "Distribution acceptance passed: archives, twine metadata, clean CLI, "
+        "and Web health are valid."
+    )
 
 
 if __name__ == "__main__":

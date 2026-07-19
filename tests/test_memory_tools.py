@@ -55,7 +55,9 @@ def test_search_project_files_auto_index(memory_store: MemoryStore, tmp_path: Pa
     )
     indexer.index_project(root_dir=tmp_path, force=True)
 
-    result = search_project_files("helper", base_dir=str(tmp_path))
+    result = search_project_files(
+        "helper", base_dir=str(tmp_path), memory_store=memory_store
+    )
     assert result.success is True
     assert "utils.py" in result.output
 
@@ -81,6 +83,8 @@ def test_search_project_files_no_match(memory_store: MemoryStore, tmp_path: Path
     (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
     indexer.index_project(root_dir=tmp_path, force=True)
 
-    result = search_project_files("nonexistent_symbol", base_dir=str(tmp_path))
+    result = search_project_files(
+        "nonexistent_symbol", base_dir=str(tmp_path), memory_store=memory_store
+    )
     assert result.success is True
     assert "未找到" in result.output

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -20,6 +21,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from src.core.agent import Agent
+from src.core.engineering import SessionRecoveryManager
 from src.core.memory import MemoryStore
 from src.core.session import SessionStore
 from src.gateway.client import GatewayClient
@@ -31,12 +33,19 @@ console = Console()
 SLASH_COMMANDS: list[tuple[str, str, str]] = [
     ("/new", "/new [标题]", "创建新会话"),
     ("/load", "/load <id>", "加载已有会话"),
+    ("/resume", "/resume <continue|abandon>", "确认继续或放弃中断任务"),
     ("/save", "/save", "保存当前会话"),
     ("/sessions", "/sessions", "列出最近会话"),
     ("/runs", "/runs [run_id]", "本地查看本会话工程运行记录"),
+    ("/report", "/report [session|today]", "本地汇总真实交付与 token 指标"),
     ("/context", "/context", "显示上下文预算与自动压缩状态"),
     ("/tree", "/tree [路径] [深度]", "零 token 显示项目结构"),
     ("/plan", "/plan <需求>", "执行一次性多模型任务计划"),
+    ("/plan enter", "/plan enter [目标]", "进入持久化只读 Plan 模式"),
+    ("/plan show", "/plan show", "查看当前方案"),
+    ("/plan revise", "/plan revise <意见>", "要求修订当前方案"),
+    ("/plan approve", "/plan approve", "批准方案并开始实施"),
+    ("/plan cancel", "/plan cancel", "取消 Plan 模式"),
     ("/memory add", "/memory add <分类> <内容>", "添加长期记忆"),
     ("/memory list", "/memory list [分类]", "列出长期记忆"),
     ("/memory search", "/memory search <查询>", "搜索长期记忆"),
@@ -366,12 +375,22 @@ async def _stream_turn(agent: Agent, user_input: str):
                 engineering_run_id = str(engineering.get("run_id", engineering_run_id))
                 engineering_status = str(engineering.get("status", engineering_status))
                 intent = engineering.get("intent", {}) or {}
-                policy = intent.get("policy", {}) or {}
-                engineering_kind = str(intent.get("kind", engineering_kind))
-                engineering_risk = str(intent.get("risk_level", engineering_risk))
-                if policy.get("allow_project_writes"):
+                effective_intent = engineering.get("effective_intent", {}) or {}
+                display_intent = effective_intent or intent
+                policy = intent.get("policy", {}) or display_intent.get("policy", {}) or {}
+                engineering_kind = str(display_intent.get("kind", engineering_kind))
+                engineering_risk = str(display_intent.get("risk_level", engineering_risk))
+                if effective_intent.get("write_authorized"):
+                    engineering_write_state = "写入已授权"
+                elif getattr(agent, "approval_mode", "approve") == "readonly":
+                    engineering_write_state = "只读"
+                elif policy.get("allow_project_writes") or policy.get(
+                    "permission_follows_session"
+                ):
                     engineering_write_state = (
-                        "写入已授权" if intent.get("write_authorized") else "写入需批准"
+                        "写入已授权"
+                        if (intent or display_intent).get("write_authorized")
+                        else "写入需批准"
                     )
                 else:
                     engineering_write_state = "只读"
@@ -622,14 +641,58 @@ def _cmd_new(store: SessionStore, title: str = ""):
     return session
 
 
+def _print_recovery_notice(session) -> bool:
+    state = SessionRecoveryManager(session).inspect()
+    if not state.required:
+        return False
+    steps = (
+        "\n".join(f"  - {item['title']} [{item['status']}]" for item in state.unfinished_steps)
+        or "  - 无结构化步骤；上次 run 状态需要人工确认"
+    )
+    console.print(Panel(
+        f"状态：{state.run_status}\n"
+        f"原因：{state.reason}\n"
+        f"未完成步骤：{state.unfinished_step_count}\n{steps}\n\n"
+        "输入 /resume continue 继续未完成部分，或 /resume abandon 放弃。\n"
+        "确认前不会调用模型、执行工具或自动重放。",
+        title="检测到中断任务",
+        border_style="yellow",
+    ))
+    return True
+
+
 def _cmd_load(store: SessionStore, session_id: str):
     try:
         session = store.load(session_id)
         console.print(f"[bold green]已加载会话：{session.id}[/bold green]")
+        _print_recovery_notice(session)
         return session
     except FileNotFoundError:
         console.print(f"[bold red]会话不存在：{session_id}[/bold red]")
         return None
+
+
+def _cmd_resume(store: SessionStore, session, action: str) -> bool:
+    normalized = action.strip().lower()
+    if normalized not in {"continue", "abandon"}:
+        console.print("[bold red]用法：/resume <continue|abandon>[/bold red]")
+        return False
+    manager = SessionRecoveryManager(session)
+    try:
+        manager.decide(normalized)
+    except ValueError as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        return False
+    store.save(session)
+    if normalized == "continue":
+        console.print(
+            "[bold green]已确认继续。下一条消息会创建新 run，且只携带未完成步骤检查点。[/bold green]"
+        )
+    else:
+        console.print(
+            "[dim]已放弃中断任务；既有文件和证据保持原样，未执行回滚或重放。[/dim]"
+        )
+    return True
 
 
 def _cmd_sessions(store: SessionStore):
@@ -696,6 +759,33 @@ def _cmd_runs(session, run_id: str = "") -> None:
         )
     console.print(
         "[dim]使用 /runs <run_id> 查看完整工程记录；本命令为本地读取，未调用模型。[/dim]"
+    )
+
+
+def _cmd_report(session, scope: str = "session") -> None:
+    """Aggregate all local RunJournals without a model call."""
+    from src.core.engineering import (
+        DeliveryReportBuilder,
+        RunJournalStore,
+        load_today_journals,
+    )
+
+    normalized = scope.strip().casefold() or "session"
+    if normalized not in {"session", "today"}:
+        console.print("用法：/report [session|today]", style="bold red", markup=False)
+        return
+    if normalized == "today":
+        sessions_root = Path(session.output_dir).resolve().parent.parent
+        journals = load_today_journals(sessions_root)
+        report = DeliveryReportBuilder().build(journals, scope="today")
+    else:
+        journals = RunJournalStore.from_output_dir(session.output_dir).list()
+        report = DeliveryReportBuilder().build(
+            journals, scope="session", session_id=session.id
+        )
+    console.print(Markdown(report.to_markdown()))
+    console.print(
+        "[dim]报告仅聚合本地 RunJournal 直接证据，未调用模型、未产生 token。[/dim]"
     )
 
 
@@ -850,6 +940,7 @@ def _cmd_memory_index(store: MemoryStore):
         stats = indexer.index_project(root_dir=".", force=True)
         console.print(
             f"[bold green]索引完成：[/bold green] 扫描 {stats.get('scanned', 0)} 个文件，"
+            f"读取 {stats.get('read', 0)} 个，复用 {stats.get('reused', 0)} 个，"
             f"新增 {stats.get('added', 0)} 个，更新 {stats.get('updated', 0)} 个，"
             f"总计 {stats.get('total', 0)} 个"
         )
@@ -1091,6 +1182,9 @@ def run_chat_loop(
                         mode_ref[0] = session.approval_mode
                         pt_session = _make_prompt_session(mode_ref)
                         agent = Agent(gateway, session, memory_store=memory_store)
+                elif cmd == "/resume":
+                    if _cmd_resume(store, session, arg):
+                        agent = Agent(gateway, session, memory_store=memory_store)
                 elif cmd == "/save":
                     store.save(session)
                     console.print(f"[bold green]已保存会话：{session.id}[/bold green]")
@@ -1098,15 +1192,70 @@ def run_chat_loop(
                     _cmd_sessions(store)
                 elif cmd == "/runs":
                     _cmd_runs(session, arg)
+                elif cmd == "/report":
+                    _cmd_report(session, arg)
                 elif cmd == "/context":
                     _cmd_context(agent)
                 elif cmd == "/tree":
                     _cmd_tree(arg)
                 elif cmd == "/plan":
                     if not arg:
-                        console.print("[bold red]用法：/plan <需求>[/bold red]")
+                        console.print(
+                            "[bold red]用法：/plan <需求>，或 /plan enter/show/revise/approve/cancel[/bold red]"
+                        )
                         continue
-                    _cmd_plan(gateway, arg, session.output_dir, mode_ref[0])
+                    plan_parts = arg.split(" ", 1)
+                    plan_action = plan_parts[0].strip().lower()
+                    plan_arg = plan_parts[1].strip() if len(plan_parts) > 1 else ""
+                    if plan_action == "enter":
+                        session.enter_plan_mode(plan_arg)
+                        store.save(session)
+                        console.print(
+                            "[bold cyan]已进入 Plan 模式。下一条消息只会侦察和制定方案，不会修改项目。[/bold cyan]"
+                        )
+                    elif plan_action == "show":
+                        artifact = session.plan_artifact
+                        if artifact is None:
+                            console.print("[dim]当前没有 Plan 方案。[/dim]")
+                        else:
+                            body = artifact.content or "（方案尚未生成）"
+                            console.print(
+                                Panel(
+                                    Markdown(body),
+                                    title=f"Plan · {session.plan_mode} · revision {artifact.revision}",
+                                    border_style="cyan",
+                                )
+                            )
+                    elif plan_action == "revise":
+                        if not plan_arg:
+                            console.print("[bold red]用法：/plan revise <意见>[/bold red]")
+                            continue
+                        try:
+                            session.request_plan_revision(plan_arg)
+                        except ValueError as exc:
+                            console.print(f"[bold red]{exc}[/bold red]")
+                        else:
+                            store.save(session)
+                            console.print("[cyan]已记录修订意见，请发送下一条消息生成新版方案。[/cyan]")
+                    elif plan_action == "approve":
+                        try:
+                            approved_plan = session.approve_plan()
+                        except ValueError as exc:
+                            console.print(f"[bold red]{exc}[/bold red]")
+                        else:
+                            store.save(session)
+                            implementation_request = (
+                                "请严格按照下面已经批准的方案开始实施；遵守当前项目规则和权限规则，"
+                                "完成后运行与风险匹配的验证。\n\n" + approved_plan
+                            )
+                            asyncio.run(_stream_turn(agent, implementation_request))
+                            store.save(session)
+                    elif plan_action == "cancel":
+                        session.cancel_plan_mode()
+                        store.save(session)
+                        console.print("[dim]已取消 Plan 模式。[/dim]")
+                    else:
+                        _cmd_plan(gateway, arg, session.output_dir, mode_ref[0])
                 elif cmd == "/memory":
                     mem_parts = arg.split(" ", 1)
                     subcmd = mem_parts[0].strip().lower() if mem_parts else ""
@@ -1167,6 +1316,8 @@ def run_chat_loop(
                 continue
 
             try:
+                if _print_recovery_notice(session):
+                    continue
                 asyncio.run(_stream_turn(agent, user_input))
                 store.save(session)
             except Exception as e:

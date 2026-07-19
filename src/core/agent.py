@@ -8,6 +8,7 @@ import threading
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -17,12 +18,15 @@ from src.core.context_budget import ContextBudgetManager
 from src.core.engineering import (
     CompletionAuditor,
     Evidence,
+    MutationRiskEscalator,
     RunJournal,
     RunJournalStore,
+    SessionRecoveryManager,
     TaskIntent,
     TaskIntentClassifier,
     ToolEvidenceRecorder,
     VerificationTracker,
+    file_mutation_metadata,
 )
 from src.core.memory import MemoryContextBuilder, MemoryStore
 from src.core.native_content import (
@@ -30,6 +34,9 @@ from src.core.native_content import (
     native_tool_specs,
     tool_result_blocks,
 )
+from src.core.project_rules import ProjectRuleBundle, ProjectRuleResolver
+from src.core.permission_rules import PermissionRuleEngine
+from src.core.planning_council import PlanningCouncil, PlanningCouncilResult
 from src.core.session import Session
 from src.core.token_counter import count_messages_tokens
 from src.gateway.client import GatewayClient
@@ -46,16 +53,23 @@ from src.tools.file_tools import write_text_file
 from src.tools.read_cache import build_read_cache_key, should_invalidate_read_cache
 from src.tools.registry import tool_registry
 from src.tools.tool_result import ToolResult
-from src.tools.worker_tools import execute_tool_call
+from src.tools.worker_tools import (
+    COMMAND_PERMISSION_GUIDANCE,
+    command_correction_exhausted,
+    command_correction_limit_result,
+    execute_tool_call,
+    record_command_preflight_failure,
+)
 
 
 # 工具说明由注册表自动生成；这里保留调用规则与约束。
 TOOL_RULES = """规则：
 - 只能使用上面这种 Markdown 代码块调用工具，不要输出原生 JSON tool_use 或 function_call。
 - 如果用户请求需要读取、写入或执行命令，请直接输出对应的工具代码块。
-- 当用户要求分析、检查或审阅项目时，先调用 project_tree 获取精简结构，再调用 git_status 检查版本状态；随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
+- 当用户要求分析、检查或审阅项目时，先调用 project_tree 获取精简结构，再调用 git_status 检查版本状态；search_project_files 必须沿用同一个项目根 path。随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
 - 项目判断必须以工具返回的文件、检索、Git 或测试结果为证据；工具没有确认的细节标记为“待确认”，禁止把推测写成事实。
 - 修改任务必须运行与风险匹配的真实验证：普通修改至少覆盖针对性测试和相邻模块回归；高风险构建还要有 integration/e2e、全量测试和 smoke 验证。缺少任何一层时必须说明“验证未闭环”，不能宣称已完成。
+- 执行项目命令前先用 discover_project_commands 读取真实脚本；run_command 必须把工作目录放在 cwd 参数，禁止使用 cd &&、管道、重定向或 head。参数/权限失败后最多修正一次，仍失败就停止并报告。
 - 当你说要“查看”、“读取”或“探查”某个文件时，必须在同一轮回复中立即调用 read_file 工具，不能只口头描述而不调用工具。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块（正文代码块不会被保存为文件）。每个文件一次 write_file，path 用有意义的文件名。
 - 如果用户指定了绝对路径（如 G:\\MAO_test\\index.html），直接使用该路径；如果只给了文件夹（如 G:\\MAO_test），请在该文件夹下创建合理的文件名，例如 index.html、login.js、style.css。
@@ -72,9 +86,10 @@ TOOL_RULES = """规则：
 # 原生 tool_use 模式下的规则（工具定义由 tools= 参数提供，无需 Markdown 说明）
 TOOL_RULES_NATIVE = """规则：
 - 你可以通过原生工具调用（tool_use）使用提供的工具完成用户任务。
-- 分析、检查或审阅项目时，先调用 project_tree，再调用 git_status；随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
+- 分析、检查或审阅项目时，先调用 project_tree，再调用 git_status；search_project_files 必须沿用同一个项目根 path。随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
 - 项目判断必须以工具返回的文件、检索、Git 或测试结果为证据；未由工具确认的细节标记为“待确认”，禁止把推测写成事实。
 - 修改任务必须运行与风险匹配的真实验证：普通修改至少覆盖针对性测试和相邻模块回归；高风险构建还要有 integration/e2e、全量测试和 smoke 验证。缺少任何一层时必须说明“验证未闭环”，不能宣称已完成。
+- 执行项目命令前先调用 discover_project_commands；run_command 使用独立 cwd，禁止 cd &&、管道、重定向或 head。参数/权限失败后最多修正一次。
 - 当你说要“查看”或“读取”某个文件时，必须立即调用 read_file，不能只口头描述。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块。
 - 如果用户指定了绝对路径，直接使用该路径；如果只给了文件夹，请在该文件夹下创建合理的文件名。
@@ -130,6 +145,37 @@ class AgentTurnResult(BaseModel):
     engineering: dict[str, Any] = Field(default_factory=dict)
 
 
+def _response_usage(response: Any) -> dict[str, int | float]:
+    """Extract only serializable usage scalars from real or mocked responses."""
+    input_tokens = getattr(response, "input_tokens", 0)
+    output_tokens = getattr(response, "output_tokens", 0)
+    cost_usd = getattr(response, "cost_usd", 0.0)
+    return {
+        "input_tokens": input_tokens if isinstance(input_tokens, int) else 0,
+        "output_tokens": output_tokens if isinstance(output_tokens, int) else 0,
+        "cost_usd": (
+            float(cost_usd) if isinstance(cost_usd, (int, float)) else 0.0
+        ),
+    }
+
+
+def _delivery_report_scope(user_input: str) -> Literal["session", "today"] | None:
+    """Recognize only explicit engineering-history report requests."""
+    normalized = " ".join(user_input.casefold().split())
+    today_markers = (
+        "今日工程报告", "今天的工程报告", "今日操作整理", "今天的操作过程",
+        "总结今天的操作", "整理今天的操作",
+    )
+    session_markers = (
+        "本会话工程报告", "本会话工程总结", "总结本会话操作", "整理本会话操作",
+    )
+    if any(marker in normalized for marker in today_markers):
+        return "today"
+    if any(marker in normalized for marker in session_markers):
+        return "session"
+    return None
+
+
 class Agent:
     """对话 Agent"""
 
@@ -144,6 +190,8 @@ class Agent:
         compaction_threshold: float = 0.75,
         journal_store: RunJournalStore | None = None,
         intent_classifier: TaskIntentClassifier | None = None,
+        project_rule_resolver: ProjectRuleResolver | None = None,
+        permission_rule_engine: PermissionRuleEngine | None = None,
     ):
         self.gateway = gateway
         self.session = session
@@ -163,10 +211,30 @@ class Agent:
             session.output_dir
         )
         self.intent_classifier = intent_classifier or TaskIntentClassifier()
+        self.project_rule_resolver = project_rule_resolver or ProjectRuleResolver()
+        self._active_project_rules = ProjectRuleBundle()
+        self._configured_permission_engine = permission_rule_engine
+        self._active_permission_engine = permission_rule_engine or PermissionRuleEngine()
         self.evidence_recorder = ToolEvidenceRecorder()
         self.verification_tracker = VerificationTracker()
         self.completion_auditor = CompletionAuditor()
+        self.mutation_escalator = MutationRiskEscalator(self.session.output_dir)
         self._active_run_journal: RunJournal | None = None
+        self.recovery_manager = SessionRecoveryManager(session, self.journal_store)
+        self._active_recovery_checkpoint = None
+
+    def _claim_recovery_checkpoint(self, journal: RunJournal) -> None:
+        checkpoint = self.recovery_manager.claim_checkpoint(journal.run_id)
+        self._active_recovery_checkpoint = checkpoint
+        if checkpoint is None:
+            return
+        journal.decisions.append(
+            f"[recovery] 续跑检查点来自 {checkpoint.run_id}；"
+            f"未完成步骤 {len(checkpoint.unfinished_step_ids)} 个，"
+            f"已完成步骤 {len(checkpoint.completed_step_ids)} 个。"
+        )
+        journal.metrics["recovery"] = checkpoint.model_dump()
+        self.journal_store.save(journal)
 
     def _start_engineering_run(self, user_input: str) -> RunJournal:
         previous_intent = None
@@ -187,6 +255,34 @@ class Agent:
             self.approval_mode,
             intent=intent,
         )
+        try:
+            self._active_project_rules = self.project_rule_resolver.resolve(user_input)
+        except Exception as exc:  # project rules must never prevent a conversation
+            self._active_project_rules = ProjectRuleBundle(
+                diagnostics=[f"项目规则解析失败：{exc}"]
+            )
+        journal.rule_context = self._active_project_rules.summary()
+        if self._configured_permission_engine is not None:
+            self._active_permission_engine = self._configured_permission_engine
+        else:
+            project_root = self._active_project_rules.project_root or None
+            self._active_permission_engine = PermissionRuleEngine.load(
+                project_root=project_root,
+                user_config=str(Path(self.session.config_dir) / "permissions.yaml"),
+                workspace=project_root or Path.cwd(),
+            )
+        journal.permission_context = self._active_permission_engine.summary()
+        confirmed_facts = list(journal.metrics.get("confirmed_facts") or [])
+        if (Path(self.session.config_dir) / "providers.yaml").is_file():
+            confirmed_facts.append("provider_configured")
+        journal.metrics["confirmed_facts"] = list(dict.fromkeys(confirmed_facts))
+        journal.metrics["approval_mode"] = self.approval_mode
+        if self._active_project_rules.sources:
+            journal.decisions.append(
+                f"加载 {len(self._active_project_rules.sources)} 个项目规则文件，"
+                f"共 {self._active_project_rules.total_chars} 字符。"
+            )
+        self.journal_store.save(journal)
         self._active_run_journal = journal
         return journal
 
@@ -201,7 +297,8 @@ class Agent:
         cost_usd: float = 0.0,
         residual_risks: list[str] | None = None,
     ) -> dict[str, Any]:
-        if files_changed and journal.intent.policy.allow_project_writes:
+        self.mutation_escalator.observe(journal, files_changed=files_changed)
+        if files_changed and self._permission_allows_non_read_tools(journal.intent):
             journal.intent.write_authorized = True
         audit = self.completion_auditor.audit(journal, status)
         resolved_status = status
@@ -312,6 +409,7 @@ class Agent:
         *,
         cached: bool = False,
         skipped: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         """记录真实工具结果；有状态变化时立即原子持久化。"""
         evidence_changed = self.evidence_recorder.record(
@@ -321,6 +419,7 @@ class Agent:
             result,
             cached=cached,
             skipped=skipped,
+            metadata=metadata,
         )
         verification_changed = self.verification_tracker.record(
             journal,
@@ -330,7 +429,8 @@ class Agent:
             cached=cached,
             skipped=skipped,
         )
-        changed = evidence_changed or verification_changed
+        mutation_changed = self.mutation_escalator.observe(journal)
+        changed = evidence_changed or verification_changed or mutation_changed
         if changed:
             self.journal_store.save(journal)
         return changed
@@ -492,24 +592,62 @@ class Agent:
             self.gateway,
             max_context_tokens=max_ctx,
             threshold=self.get_context_status()["compaction_threshold"],
+            artifact_dir=Path(self.session.output_dir) / "context",
+            task_checkpoint=self._build_task_checkpoint(),
         )
         if not compactor.needs_compaction(self.session.messages):
             return False
         before = len(self.session.messages)
         new_messages = compactor.maybe_compact(self.session.messages)
         if len(new_messages) < before:
+            metadata = compactor.last_metadata
             self.session.record_compaction_event(
                 {
                     "at": datetime.now(timezone.utc).isoformat(),
                     "before_tokens": count_messages_tokens(self.session.messages),
                     "after_tokens": count_messages_tokens(new_messages),
                     "dropped_messages": before - len(new_messages),
-                    "layer": "summary",
+                    "layer": "/".join(metadata.layers),
+                    "layers": metadata.layers,
+                    "deduplicated_messages": metadata.deduplicated_messages,
+                    "schema_valid": metadata.schema_valid,
+                    "fallback_used": metadata.fallback_used,
+                    "fallback_reason": metadata.fallback_reason,
+                    "entity_retention": metadata.entity_retention,
+                    "task_relevance_ratio": metadata.task_relevance_ratio,
+                    "quality_passed": metadata.quality_passed,
+                    "checkpoint_count": metadata.checkpoint_count,
+                    "artifact_path": metadata.artifact_path,
                 }
             )
             self.session.messages = new_messages
             return True
         return False
+
+    def _build_task_checkpoint(self) -> str:
+        """Build a bounded deterministic checkpoint that summaries cannot absorb."""
+        journal = self._active_run_journal
+        if journal is None:
+            return ""
+        pending_steps = []
+        completed_steps = []
+        if journal.plan is not None:
+            pending_steps = [
+                {"id": step.id, "title": step.title, "status": step.status}
+                for step in journal.plan.steps
+                if step.status != "completed"
+            ]
+            completed_steps = [step.id for step in journal.plan.steps if step.status == "completed"]
+        checkpoint = {
+            "run_id": journal.run_id,
+            "objective": journal.objective,
+            "pending_steps": pending_steps[:30],
+            "completed_step_ids": completed_steps[:30],
+            "evidence_ids": [item.id for item in journal.evidence[-30:]],
+            "files_changed": journal.files_changed[-30:],
+            "residual_risks": journal.residual_risks[-20:],
+        }
+        return json.dumps(checkpoint, ensure_ascii=False, sort_keys=True)[:8000]
 
     def _record_usage_observation(self, actual_input_tokens: int) -> None:
         """Provider 返回真实 usage 时，记录本地 token 估算的误差（有界）。"""
@@ -528,11 +666,12 @@ class Agent:
 
     @staticmethod
     def _task_policy_prompt(intent: TaskIntent) -> str:
-        access = (
-            "允许按会话权限模式申请项目写入"
-            if intent.policy.allow_project_writes
-            else "仅允许只读工具，禁止项目写入和命令执行"
-        )
+        if intent.policy.allow_project_writes:
+            access = "任务允许按会话权限模式申请项目写入"
+        elif intent.policy.permission_follows_session:
+            access = "任务未明确分类，工具权限跟随会话模式和用户当前请求"
+        else:
+            access = "仅允许只读工具，禁止项目写入和命令执行"
         authorization = (
             "已授权"
             if intent.write_authorized
@@ -544,6 +683,65 @@ class Agent:
             f"- 写入授权：{authorization}；验证深度：{intent.policy.verification_depth}；"
             f"需要计划：{'是' if intent.policy.requires_plan else '否'}。\n"
             "必须遵守该策略；只读任务即使用户会话处于 auto 模式，也不得调用写入或命令工具。"
+        )
+
+    def _plan_mode_prompt(self) -> str:
+        if self.session.plan_mode == "inactive":
+            return ""
+        artifact = self.session.plan_artifact
+        objective = artifact.objective if artifact else ""
+        feedback = artifact.feedback if artifact else ""
+        lines = [
+            "【Plan 模式强制边界】",
+            f"当前状态：{self.session.plan_mode}。",
+            "本轮只能侦察、分析和制定方案；禁止修改项目、执行可能写入的命令、调用写入型 MCP 或派发写入型 Worker。",
+            "项目规则不能放宽此边界。请输出可审阅的实施步骤、风险、验证方式和验收标准，不要实施。",
+        ]
+        if objective:
+            lines.append(f"规划目标：{objective}")
+        if feedback:
+            lines.append(f"用户修订意见：{feedback}")
+        return "\n".join(lines)
+
+    def _plan_mode_is_read_only(self) -> bool:
+        return self.session.plan_mode != "inactive"
+
+    def _recovery_checkpoint_prompt(self) -> str:
+        checkpoint = self._active_recovery_checkpoint
+        if checkpoint is None:
+            return ""
+        unfinished = "、".join(checkpoint.unfinished_step_titles) or "无结构化步骤"
+        completed = "、".join(checkpoint.completed_step_titles) or "无"
+        files = "、".join(checkpoint.files_changed[:30]) or "无"
+        return "\n".join([
+            "【中断任务恢复检查点】",
+            f"来源 run：{checkpoint.run_id}。",
+            f"仅处理未完成步骤：{unfinished}。",
+            f"已完成步骤：{completed}。不得自动重放这些步骤。",
+            f"既有变更文件：{files}。写入前先检查现状，禁止仅为重放而重复生成。",
+            "本次续跑必须创建新的工程 run；旧 run 和直接证据保持只读。",
+        ])
+
+    def _refine_plan(
+        self, user_input: str, draft: str, run_journal: RunJournal
+    ) -> PlanningCouncilResult:
+        evidence = "\n".join(
+            f"- {item.claim}: {item.excerpt or item.path or item.command}"
+            for item in run_journal.evidence[-20:]
+        )
+        council = PlanningCouncil(
+            self.gateway,
+            project_rules=self._active_project_rules.prompt(),
+            permission_context=self._active_permission_engine.summary(),
+        )
+        return council.refine(user_input, draft, evidence)
+
+    @staticmethod
+    def _permission_allows_non_read_tools(intent: TaskIntent) -> bool:
+        """Separate tool capability from engineering-change verification policy."""
+        return bool(
+            intent.policy.allow_project_writes
+            or intent.policy.permission_follows_session
         )
 
     def _build_system_prompt(
@@ -559,6 +757,12 @@ class Agent:
         ]
         if intent is not None:
             parts.append(self._task_policy_prompt(intent))
+        plan_prompt = self._plan_mode_prompt()
+        if plan_prompt:
+            parts.append(plan_prompt)
+        recovery_prompt = self._recovery_checkpoint_prompt()
+        if recovery_prompt:
+            parts.append(recovery_prompt)
         if native:
             # 原生模式：工具定义由 tools= 参数提供，系统提示不再列 Markdown 工具块
             parts.append(TOOL_RULES_NATIVE)
@@ -571,6 +775,9 @@ class Agent:
             memory_context = builder.build_context(user_input)
             if memory_context:
                 parts.append(memory_context)
+        project_rules = self._active_project_rules.prompt()
+        if project_rules:
+            parts.append(project_rules)
         return "\n\n".join(parts)
 
     def _ensure_system_prompt(
@@ -699,7 +906,7 @@ class Agent:
         read_file_keys: set[str] | None = None,
         run_journal: RunJournal | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
-        """同步执行工具调用（用于 run_turn，approve 模式下视为自动批准）"""
+        """同步执行工具调用；approve 无法交互确认时拒绝非只读工具。"""
         calls: list[dict[str, Any]] = []
         outputs: list[str] = []
 
@@ -708,40 +915,76 @@ class Agent:
             tool_name = spec["tool"]
             params = spec.get("params", {})
 
-            if self.approval_mode == "readonly":
+            if (
+                tool_name == "run_command"
+                and run_journal is not None
+                and command_correction_exhausted(run_journal.metrics)
+            ):
+                result = command_correction_limit_result(str(params.get("cwd", ".")))
                 calls.append({
                     "tool": tool_name,
                     "params": params,
                     "success": False,
-                    "error": "只读模式：操作被拒绝",
+                    "output": result.output,
+                    "error": result.error,
+                    "cached": False,
+                    "metadata": result.metadata,
                 })
-                outputs.append(f"\n[工具 {tool_name} 被拒绝：当前为只读模式]\n")
+                outputs.append(self._format_tool_result(tool_name, result))
                 continue
 
             cache_key = build_read_cache_key(tool_name, params, self.session.output_dir)
             tool_spec = tool_registry.get(tool_name)
             category = tool_spec.category if tool_spec else "unknown"
-            if self.approval_mode == "approve" and category != "read":
+            decision = self._active_permission_engine.decide(
+                tool_name,
+                params,
+                category=category,
+                approval_mode=self.approval_mode,
+                hard_read_only=analysis_only,
+            )
+
+            if decision.action == "deny":
+                denial_reason = decision.reason
+                if tool_name == "run_command":
+                    denial_reason = f"{denial_reason}；{COMMAND_PERMISSION_GUIDANCE}"
+                calls.append({
+                    "tool": tool_name,
+                    "params": params,
+                    "success": False,
+                    "error": f"权限规则拒绝：{denial_reason}",
+                    "permission": decision.summary(),
+                    "metadata": {"error_code": "permission_denied"},
+                })
+                if tool_name == "run_command" and run_journal is not None:
+                    record_command_preflight_failure(
+                        run_journal.metrics, {"error_code": "permission_denied"}
+                    )
+                    self.journal_store.save(run_journal)
+                outputs.append(f"\n[工具 {tool_name} 被拒绝：{denial_reason}]\n")
+                continue
+
+            if decision.action == "ask":
+                ask_error = "权限规则要求确认；同步执行无法交互确认，工具已拒绝"
+                if tool_name == "run_command":
+                    ask_error = f"{ask_error}；{COMMAND_PERMISSION_GUIDANCE}"
                 call = {
                     "tool": tool_name,
                     "params": params,
                     "success": False,
-                    "error": "approve 模式：同步执行无法交互确认，非只读工具已拒绝",
+                    "error": ask_error,
+                    "permission": decision.summary(),
+                    "metadata": {"error_code": "permission_denied"},
                 }
+                if tool_name == "run_command" and run_journal is not None:
+                    record_command_preflight_failure(
+                        run_journal.metrics, {"error_code": "permission_denied"}
+                    )
+                    self.journal_store.save(run_journal)
                 calls.append(call)
                 outputs.append(
-                    f"\n[工具 {tool_name} 被拒绝：请使用流式对话批准，或显式切换 auto]\n"
+                    f"\n[工具 {tool_name} 被拒绝：请使用流式对话完成权限确认]\n"
                 )
-                continue
-            if analysis_only and category != "read":
-                call = {
-                    "tool": tool_name,
-                    "params": params,
-                    "success": False,
-                    "error": "只做分析/方案：仅允许只读工具",
-                }
-                calls.append(call)
-                outputs.append(f"\n[工具 {tool_name} 被拒绝：只做分析/方案，仅允许只读工具]\n")
                 continue
             if (
                 analysis_only
@@ -771,6 +1014,9 @@ class Agent:
             if analysis_only and tool_name == "read_file" and cache_key and read_file_keys is not None:
                 read_file_keys.add(cache_key)
             cached = bool(read_cache is not None and cache_key in read_cache)
+            mutation_metadata = file_mutation_metadata(
+                tool_name, params, self.session.output_dir
+            )
             if cached:
                 result = read_cache[cache_key]  # type: ignore[index]
             else:
@@ -779,6 +1025,7 @@ class Agent:
                     read_cache[cache_key] = result
                 if read_cache is not None and should_invalidate_read_cache(tool_name):
                     read_cache.clear()
+            cached = cached or bool(result.metadata.get("cached"))
             calls.append({
                 "tool": tool_name,
                 "params": params,
@@ -786,11 +1033,24 @@ class Agent:
                 "output": result.output,
                 "error": result.error,
                 "cached": cached,
+                "mutation_metadata": mutation_metadata,
+                "metadata": result.metadata,
+                "permission": decision.summary(),
             })
+            if tool_name == "run_command" and not result.success and run_journal is not None:
+                record_command_preflight_failure(run_journal.metrics, result.metadata)
             outputs.append(self._format_tool_result(tool_name, result))
             if run_journal is not None:
                 self._record_tool_evidence(
-                    run_journal, tool_name, params, result, cached=cached
+                    run_journal,
+                    tool_name,
+                    params,
+                    result,
+                    cached=cached,
+                    metadata={
+                        "permission": decision.summary(),
+                        **mutation_metadata,
+                    },
                 )
             if files_written is not None:
                 self._record_written_file(tool_name, params, result, files_written)
@@ -805,20 +1065,27 @@ class Agent:
         self._permission_results[request_id] = False
         return request_id
 
-    def respond_to_permission(self, request_id: str, approved: bool) -> None:
-        """用户响应权限请求"""
-        self._permission_results[request_id] = approved
+    def respond_to_permission(self, request_id: str, approved: bool) -> bool:
+        """Resolve one live permission request without retaining stale IDs."""
         event = self._pending_permissions.get(request_id)
-        if event and not event.is_set():
+        if event is None:
+            return False
+        self._permission_results[request_id] = approved
+        if not event.is_set():
             event.set()
+        return True
 
     async def _wait_for_permission(self, request_id: str) -> bool:
         """等待用户对指定权限请求的响应"""
         event = self._pending_permissions.get(request_id)
         if not event:
             return False
-        await event.wait()
-        return self._permission_results.get(request_id, False)
+        try:
+            await event.wait()
+            return self._permission_results.get(request_id, False)
+        finally:
+            self._pending_permissions.pop(request_id, None)
+            self._permission_results.pop(request_id, None)
 
     def _has_tool_calls(
         self, content: str, content_blocks: list[MessageContentBlock] | None = None
@@ -829,11 +1096,34 @@ class Agent:
 
     def run_turn(self, user_input: str) -> AgentTurnResult:
         """执行一轮对话"""
+        self.recovery_manager.require_ready()
         run_journal = self._start_engineering_run(user_input)
+        self._claim_recovery_checkpoint(run_journal)
 
         try:
+            if self.session.plan_mode == "pending":
+                self.session.activate_plan_mode()
             self._ensure_system_prompt(user_input, run_journal.intent)
             self.session.add_message("user", user_input)
+            report_scope = _delivery_report_scope(user_input)
+            if report_scope:
+                content = self._build_local_delivery_report(
+                    report_scope, exclude_run_id=run_journal.run_id
+                )
+                self.session.add_message("assistant", content)
+                engineering = self._finish_engineering_run(run_journal, "completed")
+                return AgentTurnResult(
+                    session_id=self.session.id,
+                    user_message=user_input,
+                    assistant_message=content,
+                    tool_calls=[],
+                    files_written=[],
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost_usd=0.0,
+                    run_id=run_journal.run_id,
+                    engineering=engineering,
+                )
             self._maybe_compact_context()
             return self._run_turn_impl(user_input, run_journal)
         except Exception as exc:
@@ -853,8 +1143,9 @@ class Agent:
         final_content = ""
         read_cache: dict[str, ToolResult] = {}
         analysis_only = (
-            not run_journal.intent.policy.allow_project_writes
+            not self._permission_allows_non_read_tools(run_journal.intent)
             or self.approval_mode == "readonly"
+            or self._plan_mode_is_read_only()
         )
         read_file_keys: set[str] = set()
 
@@ -1008,8 +1299,24 @@ class Agent:
 
         # 不再自动抽取代码块为 generated_N 文件（易产出无意义文件名）；
         # 模型应通过 write_file 显式写文件。仅当本轮未写任何文件时，兜底保存回复为 response.md。
-        if self.approval_mode == "auto" and not files_written and final_content.strip():
+        if (
+            self.approval_mode == "auto"
+            and not self._plan_mode_is_read_only()
+            and not files_written
+            and final_content.strip()
+        ):
             files_written.append(write_text_file("response.md", final_content, self.session.output_dir))
+
+        if self.session.plan_mode in ("pending", "active") and final_content.strip():
+            council_result = self._refine_plan(user_input, final_content, run_journal)
+            final_content = council_result.content
+            total_input += council_result.input_tokens
+            total_output += council_result.output_tokens
+            total_cost += council_result.cost_usd
+            self._replace_latest_assistant_message(final_content)
+            self.session.save_plan_artifact(
+                final_content, council=council_result.summary()
+            )
 
         engineering = self._finish_engineering_run(
             run_journal,
@@ -1040,15 +1347,42 @@ class Agent:
         user_input: str,
     ) -> AsyncIterator[ChatStreamEvent]:
         """流式执行一轮对话，按 delta/done 事件产出"""
+        await asyncio.to_thread(self.recovery_manager.require_ready)
         run_journal = await asyncio.to_thread(self._start_engineering_run, user_input)
+        await asyncio.to_thread(self._claim_recovery_checkpoint, run_journal)
         yield ChatStreamEvent(
             type="engineering_start",
             engineering=run_journal.event_payload(),
         )
 
         try:
+            if self.session.plan_mode == "pending":
+                self.session.activate_plan_mode()
             self._ensure_system_prompt(user_input, run_journal.intent)
             self.session.add_message("user", user_input)
+            report_scope = _delivery_report_scope(user_input)
+            if report_scope:
+                content = await asyncio.to_thread(
+                    self._build_local_delivery_report,
+                    report_scope,
+                    exclude_run_id=run_journal.run_id,
+                )
+                self.session.add_message("assistant", content)
+                engineering = await asyncio.to_thread(
+                    self._finish_engineering_run, run_journal, "completed"
+                )
+                yield ChatStreamEvent(type="delta", delta=content)
+                yield ChatStreamEvent(
+                    type="engineering_complete", engineering=engineering
+                )
+                yield ChatStreamEvent(
+                    type="done",
+                    assistant_message=content,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost_usd=0.0,
+                )
+                return
             await asyncio.to_thread(self._maybe_compact_context)
             async for event in self._run_turn_stream_impl(user_input, run_journal):
                 yield event
@@ -1062,6 +1396,30 @@ class Agent:
             )
             raise
 
+    def _build_local_delivery_report(
+        self,
+        scope: Literal["session", "today"],
+        *,
+        exclude_run_id: str,
+    ) -> str:
+        from src.core.engineering import DeliveryReportBuilder, load_today_journals
+
+        if scope == "today":
+            sessions_root = Path(self.session.output_dir).resolve().parent.parent
+            journals = load_today_journals(sessions_root)
+            report = DeliveryReportBuilder().build(
+                (item for item in journals if item.run_id != exclude_run_id),
+                scope="today",
+            )
+        else:
+            journals = self.journal_store.list()
+            report = DeliveryReportBuilder().build(
+                (item for item in journals if item.run_id != exclude_run_id),
+                scope="session",
+                session_id=self.session.id,
+            )
+        return report.to_markdown()
+
     async def _run_turn_stream_impl(
         self,
         user_input: str,
@@ -1073,6 +1431,7 @@ class Agent:
         # 自动判断是否需要多模型协作（只读模式下不走协作，避免自动写文件）
         if (
             self.approval_mode != "readonly"
+            and not self._plan_mode_is_read_only()
             and run_journal.intent.policy.collaboration_allowed
             and await self._should_collaborate(user_input, run_journal.intent)
         ):
@@ -1111,8 +1470,9 @@ class Agent:
         final_content = ""
         read_cache: dict[str, ToolResult] = {}
         analysis_only = (
-            not run_journal.intent.policy.allow_project_writes
+            not self._permission_allows_non_read_tools(run_journal.intent)
             or self.approval_mode == "readonly"
+            or self._plan_mode_is_read_only()
         )
         read_file_keys: set[str] = set()
 
@@ -1276,33 +1636,61 @@ class Agent:
                     )
                     continue
 
-                if self.approval_mode == "readonly":
+                if (
+                    tool_name == "run_command"
+                    and command_correction_exhausted(run_journal.metrics)
+                ):
+                    result = command_correction_limit_result(
+                        str(params.get("cwd", "."))
+                    )
                     call = {
                         "tool": tool_name,
                         "params": params,
                         "success": False,
-                        "error": "只读模式：操作被拒绝",
+                        "output": result.output,
+                        "error": result.error,
+                        "cached": False,
+                        "metadata": result.metadata,
                     }
                     calls.append(call)
                     yield ChatStreamEvent(type="tool_complete", tool_call=call)
-                    tool_results_parts.append(
-                        f"\n[工具 {tool_name} 被拒绝：当前为只读模式]\n"
-                    )
+                    tool_results_parts.append(self._format_tool_result(tool_name, result))
                     continue
 
                 tool_spec = tool_registry.get(tool_name)
                 category = tool_spec.category if tool_spec else "unknown"
-                if analysis_only and category != "read":
+                decision = self._active_permission_engine.decide(
+                    tool_name,
+                    params,
+                    category=category,
+                    approval_mode=self.approval_mode,
+                    hard_read_only=analysis_only,
+                )
+
+                if decision.action == "deny":
+                    denial_reason = decision.reason
+                    if tool_name == "run_command":
+                        denial_reason = (
+                            f"{denial_reason}；{COMMAND_PERMISSION_GUIDANCE}"
+                        )
                     call = {
                         "tool": tool_name,
                         "params": params,
                         "success": False,
-                        "error": "只做分析/方案：仅允许只读工具",
+                        "error": f"权限规则拒绝：{denial_reason}",
+                        "permission": decision.summary(),
+                        "metadata": {"error_code": "permission_denied"},
                     }
+                    if tool_name == "run_command":
+                        record_command_preflight_failure(
+                            run_journal.metrics,
+                            {"error_code": "permission_denied"},
+                        )
+                        await asyncio.to_thread(self.journal_store.save, run_journal)
                     calls.append(call)
                     yield ChatStreamEvent(type="tool_complete", tool_call=call)
                     tool_results_parts.append(
-                        f"\n[工具 {tool_name} 被拒绝：只做分析/方案，仅允许只读工具]\n"
+                        f"\n[工具 {tool_name} 被拒绝：{denial_reason}]\n"
                     )
                     continue
 
@@ -1345,34 +1733,45 @@ class Agent:
                 if analysis_only and tool_name == "read_file" and cache_key:
                     read_file_keys.add(cache_key)
 
-                if self.approval_mode == "approve":
-                    if cache_key in read_cache:
-                        approved = True
-                    else:
-                        request_id = self._register_permission_request()
-                        yield ChatStreamEvent(
-                            type="permission_request",
-                            permission_request={
-                                "request_id": request_id,
-                                "tool": tool_name,
-                                "params": params,
-                                "message": self._build_permission_message(tool_name, params),
-                            },
-                        )
-                        approved = await self._wait_for_permission(request_id)
+                if decision.action == "ask":
+                    request_id = self._register_permission_request()
+                    yield ChatStreamEvent(
+                        type="permission_request",
+                        permission_request={
+                            "request_id": request_id,
+                            "tool": tool_name,
+                            "params": params,
+                            "message": self._build_permission_message(tool_name, params),
+                            "decision": decision.summary(),
+                        },
+                    )
+                    approved = await self._wait_for_permission(request_id)
                     if not approved:
                         call = {
                             "tool": tool_name,
                             "params": params,
                             "success": False,
                             "error": "用户拒绝执行",
+                            "permission": decision.summary(),
+                            "metadata": {"error_code": "permission_denied"},
                         }
+                        if tool_name == "run_command":
+                            record_command_preflight_failure(
+                                run_journal.metrics,
+                                {"error_code": "permission_denied"},
+                            )
+                            await asyncio.to_thread(
+                                self.journal_store.save, run_journal
+                            )
                         calls.append(call)
                         yield ChatStreamEvent(type="tool_complete", tool_call=call)
                         tool_results_parts.append(f"\n[工具 {tool_name} 被用户拒绝]\n")
                         continue
 
                 cached = bool(cache_key and cache_key in read_cache)
+                mutation_metadata = file_mutation_metadata(
+                    tool_name, params, self.session.output_dir
+                )
                 yield ChatStreamEvent(
                     type="tool_start",
                     tool_call={"tool": tool_name, "params": params, "cached": cached},
@@ -1387,6 +1786,7 @@ class Agent:
                         read_cache[cache_key] = result
                     if should_invalidate_read_cache(tool_name):
                         read_cache.clear()
+                cached = cached or bool(result.metadata.get("cached"))
                 call = {
                     "tool": tool_name,
                     "params": params,
@@ -1394,7 +1794,14 @@ class Agent:
                     "output": result.output,
                     "error": result.error,
                     "cached": cached,
+                    "mutation_metadata": mutation_metadata,
+                    "metadata": result.metadata,
+                    "permission": decision.summary(),
                 }
+                if tool_name == "run_command" and not result.success:
+                    record_command_preflight_failure(
+                        run_journal.metrics, result.metadata
+                    )
                 calls.append(call)
                 yield ChatStreamEvent(type="tool_complete", tool_call=call)
                 tool_results_parts.append(self._format_tool_result(tool_name, result))
@@ -1405,6 +1812,10 @@ class Agent:
                     params,
                     result,
                     cached=cached,
+                    metadata={
+                        "permission": decision.summary(),
+                        **mutation_metadata,
+                    },
                 )
                 if changed:
                     yield ChatStreamEvent(
@@ -1469,11 +1880,29 @@ class Agent:
                 )
 
         # 不再自动抽取代码块为 generated_N 文件；仅当本轮未写任何文件时兜底保存回复为 response.md
-        if self.approval_mode == "auto" and not files_written and final_content.strip():
+        if (
+            self.approval_mode == "auto"
+            and not self._plan_mode_is_read_only()
+            and not files_written
+            and final_content.strip()
+        ):
             files_written.append(
                 await asyncio.to_thread(
                     write_text_file, "response.md", final_content, self.session.output_dir
                 )
+            )
+
+        if self.session.plan_mode in ("pending", "active") and final_content.strip():
+            council_result = await asyncio.to_thread(
+                self._refine_plan, user_input, final_content, run_journal
+            )
+            final_content = council_result.content
+            total_input += council_result.input_tokens
+            total_output += council_result.output_tokens
+            total_cost += council_result.cost_usd
+            self._replace_latest_assistant_message(final_content)
+            self.session.save_plan_artifact(
+                final_content, council=council_result.summary()
             )
 
         engineering = await asyncio.to_thread(
@@ -1561,12 +1990,49 @@ class Agent:
             memory_context = builder.build_context(user_input)
 
         # 1. Orchestrator 规划
-        orchestrator = Orchestrator(self.gateway)
+        project_rules = self._active_project_rules.prompt()
+        orchestrator = Orchestrator(self.gateway, project_rules=project_rules)
         plan = await asyncio.to_thread(
             orchestrator.plan,
             user_request=user_input,
             memory_context=memory_context,
         )
+        collaboration_roles = [
+            {
+                "role": "orchestrator",
+                "task_id": "orchestrator",
+                "planned_model": (
+                    orchestrator.model if isinstance(orchestrator.model, str) else ""
+                ),
+                "actual_model": (
+                    orchestrator.model if isinstance(orchestrator.model, str) else ""
+                ),
+                "status": "completed",
+                **_response_usage(getattr(orchestrator, "last_response", None)),
+            },
+            *[
+                {
+                    "role": task.frontend_stage or task.type,
+                    "task_id": task.id,
+                    "planned_model": task.assigned_model,
+                    "actual_model": "",
+                    "status": "planned",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0.0,
+                }
+                for task in plan.tasks
+            ],
+        ]
+        run_journal.metrics["collaboration"] = {
+            "roles": collaboration_roles,
+            "distinct_roles": len({item["role"] for item in collaboration_roles}),
+            "distinct_models": len({
+                item["planned_model"]
+                for item in collaboration_roles
+                if item["planned_model"]
+            }),
+        }
         yield ChatStreamEvent(
             type="plan",
             plan={
@@ -1582,9 +2048,15 @@ class Agent:
                         "parallel_safe": t.parallel_safe,
                         "max_retries": t.max_retries,
                         "acceptance": t.acceptance,
+                        "frontend_stage": t.frontend_stage,
                     }
                     for t in plan.tasks
                 ],
+                "frontend_contract": (
+                    plan.frontend_contract.model_dump()
+                    if plan.frontend_contract is not None
+                    else None
+                ),
             },
         )
 
@@ -1637,7 +2109,13 @@ class Agent:
             nonlocal error_info
             try:
                 workers_config = load_workers_config()
-                worker = Worker(self.gateway, workers_config)
+                worker = Worker(
+                    self.gateway,
+                    workers_config,
+                    project_rules=project_rules,
+                    permission_engine=self._active_permission_engine,
+                    approval_mode="auto",
+                )
                 dispatcher = Dispatcher(worker, max_workers=4)
                 completed_results = dispatcher.dispatch(
                     plan,
@@ -1667,6 +2145,20 @@ class Agent:
         results = list(dispatch_results)
         evidence_changed = False
         for result in results:
+            role_entry = next(
+                (
+                    item
+                    for item in collaboration_roles
+                    if item["task_id"] == result.task.id
+                ),
+                None,
+            )
+            if role_entry is not None:
+                role_entry["status"] = "completed" if result.success else "failed"
+                role_entry["actual_model"] = (
+                    result.response.model if result.response is not None else ""
+                )
+                role_entry.update(_response_usage(result.response))
             excerpt = (result.content if result.success else result.error).strip()
             _, added = run_journal.add_evidence(
                 Evidence(
@@ -1697,6 +2189,7 @@ class Agent:
                     success=bool(call.get("success", False)),
                     output=str(call.get("output", "")),
                     error=str(call.get("error", "")),
+                    metadata=call.get("metadata") or {},
                 )
                 changed = self.evidence_recorder.record(
                     run_journal,
@@ -1708,6 +2201,9 @@ class Agent:
                     metadata={
                         "worker_task_id": result.task.id,
                         "worker_type": result.task.type,
+                        **(call.get("metadata") or {}),
+                        "permission": call.get("permission") or {},
+                        **(call.get("mutation_metadata") or {}),
                     },
                 )
                 verification_changed = self.verification_tracker.record(
@@ -1718,6 +2214,11 @@ class Agent:
                     cached=bool(call.get("cached", False)),
                 )
                 evidence_changed = evidence_changed or changed or verification_changed
+        run_journal.metrics["collaboration"]["distinct_models"] = len({
+            item["actual_model"] or item["planned_model"]
+            for item in collaboration_roles
+            if item["actual_model"] or item["planned_model"]
+        })
         self.completion_auditor.audit(run_journal, "completed")
         await asyncio.to_thread(self.journal_store.save, run_journal)
         if evidence_changed or run_journal.audit is not None:
@@ -1727,7 +2228,7 @@ class Agent:
             )
 
         # 3. Reviewer 整合
-        reviewer = Reviewer(self.gateway)
+        reviewer = Reviewer(self.gateway, project_rules=project_rules)
         review = await asyncio.to_thread(
             reviewer.review,
             user_request=user_input,
@@ -1744,6 +2245,36 @@ class Agent:
                 "audit": run_journal.audit.model_dump() if run_journal.audit else None,
             },
         )
+        reviewer_input_mode = (
+            reviewer.input_mode
+            if isinstance(getattr(reviewer, "input_mode", None), str)
+            else "restricted"
+        )
+        collaboration_roles.append({
+            "role": "reviewer",
+            "task_id": "reviewer",
+            "planned_model": (
+                reviewer.model if isinstance(reviewer.model, str) else ""
+            ),
+            "actual_model": (
+                reviewer.model if isinstance(reviewer.model, str) else ""
+            ),
+            "status": "completed" if review.passed else "failed",
+            "input_mode": reviewer_input_mode,
+            **_response_usage(getattr(reviewer, "last_response", None)),
+        })
+        run_journal.metrics["collaboration"]["reviewer_input_mode"] = (
+            reviewer_input_mode
+        )
+        run_journal.metrics["collaboration"]["distinct_roles"] = len({
+            item["role"] for item in collaboration_roles
+        })
+        run_journal.metrics["collaboration"]["distinct_models"] = len({
+            item["actual_model"] or item["planned_model"]
+            for item in collaboration_roles
+            if item["actual_model"] or item["planned_model"]
+        })
+        await asyncio.to_thread(self.journal_store.save, run_journal)
         yield ChatStreamEvent(
             type="review_complete",
             review={

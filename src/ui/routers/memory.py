@@ -158,6 +158,8 @@ def get_file_index_status() -> dict[str, Any]:
         "indexed": True,
         "updated_at": index.updated_at,
         "file_count": len(index.files),
+        "root": index.root,
+        "last_refresh": index.last_refresh,
     }
 
 

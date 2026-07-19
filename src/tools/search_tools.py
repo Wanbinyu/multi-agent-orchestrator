@@ -7,10 +7,14 @@ from __future__ import annotations
 import fnmatch
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.tools.paths import resolve_path as _resolve_path
 from src.tools.registry import tool_registry
 from src.tools.tool_result import ToolResult
+
+if TYPE_CHECKING:
+    from src.core.memory import MemoryStore
 
 # 结果数量上限，避免输出过长
 _MAX_GLOB_RESULTS = 200
@@ -47,6 +51,7 @@ def project_tree(
     max_entries: int = 300,
     include_hidden: bool = False,
     base_dir: str = ".",
+    memory_store: "MemoryStore | None" = None,
 ) -> ToolResult:
     """生成跨平台项目树，不依赖外部 tree/dir/ls 命令。"""
     if not 0 <= max_depth <= 20:
@@ -62,6 +67,46 @@ def project_tree(
         return ToolResult(success=False, error=f"目录不存在：{path}")
     if not root.is_dir():
         return ToolResult(success=False, error=f"不是目录：{path}")
+
+    if not include_hidden:
+        try:
+            from src.core.memory import (
+                MemoryStore,
+                ProjectIndexer,
+                render_indexed_project_tree,
+            )
+
+            index_store = memory_store or MemoryStore()
+            stats = ProjectIndexer(index_store).index_project(root)
+            rendered, count, depth_truncated, entries_truncated = (
+                render_indexed_project_tree(
+                    index_store.get_file_index(),
+                    max_depth=max_depth,
+                    max_entries=max_entries,
+                )
+            )
+            lines = [f"项目结构：{root}"]
+            if rendered:
+                lines.append(rendered)
+            if entries_truncated:
+                lines.append(f"...（已达到 {max_entries} 个节点上限，目录树已截断）")
+            if depth_truncated:
+                lines.append(
+                    f"...（{depth_truncated} 个目录达到最大深度 {max_depth}，未继续展开）"
+                )
+            lines.append(f"共显示 {count} 个节点")
+            return ToolResult(
+                success=True,
+                output="\n".join(lines),
+                metadata={
+                    "project_index": stats,
+                    "cached": stats["read"] == 0,
+                },
+            )
+        except Exception as exc:
+            index_fallback = type(exc).__name__
+    else:
+        index_fallback = "hidden_entries_require_live_scan"
 
     lines = [f"项目结构：{root}"]
     entry_count = 0
@@ -125,7 +170,11 @@ def project_tree(
             f"...（{depth_truncated} 个目录达到最大深度 {max_depth}，未继续展开）"
         )
     lines.append(f"共显示 {entry_count} 个节点")
-    return ToolResult(success=True, output="\n".join(lines))
+    return ToolResult(
+        success=True,
+        output="\n".join(lines),
+        metadata={"cached": False, "index_fallback": index_fallback},
+    )
 
 
 @tool_registry.register(

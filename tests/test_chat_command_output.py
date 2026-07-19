@@ -117,6 +117,13 @@ class _EngineeringEventAgent(_FakeAgent):
                 "run_id": "run-test",
                 "status": "completed",
                 "evidence_count": 3,
+                "effective_intent": {
+                    "kind": "build",
+                    "risk_level": "high",
+                    "write_authorized": True,
+                    "policy": {"verification_depth": "deep"},
+                },
+                "observed_mutation": {"project_file_count": 2},
                 "reconnaissance": {
                     "status": "partial",
                     "observed_categories": ["structure", "docs"],
@@ -136,7 +143,7 @@ def test_stream_turn_prints_engineering_run_status(capsys):
     asyncio.run(_stream_turn(_EngineeringEventAgent(), "执行任务"))
     output = capsys.readouterr().out
     assert "工程记录：run-test · completed" in output
-    assert "review / medium / 只读" in output
+    assert "build / high / 写入已授权" in output
     assert "证据：3 条" in output
     assert "项目侦察：部分覆盖（2/6）" in output
     assert "验证门：1 个" in output

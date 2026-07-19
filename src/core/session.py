@@ -5,12 +5,43 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
 
 from src.models.schemas import ApprovalMode, ChatMessage, MessageContentBlock
+
+
+PlanModeState = Literal["inactive", "pending", "active", "awaiting_approval"]
+PlanArtifactStatus = Literal["draft", "awaiting_approval", "approved", "cancelled"]
+RecoveryAction = Literal["continue", "abandon"]
+
+
+class SessionPlanArtifact(BaseModel):
+    objective: str = ""
+    content: str = ""
+    feedback: str = ""
+    status: PlanArtifactStatus = "draft"
+    revision: int = 0
+    council: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class SessionRecoveryDecision(BaseModel):
+    """One explicit owner decision for an interrupted engineering run."""
+
+    run_id: str
+    action: RecoveryAction
+    status_before: str
+    unfinished_step_ids: list[str] = Field(default_factory=list)
+    unfinished_step_titles: list[str] = Field(default_factory=list)
+    completed_step_ids: list[str] = Field(default_factory=list)
+    completed_step_titles: list[str] = Field(default_factory=list)
+    files_changed: list[str] = Field(default_factory=list)
+    decided_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    consumed_by_run_id: str | None = None
 
 
 class Session(BaseModel):
@@ -24,8 +55,11 @@ class Session(BaseModel):
     output_dir: str
     config_dir: str = "config"
     approval_mode: ApprovalMode = "auto"
+    plan_mode: PlanModeState = "inactive"
+    plan_artifact: SessionPlanArtifact | None = None
     compaction_events: list[dict[str, Any]] = Field(default_factory=list)
     usage_observations: list[dict[str, Any]] = Field(default_factory=list)
+    recovery_decisions: list[SessionRecoveryDecision] = Field(default_factory=list)
 
     def add_message(
         self,
@@ -55,6 +89,71 @@ class Session(BaseModel):
         """记录一次本地估算与 Provider 实际 usage 的对比，最多保留最近 20 条。"""
         self.usage_observations.append(observation)
         del self.usage_observations[:-20]
+        self.updated_at = datetime.now(timezone.utc).isoformat()
+
+    def record_recovery_decision(self, decision: SessionRecoveryDecision) -> None:
+        """Persist a bounded recovery history without adding chat messages."""
+        self.recovery_decisions = [
+            item for item in self.recovery_decisions if item.run_id != decision.run_id
+        ]
+        self.recovery_decisions.append(decision)
+        del self.recovery_decisions[:-20]
+        self.updated_at = decision.decided_at
+
+    def enter_plan_mode(self, objective: str = "") -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self.plan_artifact = SessionPlanArtifact(
+            objective=objective.strip(),
+            status="draft",
+            created_at=now,
+            updated_at=now,
+        )
+        self.plan_mode = "pending"
+        self.updated_at = now
+
+    def activate_plan_mode(self) -> None:
+        if self.plan_mode not in ("pending", "active"):
+            raise ValueError(f"当前 Plan 状态不能进入规划：{self.plan_mode}")
+        self.plan_mode = "active"
+        self.updated_at = datetime.now(timezone.utc).isoformat()
+
+    def save_plan_artifact(self, content: str, *, council: dict[str, Any] | None = None) -> None:
+        if self.plan_mode not in ("pending", "active"):
+            raise ValueError(f"当前 Plan 状态不能保存方案：{self.plan_mode}")
+        if self.plan_artifact is None:
+            self.plan_artifact = SessionPlanArtifact()
+        self.plan_artifact.content = content.strip()
+        self.plan_artifact.status = "awaiting_approval"
+        self.plan_artifact.revision += 1
+        if council is not None:
+            self.plan_artifact.council = council
+        self.plan_artifact.updated_at = datetime.now(timezone.utc).isoformat()
+        self.plan_mode = "awaiting_approval"
+        self.updated_at = self.plan_artifact.updated_at
+
+    def request_plan_revision(self, feedback: str) -> None:
+        if self.plan_mode != "awaiting_approval" or self.plan_artifact is None:
+            raise ValueError("当前没有等待审阅的方案")
+        self.plan_artifact.feedback = feedback.strip()
+        self.plan_artifact.status = "draft"
+        self.plan_artifact.updated_at = datetime.now(timezone.utc).isoformat()
+        self.plan_mode = "active"
+        self.updated_at = self.plan_artifact.updated_at
+
+    def approve_plan(self) -> str:
+        if self.plan_mode != "awaiting_approval" or self.plan_artifact is None:
+            raise ValueError("当前没有等待批准的方案")
+        self.plan_artifact.status = "approved"
+        self.plan_artifact.updated_at = datetime.now(timezone.utc).isoformat()
+        self.plan_mode = "inactive"
+        self.updated_at = self.plan_artifact.updated_at
+        return self.plan_artifact.content
+
+    def cancel_plan_mode(self) -> None:
+        if self.plan_artifact is not None:
+            self.plan_artifact.status = "cancelled"
+            self.plan_artifact.updated_at = datetime.now(timezone.utc).isoformat()
+        self.plan_mode = "inactive"
         self.updated_at = datetime.now(timezone.utc).isoformat()
 
 

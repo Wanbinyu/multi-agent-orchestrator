@@ -1,12 +1,14 @@
 """Worker 执行器单元测试"""
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from src.core.worker import (
+    Worker,
     _expand_legacy_read_tools,
     build_tool_instructions,
     process_tool_calls,
 )
-from src.models.schemas import Task
+from src.models.schemas import ChatResponse, FrontendBuildContract, Task
 
 
 def test_build_tool_instructions_with_read_and_run():
@@ -56,6 +58,28 @@ def test_process_tool_calls_run_command(tmp_path):
     assert results[0]["success"] is True
     assert "Python" in results[0]["output"]
     assert "Python" in processed
+    assert results[0]["permission"]["action"] == "allow"
+    assert results[0]["metadata"]["cwd"] == str(tmp_path.resolve())
+
+
+def test_process_tool_calls_limits_invalid_command_corrections(tmp_path):
+    state = {"preflight_failures": 0}
+    invalid = '```tool:run_command\n{"command": "cd bad && npm test"}\n```'
+
+    _processed, first = process_tool_calls(
+        invalid, str(tmp_path), command_state=state
+    )
+    _processed, second = process_tool_calls(
+        invalid, str(tmp_path), command_state=state
+    )
+    _processed, third = process_tool_calls(
+        invalid, str(tmp_path), command_state=state
+    )
+
+    assert first[0]["metadata"]["error_code"] == "inline_cwd"
+    assert second[0]["metadata"]["error_code"] == "inline_cwd"
+    assert third[0]["metadata"]["error_code"] == "correction_limit"
+    assert state["preflight_failures"] == 2
 
 
 def test_process_tool_calls_invalid_json(tmp_path):
@@ -170,3 +194,54 @@ def test_process_tool_calls_supports_special_closing_token(tmp_path):
 
     assert results[0]["success"] is True
     assert "ok" in processed
+
+
+def test_integration_worker_cannot_replace_command_evidence_with_prose(tmp_path):
+    project = tmp_path / "project"
+    (project / "src" / "pages").mkdir(parents=True)
+    (project / "src" / "main.tsx").write_text(
+        'import "./pages/Home";\n', encoding="utf-8"
+    )
+    (project / "src" / "pages" / "Home.tsx").write_text(
+        "export default function Home() {}\n", encoding="utf-8"
+    )
+    (project / "package.json").write_text(
+        '{"dependencies":{"react":"latest"}}', encoding="utf-8"
+    )
+    contract = FrontendBuildContract(
+        project_root=str(project),
+        entrypoints=["src/main.tsx"],
+        routes=[{"path": "/", "target": "src/pages/Home.tsx"}],
+        dependencies=["react"],
+        ownership={"integration": []},
+        verification_commands=["npm run build"],
+        smoke_paths=["/"],
+        smoke={
+            "start_command": [
+                "python", "-m", "http.server", "{port}", "--bind", "127.0.0.1"
+            ],
+            "routes": [
+                {"path": "/", "assertions": [{"selector": "body"}]}
+            ],
+        },
+    )
+    task = Task(
+        id="integration", type="tester", title="集成验证", input="验证项目",
+        assigned_model="glm-ark", execution_mode="verify",
+        frontend_stage="integration", frontend_contract=contract,
+    )
+    gateway = MagicMock()
+    gateway.resolve_model.return_value = "glm-ark"
+    gateway.chat.return_value = ChatResponse(
+        content="我已经运行 npm run build，一切正常。",
+        model="glm-ark", provider="ark",
+    )
+    worker = Worker(
+        gateway,
+        {"tester": {"tools": ["read_file", "run_command"]}},
+    )
+
+    result = worker.execute(task, output_dir=str(tmp_path / "output"))
+
+    assert result.success is False
+    assert "缺少真实成功命令证据：npm run build" in result.error

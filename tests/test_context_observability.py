@@ -71,7 +71,10 @@ def test_agent_records_compaction_event():
     event = session.compaction_events[0]
     assert event["dropped_messages"] > 0
     assert event["before_tokens"] > event["after_tokens"] > 0
-    assert event["layer"] == "summary"
+    assert event["layer"] == "L1/L2"
+    assert event["layers"] == ["L1", "L2"]
+    assert event["fallback_used"] is True
+    assert event["quality_passed"] is True
     assert event["at"]
 
 

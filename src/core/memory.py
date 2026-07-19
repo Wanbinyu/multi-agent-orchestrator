@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -52,11 +53,18 @@ class MemoryConfig(BaseModel):
     storage_path: str = "memory"
     max_injected_chars: int = 3000
     indexed_extensions: list[str] = Field(
-        default_factory=lambda: [".py", ".yaml", ".yml", ".md", ".js", ".ts", ".json"]
+        default_factory=lambda: [
+            ".py", ".yaml", ".yml", ".md", ".js", ".ts", ".json",
+            ".jsx", ".tsx", ".html", ".css", ".toml", ".ini", ".cfg",
+            ".sh", ".ps1", ".java", ".go", ".rs", ".sql",
+        ]
     )
     excluded_dirs: list[str] = Field(
         default_factory=lambda: [
             ".git",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
             "__pycache__",
             ".claude",
             "node_modules",
@@ -65,6 +73,8 @@ class MemoryConfig(BaseModel):
             "sessions",
             "memory",
             "output",
+            "dist",
+            "build",
         ]
     )
     max_indexed_file_size: int = 500_000
@@ -76,6 +86,7 @@ class FileIndexEntry(BaseModel):
     path: str
     mtime: float
     size: int
+    content_hash: str = ""
     symbols: list[str] = Field(default_factory=list)
     summary: str = ""
     snippet: str = ""
@@ -84,9 +95,13 @@ class FileIndexEntry(BaseModel):
 class FileIndex(BaseModel):
     """项目文件索引"""
 
-    version: int = 1
+    version: int = 2
+    root: str = ""
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     files: dict[str, FileIndexEntry] = Field(default_factory=dict)
+    directories: list[str] = Field(default_factory=list)
+    tree_paths: list[str] = Field(default_factory=list)
+    last_refresh: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +168,7 @@ class MemoryStore:
 
         self._entries: dict[str, MemoryEntry] = {}
         self._file_index: FileIndex = FileIndex()
+        self._file_index_load_failed = False
         self._load_entries()
         self._load_file_index()
 
@@ -183,15 +199,18 @@ class MemoryStore:
     def _load_file_index(self) -> None:
         if not self.file_index_path.exists():
             return
-        with open(self.file_index_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
         try:
+            with open(self.file_index_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
             self._file_index = FileIndex(**data)
         except Exception:
             self._file_index = FileIndex()
+            self._file_index_load_failed = True
 
     def _save_file_index(self) -> None:
-        with open(self.file_index_path, "w", encoding="utf-8") as f:
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = self.file_index_path.with_suffix(".yaml.tmp")
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as f:
             yaml.dump(
                 self._file_index.model_dump(),
                 f,
@@ -199,6 +218,8 @@ class MemoryStore:
                 sort_keys=False,
                 default_flow_style=False,
             )
+        temp_path.replace(self.file_index_path)
+        self._file_index_load_failed = False
 
     # --- entries API ---
 
@@ -252,6 +273,10 @@ class MemoryStore:
 
     def get_file_index(self) -> FileIndex:
         return self._file_index
+
+    @property
+    def file_index_load_failed(self) -> bool:
+        return self._file_index_load_failed
 
     def search_files(self, query: str, top_k: int = 5) -> list[FileIndexEntry]:
         """关键词搜索项目文件索引"""
@@ -360,27 +385,48 @@ class ProjectIndexer:
         self.store = store
         self.config = store.config
 
-    def index_project(self, root_dir: str | Path = ".", force: bool = False) -> dict[str, int]:
-        """遍历项目并更新文件索引，返回统计信息"""
+    def index_project(self, root_dir: str | Path = ".", force: bool = False) -> dict[str, Any]:
+        """Refresh the project index while reading only changed text files."""
         root = Path(root_dir).resolve()
-        excluded = set(self.config.excluded_dirs)
+        if not root.exists() or not root.is_dir():
+            raise FileNotFoundError(f"项目目录不存在：{root_dir}")
+        excluded = {item.casefold() for item in self.config.excluded_dirs}
         extensions = set(self.config.indexed_extensions)
         max_size = self.config.max_indexed_file_size
         storage_dir = self.store.storage_dir.resolve()
         config_path = self.store.config_path.resolve()
 
-        existing = self.store.get_file_index().files if not force else {}
+        previous_index = self.store.get_file_index()
+        root_changed = bool(
+            previous_index.files and previous_index.root != str(root)
+        )
+        cache_recovered = self.store.file_index_load_failed
+        existing = (
+            previous_index.files
+            if not force and not root_changed and not cache_recovered
+            else {}
+        )
         new_files: dict[str, FileIndexEntry] = {}
+        directories: list[str] = []
+        tree_paths: list[str] = []
         scanned = 0
         added = 0
         updated = 0
+        reused = 0
+        read = 0
+        metadata_only = 0
+        errors = 0
 
         for path in root.rglob("*"):
-            if not path.is_file():
+            if path.is_symlink():
                 continue
-            if path.suffix not in extensions:
+            try:
+                relative = path.relative_to(root)
+            except ValueError:
                 continue
-            if any(part in excluded for part in path.parts):
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            if any(part.casefold() in excluded for part in relative.parts):
                 continue
             resolved = path.resolve()
             if resolved == config_path:
@@ -390,46 +436,149 @@ class ProjectIndexer:
                 continue
             except ValueError:
                 pass
-            if path.stat().st_size > max_size:
+            rel_path = str(relative).replace("\\", "/")
+            if path.is_dir():
+                directories.append(rel_path)
                 continue
-
-            rel_path = str(path.relative_to(root)).replace("\\", "/")
-            mtime = path.stat().st_mtime
+            if not path.is_file():
+                continue
+            tree_paths.append(rel_path)
+            if path.suffix.lower() not in extensions:
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                errors += 1
+                continue
+            if stat.st_size > max_size:
+                continue
+            mtime = stat.st_mtime
             scanned += 1
 
-            # 增量更新：mtime 未变则保留
-            if not force and rel_path in existing and existing[rel_path].mtime == mtime:
-                new_files[rel_path] = existing[rel_path]
+            previous = existing.get(rel_path)
+            if (
+                previous is not None
+                and previous.mtime == mtime
+                and previous.size == stat.st_size
+                and previous.content_hash
+            ):
+                new_files[rel_path] = previous
+                reused += 1
                 continue
-
-            if rel_path in existing:
+            try:
+                raw = path.read_bytes()
+                read += 1
+            except OSError:
+                errors += 1
+                if previous is not None:
+                    new_files[rel_path] = previous
+                continue
+            content_hash = hashlib.sha256(raw).hexdigest()
+            if previous is not None and previous.content_hash == content_hash:
+                new_files[rel_path] = previous.model_copy(update={
+                    "mtime": mtime,
+                    "size": stat.st_size,
+                })
+                metadata_only += 1
+                continue
+            content = raw.decode("utf-8", errors="ignore")
+            if previous is not None:
                 updated += 1
             else:
                 added += 1
 
-            try:
-                content = path.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                continue
-
-            symbols = _extract_symbols(content, path.suffix)
-            summary = _summarize_file(content, path.suffix)
+            suffix = path.suffix.lower()
+            symbols = _extract_symbols(content, suffix)
+            summary = _summarize_file(content, suffix)
             snippet = content[:500].strip()
 
             new_files[rel_path] = FileIndexEntry(
                 path=rel_path,
                 mtime=mtime,
-                size=path.stat().st_size,
+                size=stat.st_size,
+                content_hash=content_hash,
                 symbols=symbols,
                 summary=summary,
                 snippet=snippet,
             )
-
-        index = FileIndex(files=new_files)
-        self.store.update_file_index(index)
-        return {
+        removed = len(set(existing) - set(new_files))
+        stats: dict[str, Any] = {
             "scanned": scanned,
+            "read": read,
+            "reused": reused,
             "added": added,
             "updated": updated,
+            "metadata_only": metadata_only,
+            "removed": removed,
+            "errors": errors,
             "total": len(new_files),
+            "directories": len(directories),
+            "tree_entries": len(directories) + len(tree_paths),
+            "root_changed": root_changed,
+            "cache_recovered": cache_recovered,
+            "force": force,
         }
+        index = FileIndex(
+            root=str(root),
+            files=new_files,
+            directories=sorted(dict.fromkeys(directories)),
+            tree_paths=sorted(dict.fromkeys(tree_paths)),
+            last_refresh=stats,
+        )
+        self.store.update_file_index(index)
+        return stats
+
+
+def render_indexed_project_tree(
+    index: FileIndex,
+    *,
+    max_depth: int = 4,
+    max_entries: int = 300,
+) -> tuple[str, int, int, bool]:
+    """Render a stable tree from cached relative paths without filesystem reads."""
+    paths = [(path, True) for path in index.directories]
+    paths.extend((path, False) for path in index.tree_paths)
+    children: dict[str, list[tuple[str, bool]]] = {}
+    for path, is_dir in paths:
+        parts = Path(path).parts
+        if not parts:
+            continue
+        parent = "/".join(parts[:-1])
+        item = (parts[-1], is_dir)
+        if item not in children.setdefault(parent, []):
+            children[parent].append(item)
+    for items in children.values():
+        items.sort(key=lambda item: (not item[1], item[0].casefold(), item[0]))
+
+    lines: list[str] = []
+    count = 0
+    depth_truncated = 0
+    entries_truncated = False
+
+    def walk(parent: str, prefix: str, depth: int) -> None:
+        nonlocal count, depth_truncated, entries_truncated
+        items = children.get(parent, [])
+        for position, (name, is_dir) in enumerate(items):
+            if count >= max_entries:
+                entries_truncated = True
+                return
+            is_last = position == len(items) - 1
+            connector = "└── " if is_last else "├── "
+            lines.append(f"{prefix}{connector}{name}{'/' if is_dir else ''}")
+            count += 1
+            if not is_dir:
+                continue
+            child = f"{parent}/{name}".strip("/")
+            if depth >= max_depth:
+                if children.get(child):
+                    depth_truncated += 1
+                continue
+            walk(child, prefix + ("    " if is_last else "│   "), depth + 1)
+            if entries_truncated:
+                return
+
+    if max_depth == 0:
+        depth_truncated = 1 if paths else 0
+    else:
+        walk("", "", 1)
+    return "\n".join(lines), count, depth_truncated, entries_truncated

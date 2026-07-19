@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Smart Mining Fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: sans-serif; overflow-x: hidden; }
+    .shell { display: grid; grid-template-columns: 180px minmax(0, 1fr); min-height: 100vh; }
+    aside { padding: 16px; background: #20242a; color: #fff; }
+    main { min-width: 0; padding: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 6px; border: 1px solid #bbb; }
+    canvas { width: 240px; height: 100px; max-width: 100%; }
+    .skeleton { display: none; }
+    @media (max-width: 600px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    const app = document.querySelector("#app");
+    if (location.pathname === "/login" && !localStorage.getItem("fixture-auth")) {
+      app.innerHTML = '<main><input id="user"><input id="password"><button id="login">Login</button></main>';
+      document.querySelector("#login").onclick = () => {
+        localStorage.setItem("fixture-auth", "1");
+        location.href = "/overview";
+      };
+    } else {
+      app.innerHTML = '<div class="shell"><aside>Navigation</aside><main><h1>' +
+        location.pathname +
+        '</h1><div class="skeleton">Loading</div><table><tbody><tr><td>Mock data ready</td></tr></tbody></table><canvas width="240" height="100"></canvas></main></div>';
+      const canvas = document.querySelector("canvas");
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#167d5a";
+      context.fillRect(5, 5, 100, 70);
+      context.fillStyle = "#f0b429";
+      context.fillRect(115, 20, 100, 55);
+    }
+  </script>
+</body>
+</html>

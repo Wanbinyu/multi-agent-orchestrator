@@ -20,7 +20,6 @@ from src.core.engineering import TaskIntentClassifier
         ("写文件 native.txt，内容为 hello", "build", True),
         ("先做 Java 重构方案，不要修改文件", "plan", False),
         ("持续监控测试进程，完成后通知", "monitor", False),
-        ("处理一下", "unclassified", False),
     ],
 )
 def test_classifier_maps_common_requests(text, kind, allows_writes):
@@ -60,9 +59,39 @@ def test_mid_sentence_build_phrasing_is_recognized(text):
 @pytest.mark.parametrize(
     "text",
     [
+        "我现在接了一个智慧矿区的项目，现在给我做一个纯前端的项目，放在G:\\MAO_test",
+        "现在给我做一套后台管理界面",
+        "在 G:\\MAO_test 中做一个项目",
+    ],
+)
+def test_real_natural_language_project_build_requests_are_high_risk(text):
+    intent = TaskIntentClassifier().classify(text, "auto")
+
+    assert intent.kind == "build"
+    assert intent.risk_level == "high"
+    assert intent.policy.verification_depth == "deep"
+    assert intent.policy.requires_plan is True
+    assert intent.policy.collaboration_allowed is True
+    assert intent.write_authorized is True
+
+
+def test_create_it_for_me_followup_is_a_writable_build():
+    intent = TaskIntentClassifier().classify("帮我创建好", "auto")
+
+    assert intent.kind == "build"
+    assert intent.policy.allow_project_writes is True
+    assert intent.write_authorized is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
         "帮我看看怎么做这个页面",
         "帮我做版本对比",
         "把项目搭建的事告诉我",
+        "告诉我怎么做一个项目",
+        "给我说一下怎么做一个前端项目",
+        "如果在 G:\\MAO_test 做一个项目，需要什么技术栈？",
     ],
 )
 def test_similar_readonly_phrasing_does_not_grant_writes(text):
@@ -123,6 +152,24 @@ def test_approve_mode_requires_later_write_approval():
     assert approve.policy.allow_project_writes is True
     assert approve.write_authorized is False
     assert readonly.policy.allow_project_writes is True
+    assert readonly.write_authorized is False
+
+
+def test_unclassified_task_uses_session_permission_mode():
+    classifier = TaskIntentClassifier()
+
+    auto = classifier.classify("处理一下", "auto")
+    approve = classifier.classify("处理一下", "approve")
+    readonly = classifier.classify("处理一下", "readonly")
+
+    assert auto.policy.allow_project_writes is False
+    assert auto.policy.permission_follows_session is True
+    assert auto.write_authorized is True
+    assert approve.policy.allow_project_writes is False
+    assert approve.policy.permission_follows_session is True
+    assert approve.write_authorized is False
+    assert readonly.policy.allow_project_writes is False
+    assert readonly.policy.permission_follows_session is True
     assert readonly.write_authorized is False
 
 

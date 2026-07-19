@@ -6,20 +6,28 @@ from pathlib import Path
 from typing import Any
 
 from src.core.memory import MemoryStore, ProjectIndexer
+from src.tools.paths import resolve_path
 from src.tools.registry import tool_registry
 from src.tools.tool_result import ToolResult
 
 
 @tool_registry.register(
     name="search_project_files",
-    description="基于项目文件索引搜索相关源码文件",
+    description="基于增量项目索引搜索相关源码文件；path 可指定相对或绝对项目根",
     params={
         "query": {"type": "string", "description": "搜索关键词"},
+        "path": {"type": "string", "description": "项目根目录", "default": "."},
         "top_k": {"type": "integer", "description": "返回结果数量", "default": 5},
     },
     category="read",
 )
-def search_project_files(query: str, base_dir: str = ".", top_k: int = 5) -> ToolResult:
+def search_project_files(
+    query: str,
+    path: str = ".",
+    base_dir: str = ".",
+    top_k: int = 5,
+    memory_store: MemoryStore | None = None,
+) -> ToolResult:
     """基于本地项目文件索引搜索相关文件
 
     若索引不存在，会自动触发一次索引构建。
@@ -28,16 +36,18 @@ def search_project_files(query: str, base_dir: str = ".", top_k: int = 5) -> Too
         return ToolResult(success=False, error="查询词不能为空")
 
     try:
-        store = MemoryStore()
+        store = memory_store or MemoryStore()
         indexer = ProjectIndexer(store)
-
-        # 若索引为空，自动构建一次
-        if not store.get_file_index().files:
-            indexer.index_project(root_dir=base_dir)
+        project_root = resolve_path(path, base_dir)
+        stats = indexer.index_project(root_dir=project_root)
 
         entries = store.search_files(query, top_k=top_k)
         if not entries:
-            return ToolResult(success=True, output=f"未找到与 '{query}' 相关的项目文件。")
+            return ToolResult(
+                success=True,
+                output=f"未找到与 '{query}' 相关的项目文件。",
+                metadata={"project_index": stats, "cached": stats["read"] == 0},
+            )
 
         lines = [f'搜索 "{query}" 的结果（top {len(entries)}）：', ""]
         for i, entry in enumerate(entries, 1):
@@ -51,7 +61,11 @@ def search_project_files(query: str, base_dir: str = ".", top_k: int = 5) -> Too
                 lines.append(f"   片段：{snippet}...")
             lines.append("")
 
-        return ToolResult(success=True, output="\n".join(lines))
+        return ToolResult(
+            success=True,
+            output="\n".join(lines),
+            metadata={"project_index": stats, "cached": stats["read"] == 0},
+        )
     except Exception as e:
         return ToolResult(success=False, error=str(e))
 

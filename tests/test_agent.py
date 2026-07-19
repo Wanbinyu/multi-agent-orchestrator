@@ -65,6 +65,25 @@ def test_context_status_and_system_prompt_use_runtime_facts(tmp_path):
     assert "不得猜测其他模型配置" in prompt
 
 
+def test_explicit_session_report_uses_all_journals_without_provider(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway("must not be used")
+    store = RunJournalStore.from_output_dir(session.output_dir)
+    previous = store.create(session.id, "检查项目", "auto")
+    previous.finish("completed", metrics={"input_tokens": 12, "output_tokens": 3})
+    store.save(previous)
+    agent = Agent(gateway, session, journal_store=store)
+
+    result = agent.run_turn("请生成本会话工程报告")
+
+    assert "本会话工程报告" in result.assistant_message
+    assert previous.run_id in result.assistant_message
+    assert result.input_tokens == 0
+    assert result.output_tokens == 0
+    assert result.cost_usd == 0
+    gateway.chat_with_main_model.assert_not_called()
+
+
 def test_context_status_uses_agent_default_when_model_has_no_limit(tmp_path):
     session = _make_session(tmp_path)
     gateway = _mock_gateway("unused")
@@ -98,6 +117,9 @@ def test_run_turn_no_tools(tmp_path):
     journal = RunJournalStore.from_output_dir(session.output_dir).load(result.run_id)
     assert journal.status == "completed"
     assert result.engineering["run_id"] == result.run_id
+    assert result.engineering["effective_intent"] is None
+    assert result.engineering["observed_mutation"]["project_file_count"] == 0
+    assert result.engineering["audit"]["status"] == "not_required"
     assert journal.metrics["input_tokens"] == 10
 
 
@@ -165,6 +187,25 @@ def test_auto_change_can_complete_with_direct_standard_verification(tmp_path):
     assert result.engineering["verification_count"] == 2
     assert result.engineering["requirement_counts"]["satisfied"] == 3
     assert "验证未闭环" not in result.assistant_message
+
+
+def test_agent_limits_command_preflight_correction_to_one_retry(tmp_path):
+    session = _make_session(tmp_path)
+    invalid = (
+        '```tool:run_command\n'
+        '{"command":"cd missing && npm test"}\n```'
+    )
+    gateway = _mock_gateway(invalid, invalid, invalid, "停止重试并报告")
+    agent = Agent(gateway, session, approval_mode="auto")
+
+    result = agent.run_turn("修复测试命令")
+
+    error_codes = [
+        call.get("metadata", {}).get("error_code") for call in result.tool_calls
+    ]
+    assert error_codes == ["inline_cwd", "inline_cwd", "correction_limit"]
+    assert result.engineering["metrics"]["preflight_failures"] == 2
+    assert result.engineering["verification_count"] == 0
 
 
 def test_run_turn_failure_marks_journal_failed(tmp_path):

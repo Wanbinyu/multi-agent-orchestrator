@@ -1,0 +1,13 @@
+<!doctype html>
+<html><body><main>
+  <input id="user"><input id="password"><button id="login">Login</button>
+  <table hidden><tbody><tr><td>Mock data ready</td></tr></tbody></table>
+  <canvas hidden></canvas>
+  <script>
+    document.querySelector("#login").onclick = async () => {
+      const response = await fetch("/api/login", { method: "POST" });
+      const data = await response.json();
+      if (data.ok) location.href = "/overview";
+    };
+  </script>
+</main></body></html>

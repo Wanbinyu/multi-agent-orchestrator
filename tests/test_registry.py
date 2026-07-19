@@ -132,9 +132,39 @@ def test_global_registry_has_builtins():
         "read_file",
         "write_file",
         "run_command",
+        "discover_project_commands",
+        "frontend_smoke",
         "search_project_files",
         "search_memory",
         "web_search",
         "fetch_url",
     ):
         assert expected in names, f"缺少内置工具：{expected}"
+
+
+def test_run_command_schema_exposes_structured_cwd_and_temp_output():
+    import src.tools.worker_tools  # noqa: F401
+
+    schema = tool_registry.build_tool_schemas("anthropic", ["run_command"])[0]
+    properties = schema["input_schema"]["properties"]
+
+    assert properties["cwd"]["type"] == "string"
+    assert properties["temporary_output"]["type"] == "boolean"
+    assert "cwd" not in schema["input_schema"]["required"]
+    spec = tool_registry.get("run_command")
+    assert spec is not None
+    assert spec.params["cwd"]["default"] == "."
+    assert spec.params["temporary_output"]["default"] is False
+
+
+def test_frontend_smoke_schema_is_structured_execute_tool():
+    import src.tools.worker_tools  # noqa: F401
+
+    spec = tool_registry.get("frontend_smoke")
+    assert spec is not None
+    assert spec.category == "execute"
+    schema = tool_registry.build_tool_schemas("anthropic", ["frontend_smoke"])[0]
+    properties = schema["input_schema"]["properties"]
+    assert properties["contract"]["type"] == "object"
+    assert "artifact_dir" not in schema["input_schema"]["required"]
+    assert spec.params["artifact_dir"]["default"] == "smoke-artifacts"

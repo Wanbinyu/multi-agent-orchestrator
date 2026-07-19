@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MAO - 对话</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=20260715-ui10">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260718-plan1">
 </head>
 <body>
   <header class="app-header">
@@ -28,10 +28,37 @@
 
     <section class="chat-main">
       <div class="chat-main-header">
-        <span id="mode-indicator" class="mode-indicator" title="Shift+Tab 切换">approve</span>
+        <div class="chat-mode-controls">
+          <span id="mode-indicator" class="mode-indicator" title="Shift+Tab 切换">approve</span>
+          <button id="btn-plan-mode" class="btn btn-secondary btn-sm" type="button" aria-pressed="false" title="进入只读 Plan 模式">Plan</button>
+        </div>
         <button id="btn-toggle-rightbar" class="btn btn-secondary btn-sm" type="button" aria-controls="chat-rightbar" aria-expanded="false">▤ 工作区</button>
       </div>
+      <section id="recovery-banner" class="recovery-banner hidden" aria-live="assertive">
+        <div class="recovery-banner-copy">
+          <strong>检测到中断任务</strong>
+          <span id="recovery-summary"></span>
+          <span id="recovery-steps" class="recovery-steps"></span>
+        </div>
+        <div class="recovery-actions">
+          <button id="btn-recovery-abandon" class="btn btn-secondary btn-sm" type="button">放弃任务</button>
+          <button id="btn-recovery-continue" class="btn btn-primary btn-sm" type="button">继续未完成部分</button>
+        </div>
+      </section>
       <div id="chat-messages" class="chat-messages"></div>
+
+      <section id="plan-mode-panel" class="plan-mode-panel hidden" aria-live="polite">
+        <div class="plan-mode-head">
+          <strong id="plan-mode-state">Plan</strong>
+          <button id="btn-plan-cancel" class="btn btn-icon" type="button" title="取消 Plan 模式" aria-label="取消 Plan 模式">✕</button>
+        </div>
+        <div id="plan-mode-content" class="plan-mode-content">发送需求后将生成只读方案。</div>
+        <div id="plan-revision-controls" class="plan-revision-controls hidden">
+          <input id="plan-revision-input" class="input-sm" type="text" placeholder="输入修订意见">
+          <button id="btn-plan-revise" class="btn btn-secondary btn-sm" type="button">修订</button>
+          <button id="btn-plan-approve" class="btn btn-primary btn-sm" type="button">批准并实施</button>
+        </div>
+      </section>
 
       <div class="chat-input-area">
         <textarea
@@ -128,6 +155,19 @@
           <div class="empty-item">发送消息后将显示工具调用和文件记录</div>
         </div>
         </div>
+
+        <div class="rightbar-section" id="ctx-section-report">
+        <div class="rightbar-section-title">
+          <span>工程汇总</span>
+          <div class="report-scope" role="group" aria-label="工程汇总范围">
+            <button id="btn-report-session" class="report-scope-button active" type="button">本会话</button>
+            <button id="btn-report-today" class="report-scope-button" type="button">今日</button>
+          </div>
+        </div>
+        <div id="delivery-report" class="delivery-report">
+          <div class="empty-item">暂无工程记录</div>
+        </div>
+        </div>
       </div>
 
       <div id="rightbar-files-panel" class="rightbar-panel hidden" role="tabpanel" aria-labelledby="tab-files">
@@ -175,6 +215,6 @@
     </form>
   </dialog>
 
-  <script src="/static/js/chat.js?v=20260715-ui10"></script>
+  <script src="/static/js/chat.js?v=20260718-recovery1"></script>
 </body>
 </html>

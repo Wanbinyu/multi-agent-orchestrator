@@ -161,6 +161,9 @@ def test_native_mode_passes_tools_to_gateway(tmp_path):
     call_kwargs = gw.chat_with_main_model.call_args.kwargs
     assert "tools" in call_kwargs
     assert len(call_kwargs["tools"]) > 0
+    names = {schema["name"] for schema in call_kwargs["tools"]}
+    assert "write_file" in names
+    assert "run_command" in names
 
 
 def test_analysis_only_native_mode_exposes_read_tools_only(tmp_path):
