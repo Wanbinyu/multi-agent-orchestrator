@@ -43,6 +43,7 @@ def _route(
     task_kind: str = "change",
     depth: str = "standard",
     unhealthy: set[str] | None = None,
+    local: set[str] | None = None,
     estimated_input: int = 4_000,
 ):
     return ModelRouter(models, {}).route(
@@ -54,6 +55,7 @@ def _route(
         ),
         estimated_input_tokens=estimated_input,
         unhealthy_models=unhealthy,
+        local_models=local,
     )
 
 
@@ -224,6 +226,111 @@ def test_health_and_context_are_hard_candidate_filters():
 
     assert context.selected_model == "roomy"
     assert "上下文预算不足" in context.reason
+
+
+def test_fast_prefers_verified_healthy_zero_marginal_local_model():
+    decision = _route(
+        {
+            "cloud": _config(
+                "cloud",
+                capabilities={"chat": "supported"},
+                input_price=2,
+                output_price=8,
+            ),
+            "local": _config(
+                "local",
+                capabilities={"chat": "supported"},
+                source="local_runtime_config",
+                input_price=99,
+                output_price=99,
+            ),
+        },
+        requested="cloud",
+        task_kind="answer",
+        depth="fast",
+        local={"local"},
+    )
+
+    local = next(item for item in decision.candidates if item.model == "local")
+    assert decision.selected_model == "local"
+    assert decision.price_comparison == "cheaper"
+    assert decision.savings_claim_allowed is True
+    assert local.local is True
+    assert local.price_known is True
+    assert local.estimated_cost_usd == 0.0
+
+
+def test_local_cost_bonus_never_bypasses_health_capability_or_context():
+    cloud = _config("cloud", capabilities={"coding": "supported"})
+    unverified = _config(
+        "local", capabilities={"coding": "unverified"}, context=8_000
+    )
+
+    unhealthy = _route(
+        {"cloud": cloud, "local": _config("local", capabilities={"coding": "supported"})},
+        requested="cloud",
+        depth="fast",
+        local={"local"},
+        unhealthy={"local"},
+    )
+    unknown_capability = _route(
+        {"cloud": cloud, "local": unverified},
+        requested="cloud",
+        depth="fast",
+        local={"local"},
+    )
+    too_small = _route(
+        {
+            "cloud": cloud,
+            "local": _config("local", capabilities={"coding": "supported"}, context=8_000),
+        },
+        requested="cloud",
+        depth="fast",
+        local={"local"},
+        estimated_input=10_000,
+    )
+
+    assert unhealthy.selected_model == "cloud"
+    assert unknown_capability.selected_model == "cloud"
+    assert too_small.selected_model == "cloud"
+    assert any(
+        "健康冷却期" in reason
+        for reason in next(
+            item for item in unhealthy.candidates if item.model == "local"
+        ).reasons
+    )
+    assert any(
+        "unverified" in reason
+        for reason in next(
+            item for item in unknown_capability.candidates if item.model == "local"
+        ).reasons
+    )
+    assert any(
+        "安全输入预算不足" in reason
+        for reason in next(
+            item for item in too_small.candidates if item.model == "local"
+        ).reasons
+    )
+
+
+def test_deep_coding_requires_reasoning_before_local_cost_is_considered():
+    decision = _route(
+        {
+            "local": _config(
+                "local", capabilities={"coding": "supported", "reasoning": "unverified"}
+            ),
+            "cloud": _config(
+                "cloud", capabilities={"coding": "supported", "reasoning": "supported"}
+            ),
+        },
+        requested="local",
+        task_kind="build",
+        depth="deep",
+        local={"local"},
+    )
+
+    assert decision.selected_model == "cloud"
+    assert "reasoning" in decision.required_capabilities
 
 
 def _gateway(models: dict[str, ModelConfig], main_model: str) -> MagicMock:

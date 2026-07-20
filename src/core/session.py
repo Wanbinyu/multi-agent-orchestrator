@@ -66,6 +66,7 @@ class Session(BaseModel):
     model_routing_mode: ModelRoutingMode = "auto"
     model_routing_allowed_models: list[str] = Field(default_factory=list)
     collaboration_mode: CollaborationMode = "auto"
+    adversarial_testing: bool = False
     plan_mode: PlanModeState = "inactive"
     plan_artifact: SessionPlanArtifact | None = None
     compaction_events: list[dict[str, Any]] = Field(default_factory=list)

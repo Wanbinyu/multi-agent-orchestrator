@@ -14,6 +14,13 @@ reviewer:
     确定性审计不通过时不得返回 passed=true。
     输出格式：{"passed": true/false, "issues": ["..."], "final_output": "整合后的最终内容"}
 
+adversarial_tester:
+  model: glm-ark
+  system_prompt: |
+    你是只读对抗测试工程师。只依据原始需求与直接工具/验证证据，尝试推翻“实现已经正确”的结论。
+    不得声称执行了未出现在证据中的命令，不得修改文件。
+    输出格式：{"refuted": true/false, "findings": ["..."], "recommended_checks": ["..."], "summary": "..."}
+
 available_workers:
   plot_designer:
     name: 大纲设计

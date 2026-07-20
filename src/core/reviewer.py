@@ -246,6 +246,14 @@ class Reviewer:
                     f"- status={requirement.get('status', 'unverified')} | "
                     f"{requirement.get('requirement', '')}"
                 )
+            adversarial = engineering_context.get("adversarial") or {}
+            if adversarial:
+                lines.append("实验对抗测试：")
+                lines.append(f"- status={adversarial.get('status', 'inconclusive')}")
+                for finding in adversarial.get("findings", []) or []:
+                    lines.append(f"- finding={finding}")
+                for check in adversarial.get("recommended_checks", []) or []:
+                    lines.append(f"- recommended_check={check}（未执行）")
 
         lines.append("\n请根据以上结果进行审查，按指定 JSON 格式输出。")
         return "\n".join(lines)

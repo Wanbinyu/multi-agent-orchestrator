@@ -8,6 +8,8 @@ Next target: `v0.1.0-beta.5` (routing, execution depth, and reproducible benchma
 
 ### Added
 
+- B5.5 adds an opt-in, read-only adversarial tester for verified deep engineering collaboration. It receives direct requirements and verification evidence rather than Worker prose, records structured findings in RunJournal, and may downgrade a completed result to blocked but can never upgrade failed deterministic evidence. CLI `/adversarial` and a persistent Web session toggle expose the experiment.
+- Local/Ollama candidates now have explicit routing contracts proving zero marginal cost cannot bypass health cooldowns, verified capabilities, context capacity, or deep-build reasoning requirements.
 - B5.4 adds controlled `fixed-single`, `auto-route`, and `multi-model` benchmark profiles, a headless `mao benchmark-agent` entry point that uses the production Agent stream, an explicit live authorization/spend guard, and an optional Harbor `BaseInstalledAgent` adapter. The offline gate now produces 54 synthetic results across the three profiles without reading keys or calling a Provider.
 - B5.3 adds a deterministic, explainable model router using task type, verified capability states, traceable prices, safe context capacity, health cooldowns, local-model status, and user constraints. Automatic routing performs at most one upgrade, unknown prices never produce savings claims, `/routing fixed` pins the configured main model, runtime failures prefer that user model before the existing failover chain, and RunJournal v5 keeps the full candidate audit while CLI/Web show a concise reason.
 - B5.2 adds deterministic `fast`, `standard`, and `deep` execution budgets for main-agent/Worker tool rounds, context usage, Worker concurrency, collaboration review, and mutation verification. User preferences persist through `/depth` and the Web session API, while high-risk safety floors remain non-bypassable and every decision is journaled in RunJournal v4.
@@ -16,6 +18,7 @@ Next target: `v0.1.0-beta.5` (routing, execution depth, and reproducible benchma
 
 ### Fixed
 
+- The Web adversarial toggle remains readable without overlap at 320px, 390px, and desktop widths; narrow layouts move workspace controls to a separate row instead of compressing the label character by character.
 - Live benchmark Provider attempt ceilings are now reserved atomically before every network request across retries, streams, concurrent Workers, and Agent subcalls; reaching the limit blocks the next request instead of reporting an overrun only after the strategy returns.
 - Orchestrator plans now normalize top-level task arrays, list-form acceptance text, common Worker role aliases, invalid model-role placeholders, and creative Worker drift in software tasks before execution. Alias-only corrections preserve valid configured model choices.
 

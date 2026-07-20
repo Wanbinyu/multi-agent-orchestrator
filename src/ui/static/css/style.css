@@ -728,6 +728,36 @@ body::before {
   gap: 0.5rem;
 }
 
+.experiment-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 32px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.experiment-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--warning);
+}
+
+.experiment-toggle:has(input:checked) span {
+  color: var(--warning);
+}
+
+.adversarial-notice {
+  margin: 0.55rem 0;
+  padding-left: 0.65rem;
+  border-left: 2px solid var(--warning);
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
 #btn-plan-mode.active {
   color: var(--accent);
   border-color: rgba(56, 189, 248, 0.5);
@@ -2433,5 +2463,21 @@ body::before {
 
   .form-actions .btn {
     flex-basis: calc(50% - 0.5rem);
+  }
+}
+
+@media (max-width: 360px) {
+  .chat-main-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .chat-mode-controls {
+    grid-column: 1 / -1;
+  }
+
+  #btn-toggle-rightbar {
+    grid-column: 2;
+    justify-self: end;
   }
 }

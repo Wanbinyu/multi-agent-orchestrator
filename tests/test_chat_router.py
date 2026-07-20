@@ -51,6 +51,7 @@ def test_chat_page(client):
     assert 'id="plan-mode-panel"' in r.text
     assert 'id="recovery-banner"' in r.text
     assert 'id="btn-recovery-continue"' in r.text
+    assert 'id="toggle-adversarial"' in r.text
 
 
 def test_permission_response_rejects_unknown_request(client):
@@ -285,6 +286,44 @@ def test_model_routing_api_persists_fixed_constraint_without_provider_call(clien
     chat_router.gateway.chat_with_main_model.assert_not_called()
 
 
+def test_adversarial_testing_api_is_explicit_and_local(client):
+    session_id = client.post(
+        "/api/chat/sessions", json={"title": "adversarial"}
+    ).json()["session_id"]
+
+    initial = client.get(f"/api/chat/sessions/{session_id}").json()
+    enabled = client.post(
+        f"/api/chat/sessions/{session_id}/adversarial",
+        json={"enabled": True},
+    )
+
+    assert initial["adversarial_testing"] is False
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+    assert chat_router.store.load(session_id).adversarial_testing is True
+    assert client.get(f"/api/chat/sessions/{session_id}").json()[
+        "adversarial_testing"
+    ] is True
+    chat_router.gateway.chat_with_main_model.assert_not_called()
+
+
+def test_adversarial_testing_api_rejects_mid_turn_change(client):
+    session_id = client.post(
+        "/api/chat/sessions", json={"title": "active"}
+    ).json()["session_id"]
+    chat_router.active_agents[session_id] = MagicMock()
+    try:
+        response = client.post(
+            f"/api/chat/sessions/{session_id}/adversarial",
+            json={"enabled": True},
+        )
+    finally:
+        chat_router.active_agents.pop(session_id, None)
+
+    assert response.status_code == 409
+    assert chat_router.store.load(session_id).adversarial_testing is False
+
+
 def test_get_session_not_found(client):
     r = client.get("/api/chat/sessions/nonexistent")
     assert r.status_code == 404
@@ -367,6 +406,27 @@ def test_send_message(client):
         assert key in detail_payload, key
 
 
+def test_sync_message_registers_and_cleans_active_agent(client):
+    session_id = client.post(
+        "/api/chat/sessions", json={"title": "sync active"}
+    ).json()["session_id"]
+    response = chat_router.gateway.chat_with_main_model.return_value
+
+    def assert_registered(*args, **kwargs):
+        assert session_id in chat_router.active_agents
+        return response
+
+    chat_router.gateway.chat_with_main_model.side_effect = assert_registered
+
+    result = client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"message": "你好"},
+    )
+
+    assert result.status_code == 200
+    assert session_id not in chat_router.active_agents
+
+
 def test_failed_sync_message_persists_session_and_journal(client):
     created = client.post("/api/chat/sessions", json={"title": "sync failure"}).json()
     session_id = created["session_id"]
@@ -385,6 +445,7 @@ def test_failed_sync_message_persists_session_and_journal(client):
     )
     runs = client.get(f"/api/chat/sessions/{session_id}/runs").json()["runs"]
     assert runs[0]["status"] == "failed"
+    assert session_id not in chat_router.active_agents
 
 
 def test_sync_provider_error_has_structured_safe_web_response(client):

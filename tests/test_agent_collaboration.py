@@ -8,8 +8,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.core.agent import Agent
+from src.core.engineering import CompletionAudit
 from src.core.session import Session
 from src.models.schemas import (
+    AdversarialTestResult,
     ChatResponse,
     ChatStreamEvent,
     ReviewResult,
@@ -89,6 +91,7 @@ def test_analysis_only_request_skips_collaboration_without_llm_routing(tmp_path,
 
 def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
     session = _make_session(tmp_path)
+    session.adversarial_testing = True
     gateway = _mock_gateway(collaborate=True)
     agent = Agent(gateway, session)
 
@@ -125,6 +128,7 @@ def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
 
     with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
          patch("src.core.dispatcher.Dispatcher") as MockDispatcher, \
+         patch("src.core.adversarial_tester.AdversarialTester") as MockAdversarial, \
          patch("src.core.reviewer.Reviewer") as MockReviewer:
         MockOrchestrator.return_value.plan.return_value = plan
         MockDispatcher.return_value.dispatch.side_effect = _fake_dispatch
@@ -135,6 +139,8 @@ def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
         )
 
         events = _collect_events(agent, "开发一个登录功能")
+
+    MockAdversarial.assert_not_called()
 
     plan_events = [e for e in events if e.type == "plan"]
     task_starts = [e for e in events if e.type == "task_start"]
@@ -189,6 +195,91 @@ def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
     # 最终答案应被追加到会话历史
     assert session.messages[-1].role == "assistant"
     assert session.messages[-1].content == done.assistant_message
+
+
+def test_explicit_adversarial_testing_can_only_downgrade_review(tmp_path):
+    session = _make_session(tmp_path)
+    session.adversarial_testing = True
+    session.execution_depth = "deep"
+    gateway = _mock_gateway(collaborate=True)
+    agent = Agent(gateway, session)
+
+    def passing_audit(journal, requested_status):
+        audit = CompletionAudit(
+            status="passed",
+            requested_status=requested_status,
+            can_complete=True,
+            summary="deterministic checks passed",
+        )
+        journal.audit = audit
+        return audit
+
+    agent.completion_auditor.audit = MagicMock(side_effect=passing_audit)
+    task = Task(
+        id="impl",
+        type="backend_dev",
+        title="实现 health",
+        input="创建 health",
+        assigned_model="glm-ark",
+    )
+    plan = TaskPlan(summary="实现 health", tasks=[task])
+    results = [TaskResult(
+        task=task,
+        success=True,
+        content="WORKER_BODY",
+        files_written=["src/main.py"],
+        acceptance_evidence=["实现完成"],
+    )]
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
+         patch("src.core.dispatcher.Dispatcher") as MockDispatcher, \
+         patch("src.core.adversarial_tester.AdversarialTester") as MockAdversarial, \
+         patch("src.core.reviewer.Reviewer") as MockReviewer:
+        MockOrchestrator.return_value.plan.return_value = plan
+        MockDispatcher.return_value.dispatch.return_value = results
+        MockAdversarial.return_value.model = "critic-model"
+        MockAdversarial.return_value.last_response = ChatResponse(
+            content="refuted",
+            model="critic-model",
+            provider="test",
+            input_tokens=20,
+            output_tokens=10,
+            cost_usd=0.0002,
+        )
+        MockAdversarial.return_value.test.return_value = AdversarialTestResult(
+            status="refuted",
+            findings=["health 返回值大小写不匹配"],
+            recommended_checks=["断言精确返回值"],
+            summary="发现反例",
+        )
+        MockReviewer.return_value.review.return_value = ReviewResult(
+            passed=True,
+            issues=[],
+            final_output="实现完成",
+        )
+
+        events = _collect_events(agent, "实现一个返回 ok 的 health 功能")
+
+    adversarial_events = [
+        event for event in events if event.type == "adversarial_complete"
+    ]
+    assert adversarial_events, [event.type for event in events]
+    adversarial = adversarial_events[0]
+    review = next(event for event in events if event.type == "review_complete")
+    engineering = next(
+        event.engineering for event in events if event.type == "engineering_complete"
+    )
+    assert adversarial.adversarial["status"] == "refuted"
+    assert review.review["passed"] is False
+    assert "对抗测试：health 返回值大小写不匹配" in review.review["issues"]
+    assert engineering["metrics"]["adversarial_testing"]["status"] == "refuted"
+    assert engineering["status"] == "blocked"
+    done = next(event for event in events if event.type == "done")
+    assert "实验对抗测试发现反例" in done.assistant_message
+    assert any(
+        item["role"] == "adversarial_tester"
+        for item in engineering["metrics"]["collaboration"]["roles"]
+    )
 
 
 def test_collaboration_worker_tool_trace_can_satisfy_deep_completion_audit(tmp_path):

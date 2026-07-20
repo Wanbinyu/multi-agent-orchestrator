@@ -11,6 +11,7 @@ ExecutionDepthPreference = Literal["auto", "fast", "standard", "deep"]
 ModelRoutingMode = Literal["auto", "fixed"]
 CollaborationMode = Literal["auto", "single", "multi"]
 BenchmarkAgentStrategy = Literal["fixed-single", "auto-route", "multi-model"]
+AdversarialTestStatus = Literal["not_refuted", "refuted", "inconclusive"]
 ModelRoutingSource = Literal["automatic", "user_fixed", "user_fallback"]
 PriceComparison = Literal["cheaper", "equal", "higher", "unknown"]
 FrontendBuildStage = Literal[
@@ -459,6 +460,7 @@ class ChatStreamEvent(BaseModel):
         "task_start",
         "task_retry",
         "task_complete",
+        "adversarial_complete",
         "review_complete",
         "permission_request",
         "model_failover",
@@ -484,6 +486,7 @@ class ChatStreamEvent(BaseModel):
     plan: dict[str, Any] = Field(default_factory=dict)
     task: dict[str, Any] = Field(default_factory=dict)
     review: dict[str, Any] = Field(default_factory=dict)
+    adversarial: dict[str, Any] = Field(default_factory=dict)
 
     # 权限确认请求 payload
     permission_request: dict[str, Any] = Field(default_factory=dict)
@@ -517,3 +520,12 @@ class ReviewResult(BaseModel):
     passed: bool
     issues: list[str]
     final_output: str
+
+
+class AdversarialTestResult(BaseModel):
+    """Read-only experimental attempt to refute implementation evidence."""
+
+    status: AdversarialTestStatus = "inconclusive"
+    findings: list[str] = Field(default_factory=list)
+    recommended_checks: list[str] = Field(default_factory=list)
+    summary: str = ""

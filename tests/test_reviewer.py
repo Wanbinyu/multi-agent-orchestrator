@@ -287,3 +287,33 @@ def test_full_reviewer_mode_can_include_worker_body(tmp_path, monkeypatch):
     assert reviewer.input_mode == "full"
     assert "Reviewer 输入模式：full" in prompt
     assert "FULL_MODE_WORKER_BODY" in prompt
+
+
+def test_reviewer_receives_adversarial_findings_as_unexecuted_checks(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text("reviewer:\n  model: glm-ark\n", encoding="utf-8")
+    gateway = _mock_gateway(
+        '{"passed": false, "issues": ["counterexample"], "final_output": "blocked"}'
+    )
+
+    Reviewer(gateway, config_path=str(config_path)).review(
+        "request",
+        _sample_plan(),
+        _sample_results(),
+        engineering_context={
+            "audit": {"can_complete": True},
+            "adversarial": {
+                "status": "refuted",
+                "findings": ["exact response differs"],
+                "recommended_checks": ["assert lowercase ok"],
+            },
+        },
+    )
+
+    prompt = gateway.chat.call_args.kwargs["messages"][1].content
+    assert "status=refuted" in prompt
+    assert "exact response differs" in prompt
+    assert "assert lowercase ok（未执行）" in prompt

@@ -30,6 +30,7 @@
     chatStatus: document.getElementById("chat-status"),
     modeIndicator: document.getElementById("mode-indicator"),
     btnPlanMode: document.getElementById("btn-plan-mode"),
+    toggleAdversarial: document.getElementById("toggle-adversarial"),
     planModePanel: document.getElementById("plan-mode-panel"),
     planModeState: document.getElementById("plan-mode-state"),
     planModeContent: document.getElementById("plan-mode-content"),
@@ -122,6 +123,31 @@
       updateModeIndicator();
       console.error("切换模式失败", err);
       showStatus(err.message, true);
+    }
+  }
+
+  async function setAdversarialTesting(enabled) {
+    if (!state.currentSessionId || !els.toggleAdversarial) return;
+    const sessionId = state.currentSessionId;
+    const previous = !enabled;
+    els.toggleAdversarial.disabled = true;
+    try {
+      await api(
+        `/api/chat/sessions/${encodeURIComponent(sessionId)}/adversarial`,
+        {
+          method: "POST",
+          body: JSON.stringify({ enabled }),
+        }
+      );
+    } catch (err) {
+      if (state.currentSessionId === sessionId) {
+        els.toggleAdversarial.checked = previous;
+        showStatus(err.message, true);
+      }
+    } finally {
+      if (state.currentSessionId === sessionId) {
+        els.toggleAdversarial.disabled = false;
+      }
     }
   }
 
@@ -459,6 +485,9 @@
     }
     renderPlanState(data.plan_mode, data.plan_artifact);
     renderRecoveryState(data.recovery);
+    if (els.toggleAdversarial) {
+      els.toggleAdversarial.checked = Boolean(data.adversarial_testing);
+    }
     updateModeIndicator();
     renderSessionList();
     renderMessages(data.messages || []);
@@ -1632,6 +1661,19 @@
           if (collabPanel) {
             updateCollaborationReview(collabPanel, data.review || {});
           }
+        } else if (ev.event === "adversarial_complete") {
+          const data = JSON.parse(ev.data);
+          const result = data.adversarial || {};
+          const notice = document.createElement("div");
+          notice.className = "adversarial-notice";
+          const labels = {
+            not_refuted: "未推翻",
+            refuted: "发现反例",
+            inconclusive: "结果不确定",
+          };
+          notice.textContent = `对抗测试：${labels[result.status] || result.status || "结果不确定"}`;
+          messageEl.appendChild(notice);
+          scrollToBottom();
         } else if (ev.event === "permission_request") {
           const data = JSON.parse(ev.data);
           if (data.permission_request) {
@@ -1735,6 +1777,9 @@
   // 事件绑定
   els.btnSend.addEventListener("click", sendMessage);
   els.btnPlanMode?.addEventListener("click", togglePlanMode);
+  els.toggleAdversarial?.addEventListener("change", (event) => {
+    setAdversarialTesting(Boolean(event.target.checked));
+  });
   els.btnPlanCancel?.addEventListener("click", () => updatePlanState("cancel"));
   els.btnPlanApprove?.addEventListener("click", approvePlanAndImplement);
   els.btnPlanRevise?.addEventListener("click", revisePlan);

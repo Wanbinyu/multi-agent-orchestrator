@@ -55,6 +55,7 @@ SLASH_COMMANDS: list[tuple[str, str, str]] = [
     ("/mode", "/mode <auto|approve|readonly>", "切换权限模式"),
     ("/depth", "/depth <auto|fast|standard|deep>", "设置执行深度"),
     ("/routing", "/routing <auto|fixed>", "设置模型路由"),
+    ("/adversarial", "/adversarial <on|off>", "切换实验对抗测试"),
     ("/auto", "/auto", "自动执行工具"),
     ("/approve", "/approve", "每次执行前确认"),
     ("/readonly", "/readonly", "只读模式"),
@@ -556,6 +557,20 @@ async def _stream_turn(agent: Agent, user_input: str):
                         console.print(f"  [dim]📁 {f}[/dim]")
                 if task.get("assigned_model"):
                     models_used.add(task.get("assigned_model"))
+            elif event.type == "adversarial_complete":
+                adversarial = event.adversarial or {}
+                labels = {
+                    "not_refuted": "未推翻",
+                    "refuted": "发现反例",
+                    "inconclusive": "结果不确定",
+                }
+                status = adversarial.get("status", "inconclusive")
+                color = "yellow" if status != "not_refuted" else "green"
+                console.print(
+                    f"\n[bold {color}]对抗测试：{labels.get(status, status)}[/]"
+                )
+                for finding in adversarial.get("findings", []):
+                    console.print(f"  ⚠ {finding}")
             elif event.type == "review_complete":
                 review = event.review or {}
                 passed = review.get("passed", False)
@@ -1117,6 +1132,22 @@ def _set_routing_mode(session, mode: str) -> bool:
     return True
 
 
+def _set_adversarial_testing(session, state: str) -> bool:
+    """Persist the opt-in experimental adversarial testing switch."""
+    normalized = state.strip().lower()
+    if normalized not in {"on", "off"}:
+        console.print("[bold red]未知对抗测试状态，可选：on / off[/bold red]")
+        return False
+    session.adversarial_testing = normalized == "on"
+    label = "已启用" if session.adversarial_testing else "已关闭"
+    console.print(f"[cyan]实验对抗测试：{label}[/cyan]")
+    if session.adversarial_testing:
+        console.print(
+            "[dim]仅 deep 的 change/build 多模型协作会额外调用只读对抗角色。[/dim]"
+        )
+    return True
+
+
 def _cmd_context(agent: Agent) -> dict[str, Any]:
     """显示本地运行时上下文状态，不调用模型、不消耗 token。"""
     status = agent.get_context_status()
@@ -1377,6 +1408,12 @@ def run_chat_loop(
                             f"可选：{' / '.join(ROUTING_MODES)}"
                         )
                     elif _set_routing_mode(session, arg.strip().lower()):
+                        store.save(session)
+                elif cmd == "/adversarial":
+                    if not arg:
+                        status = "on" if session.adversarial_testing else "off"
+                        console.print(f"当前实验对抗测试：{status}；可选：on / off")
+                    elif _set_adversarial_testing(session, arg):
                         store.save(session)
                 elif cmd == "/auto":
                     if _set_mode(session, agent, mode_ref, "auto"):

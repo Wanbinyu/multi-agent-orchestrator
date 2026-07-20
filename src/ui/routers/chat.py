@@ -82,6 +82,10 @@ class UpdateModelRoutingForm(BaseModel):
     mode: ModelRoutingMode
 
 
+class UpdateAdversarialTestingForm(BaseModel):
+    enabled: bool
+
+
 class PermissionResponseForm(BaseModel):
     approved: bool
 
@@ -251,6 +255,7 @@ def get_session(session_id: str) -> dict[str, Any]:
         "approval_mode": session.approval_mode,
         "execution_depth": session.execution_depth,
         "model_routing_mode": session.model_routing_mode,
+        "adversarial_testing": session.adversarial_testing,
         "plan_mode": session.plan_mode,
         "plan_artifact": session.plan_artifact.model_dump() if session.plan_artifact else None,
         "recovery": recovery.public_payload(),
@@ -359,10 +364,12 @@ def send_message(session_id: str, form: SendMessageForm) -> dict[str, Any]:
     except RecoveryConfirmationRequired as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     agent = Agent(_get_gateway(), session)
+    active_agents[session_id] = agent
     try:
         result = agent.run_turn(form.message)
     finally:
         store.save(session)
+        active_agents.pop(session_id, None)
 
     return result.model_dump()
 
@@ -464,6 +471,26 @@ def update_model_routing(
     if agent is not None:
         agent.session.model_routing_mode = form.mode
     return {"success": True, "mode": form.mode}
+
+
+@router.post("/api/chat/sessions/{session_id}/adversarial")
+def update_adversarial_testing(
+    session_id: str, form: UpdateAdversarialTestingForm
+) -> dict[str, Any]:
+    """Persist an explicit opt-in for the experimental read-only test role."""
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if session_id in active_agents:
+        raise HTTPException(
+            status_code=409,
+            detail="会话仍有活跃请求，对抗测试设置将在本轮结束后才能修改",
+        )
+
+    session.adversarial_testing = form.enabled
+    store.save(session)
+    return {"success": True, "enabled": form.enabled}
 
 
 @router.get("/api/chat/sessions/{session_id}/plan")

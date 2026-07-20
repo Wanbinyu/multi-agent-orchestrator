@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MAO - 对话</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=20260718-plan1">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260720-adversarial2">
 </head>
 <body>
   <header class="app-header">
@@ -31,6 +31,10 @@
         <div class="chat-mode-controls">
           <span id="mode-indicator" class="mode-indicator" title="Shift+Tab 切换">approve</span>
           <button id="btn-plan-mode" class="btn btn-secondary btn-sm" type="button" aria-pressed="false" title="进入只读 Plan 模式">Plan</button>
+          <label class="experiment-toggle" title="实验对抗测试仅在 deep 工程协作中运行">
+            <input id="toggle-adversarial" type="checkbox">
+            <span>对抗测试</span>
+          </label>
         </div>
         <button id="btn-toggle-rightbar" class="btn btn-secondary btn-sm" type="button" aria-controls="chat-rightbar" aria-expanded="false">▤ 工作区</button>
       </div>
@@ -215,6 +219,6 @@
     </form>
   </dialog>
 
-  <script src="/static/js/chat.js?v=20260718-recovery1"></script>
+  <script src="/static/js/chat.js?v=20260720-adversarial1"></script>
 </body>
 </html>

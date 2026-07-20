@@ -17,6 +17,7 @@ from src.cli.chat_command import (
     _parse_tree_args,
     _print_welcome,
     _set_depth,
+    _set_adversarial_testing,
     _set_mode,
     _set_routing_mode,
     _summarize_tool_activity,
@@ -75,6 +76,18 @@ def test_set_model_routing_mode_persists_user_constraint():
     assert session.model_routing_mode == "fixed"
     assert _set_routing_mode(session, "invalid") is False
     assert session.model_routing_mode == "fixed"
+
+
+def test_set_adversarial_testing_requires_explicit_on_or_off():
+    session = _make_session()
+
+    assert session.adversarial_testing is False
+    assert _set_adversarial_testing(session, "on") is True
+    assert session.adversarial_testing is True
+    assert _set_adversarial_testing(session, "invalid") is False
+    assert session.adversarial_testing is True
+    assert _set_adversarial_testing(session, "off") is True
+    assert session.adversarial_testing is False
 
 
 def test_set_mode_cycle_logic():
@@ -155,6 +168,7 @@ def test_slash_command_completion_opens_on_slash():
     assert "/context" in names
     assert "/tree" in names
     assert "/exit" in names
+    assert "/adversarial" in names
 
 
 def test_slash_command_completion_filters_as_user_types():

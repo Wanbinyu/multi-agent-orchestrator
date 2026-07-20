@@ -44,6 +44,7 @@ from src.core.token_counter import count_messages_tokens
 from src.gateway.client import GatewayClient
 from src.gateway.router import ModelRouter
 from src.models.schemas import (
+    AdversarialTestResult,
     ApprovalMode,
     ChatMessage,
     ChatStreamEvent,
@@ -51,6 +52,7 @@ from src.models.schemas import (
     ModelRoutingConstraints,
     ModelRoutingDecision,
     ModelConfig,
+    ReviewResult,
     StreamChunk,
     TaskResult,
 )
@@ -329,6 +331,10 @@ class Agent:
             resolved_risks.append(
                 "验证未闭环" + (f"：{'、'.join(audit_detail)}" if audit_detail else "")
             )
+        adversarial = journal.metrics.get("adversarial_testing") or {}
+        if status == "completed" and adversarial.get("status") == "refuted":
+            resolved_status = "blocked"
+            resolved_risks.append("实验对抗测试发现反例，需补充验证或修复")
         journal.finish(
             resolved_status,
             files_changed=files_changed,
@@ -349,6 +355,20 @@ class Agent:
         content: str, engineering: dict[str, Any]
     ) -> str:
         audit = engineering.get("audit") or {}
+        adversarial = (engineering.get("metrics") or {}).get(
+            "adversarial_testing", {}
+        ) or {}
+        if (
+            engineering.get("status") == "blocked"
+            and adversarial.get("status") == "refuted"
+        ):
+            findings = adversarial.get("findings", []) or []
+            notice = "实验对抗测试发现反例，本轮结果未标记为完成"
+            if findings:
+                notice += f"：{'、'.join(findings)}"
+            if notice in content:
+                return content
+            return f"{content.rstrip()}\n\n{notice}。".strip()
         if engineering.get("status") != "blocked" or (
             not audit.get("missing_checks") and not audit.get("failed_checks")
         ):
@@ -2250,6 +2270,7 @@ class Agent:
         run_journal: RunJournal,
     ) -> AsyncIterator[ChatStreamEvent]:
         """多模型协作流：Orchestrator -> Dispatcher -> Reviewer"""
+        from src.core.adversarial_tester import AdversarialTester
         from src.core.dispatcher import Dispatcher
         from src.core.orchestrator import Orchestrator
         from src.core.reviewer import Reviewer
@@ -2506,6 +2527,105 @@ class Agent:
                 engineering=run_journal.event_payload(),
             )
 
+        # 2.5 实验对抗测试：默认关闭，仅在 deep 的工程变更协作中运行。
+        adversarial_result: AdversarialTestResult | None = None
+        adversarial_tester = None
+        adversarial_enabled = bool(
+            self.session.adversarial_testing
+            and run_journal.execution_depth is not None
+            and run_journal.execution_depth.actual == "deep"
+            and run_journal.intent.kind in {"change", "build"}
+            and bool(run_journal.audit and run_journal.audit.can_complete)
+            and bool(results)
+            and all(result.success for result in results)
+        )
+        if adversarial_enabled:
+            adversarial_tester = AdversarialTester(
+                self.gateway,
+                config_path=str(Path(self.session.config_dir) / "workers.yaml"),
+                project_rules=project_rules,
+            )
+            adversarial_context = {
+                "verification": [
+                    item.model_dump() for item in run_journal.verification
+                ],
+                "audit": (
+                    run_journal.audit.model_dump() if run_journal.audit else None
+                ),
+            }
+            try:
+                adversarial_result = await asyncio.to_thread(
+                    adversarial_tester.test,
+                    user_request=user_input,
+                    plan=plan,
+                    results=results,
+                    engineering_context=adversarial_context,
+                )
+            except Exception as exc:  # noqa: BLE001 - experimental role is isolated
+                adversarial_result = AdversarialTestResult(
+                    status="inconclusive",
+                    findings=[f"对抗测试执行失败：{type(exc).__name__}"],
+                    summary="对抗测试执行失败，未改变确定性审计结论",
+                )
+            response = getattr(adversarial_tester, "last_response", None)
+            collaboration_roles.append({
+                "role": "adversarial_tester",
+                "task_id": "adversarial-tester",
+                "planned_model": adversarial_tester.model,
+                "actual_model": response.model if response is not None else "",
+                "status": adversarial_result.status,
+                "input_mode": "direct_evidence_only",
+                **_response_usage(response),
+            })
+            evidence, _ = run_journal.add_evidence(
+                Evidence(
+                    source="adversarial_tester",
+                    claim=(
+                        "对抗测试推翻了实现结论"
+                        if adversarial_result.status == "refuted"
+                        else "对抗测试未推翻实现结论"
+                        if adversarial_result.status == "not_refuted"
+                        else "对抗测试结果不确定"
+                    ),
+                    excerpt=(
+                        adversarial_result.summary
+                        or "；".join(adversarial_result.findings)
+                    )[:800],
+                    kind="runtime",
+                    success=adversarial_result.status == "not_refuted",
+                    metadata={
+                        "experimental": True,
+                        **adversarial_result.model_dump(),
+                    },
+                )
+            )
+            run_journal.metrics["adversarial_testing"] = {
+                "enabled": True,
+                "input_mode": "direct_evidence_only",
+                "evidence_id": evidence.id,
+                **adversarial_result.model_dump(),
+            }
+            if adversarial_result.status == "inconclusive":
+                run_journal.residual_risks = list(dict.fromkeys([
+                    *run_journal.residual_risks,
+                    "实验对抗测试未形成确定结论",
+                ]))
+            await asyncio.to_thread(self.journal_store.save, run_journal)
+            yield ChatStreamEvent(
+                type="adversarial_complete",
+                adversarial=adversarial_result.model_dump(),
+                engineering=run_journal.event_payload(),
+            )
+        else:
+            run_journal.metrics["adversarial_testing"] = {
+                "enabled": False,
+                "reason": (
+                    "session_disabled"
+                    if not self.session.adversarial_testing
+                    else "requires_verified_deep_change_or_build_collaboration"
+                ),
+            }
+
         # 3. Reviewer 整合
         reviewer = Reviewer(self.gateway, project_rules=project_rules)
         review = await asyncio.to_thread(
@@ -2522,8 +2642,28 @@ class Agent:
                     item.model_dump() for item in run_journal.requirements
                 ],
                 "audit": run_journal.audit.model_dump() if run_journal.audit else None,
+                "adversarial": (
+                    adversarial_result.model_dump()
+                    if adversarial_result is not None
+                    else None
+                ),
             },
         )
+        if (
+            adversarial_result is not None
+            and adversarial_result.status == "refuted"
+        ):
+            review = ReviewResult(
+                passed=False,
+                issues=list(dict.fromkeys([
+                    *review.issues,
+                    *[
+                        f"对抗测试：{finding}"
+                        for finding in adversarial_result.findings
+                    ],
+                ])),
+                final_output=review.final_output,
+            )
         reviewer_input_mode = (
             reviewer.input_mode
             if isinstance(getattr(reviewer, "input_mode", None), str)
