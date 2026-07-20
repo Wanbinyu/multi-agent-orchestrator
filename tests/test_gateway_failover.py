@@ -112,6 +112,38 @@ def test_chat_stream_retries_when_no_chunks_yielded(tmp_path, monkeypatch):
     assert chunks[0].content == "ok"
 
 
+def test_chat_stream_hard_attempt_guard_stops_before_network_call(
+    tmp_path, monkeypatch
+):
+    client, provider = _make_client(tmp_path, monkeypatch)
+    reservations = 0
+
+    def reserve():
+        nonlocal reservations
+        if reservations >= 2:
+            raise RuntimeError("attempt ceiling reached")
+        reservations += 1
+
+    def _stream(*args, **kwargs):
+        raise RuntimeError("retryable failure")
+        yield  # pragma: no cover
+
+    client.before_provider_attempt = reserve
+    provider.chat_stream.side_effect = _stream
+
+    async def _run():
+        async for _ in client.chat_stream(
+            [MagicMock()], "glm-ark", max_retries=5
+        ):
+            pass
+
+    with pytest.raises(RuntimeError, match="attempt ceiling reached"):
+        asyncio.run(_run())
+
+    assert provider.chat_stream.call_count == 2
+    assert client.provider_attempts_total == 2
+
+
 # ---------- 故障切换 ----------
 
 
@@ -211,6 +243,33 @@ def test_nested_failover_reaches_third_model(tmp_path, monkeypatch):
     assert provider.chat.call_count == 3
 
 
+def test_automatic_route_failure_falls_back_to_user_model(tmp_path, monkeypatch):
+    client, provider = _make_client(tmp_path, monkeypatch)
+
+    def _chat(messages, model_config, **kwargs):
+        if model_config.model_id == "kimi-for-coding":
+            raise RuntimeError("Error code: 429 - AccountQuotaExceeded")
+        return ChatResponse(
+            content="user fallback",
+            model=model_config.model_id,
+            provider="ark",
+        )
+
+    provider.chat.side_effect = _chat
+    response = client.chat(
+        [MagicMock()],
+        "kimi-fake",
+        max_retries=0,
+        routing_fallback_model="glm-ark",
+    )
+
+    assert response.content == "user fallback"
+    assert [call.args[1].model_id for call in provider.chat.call_args_list] == [
+        "kimi-for-coding",
+        "ark-code-latest",
+    ]
+
+
 def test_chat_stream_fails_over_on_quota_error(tmp_path, monkeypatch):
     """流式 429 时发出 failover 事件并切换到回退模型"""
     client, provider = _make_client(tmp_path, monkeypatch)
@@ -236,6 +295,34 @@ def test_chat_stream_fails_over_on_quota_error(tmp_path, monkeypatch):
     assert chunks[0].to_model == "glm-chat"
     assert chunks[1].type == "delta"
     assert chunks[1].content == "fallback ok"
+
+
+def test_stream_route_failure_falls_back_to_user_model(tmp_path, monkeypatch):
+    client, provider = _make_client(tmp_path, monkeypatch)
+
+    def _stream(messages, model_config, **kwargs):
+        if model_config.model_id == "kimi-for-coding":
+            raise RuntimeError("Error code: 429 - AccountQuotaExceeded")
+        yield StreamChunk(type="delta", content="user fallback")
+
+    provider.chat_stream.side_effect = _stream
+
+    async def _run():
+        return [
+            chunk
+            async for chunk in client.chat_stream(
+                [MagicMock()],
+                "kimi-fake",
+                max_retries=0,
+                routing_fallback_model="glm-ark",
+            )
+        ]
+
+    chunks = asyncio.run(_run())
+
+    assert [chunk.type for chunk in chunks] == ["failover", "delta"]
+    assert chunks[0].to_model == "glm-ark"
+    assert chunks[1].content == "user fallback"
 
 
 def test_chat_raises_on_fatal_error_without_failover(tmp_path, monkeypatch):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 # Windows 默认控制台编码（如 GBK）无法输出 emoji，先强制使用 UTF-8
@@ -134,6 +135,43 @@ def web(
     serve(host=host, port=port, open_browser=not no_open)
 
 
+@app.command(hidden=True)
+def benchmark_agent(
+    instruction: str = typer.Option(..., "--instruction", help="Benchmark task instruction"),
+    project_root: str = typer.Option(".", "--project-root", help="Isolated task workspace"),
+    config_dir: str = typer.Option("config", "--config", "-c", help="Provider config directory"),
+    state_dir: str = typer.Option(".mao-benchmark", "--state-dir", help="Benchmark state directory"),
+    result_path: str = typer.Option("", "--result", help="Optional machine-readable result path"),
+    strategy: str = typer.Option("auto-route", "--strategy", help="fixed-single, auto-route, or multi-model"),
+    execution_depth: str = typer.Option("standard", "--execution-depth", help="fast, standard, or deep"),
+    main_model: str = typer.Option("", "--main-model", help="Configured MAO model alias"),
+    allowed_models: str = typer.Option("", "--allowed-models", help="Comma-separated model aliases"),
+):
+    """Run one controlled, non-interactive benchmark turn."""
+    from src.core.engineering.benchmark_agent import run_headless_benchmark_agent_sync
+
+    if strategy not in {"fixed-single", "auto-route", "multi-model"}:
+        raise typer.BadParameter("策略必须是 fixed-single、auto-route 或 multi-model")
+    if execution_depth not in {"auto", "fast", "standard", "deep"}:
+        raise typer.BadParameter("执行深度必须是 auto、fast、standard 或 deep")
+    result = run_headless_benchmark_agent_sync(
+        instruction,
+        project_root=project_root,
+        config_dir=config_dir,
+        state_dir=state_dir,
+        strategy=strategy,
+        execution_depth=execution_depth,
+        main_model=main_model,
+        allowed_models=[item.strip() for item in allowed_models.split(",") if item.strip()],
+    )
+    payload = json.dumps(result.model_dump(), ensure_ascii=False, indent=2)
+    if result_path:
+        target = Path(result_path).expanduser().resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(payload + "\n", encoding="utf-8")
+    typer.echo(payload)
+
+
 @app.command()
 def run(
     request: str = typer.Argument(..., help="一句话开发需求，例如：开发一个登录页面"),
@@ -250,7 +288,10 @@ def build_review_section(review) -> str:
 
 def _maybe_insert_run_subcommand(argv: list[str]) -> list[str]:
     """如果没有显式指定子命令，默认插入 run 子命令"""
-    known_commands = {"setup", "agent-setup", "chat", "web", "run", "--help", "-h", "--version"}
+    known_commands = {
+        "setup", "agent-setup", "chat", "web", "run", "benchmark-agent",
+        "--help", "-h", "--version",
+    }
     if len(argv) > 1 and argv[1] not in known_commands:
         argv.insert(1, "run")
     return argv

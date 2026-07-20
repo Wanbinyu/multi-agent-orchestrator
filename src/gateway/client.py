@@ -6,7 +6,7 @@ import os
 import re
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -91,6 +91,9 @@ class GatewayClient:
         # 最近一次非流式调用发生的故障切换信息
         self.last_failover: dict[str, Any] | None = None
         self.last_attempt_trace: list[dict[str, Any]] = []
+        self.provider_attempts_total = 0
+        self._provider_attempts_lock = threading.Lock()
+        self.before_provider_attempt: Callable[[], None] | None = None
         self.context_budget_manager = ContextBudgetManager()
         self.last_context_budget: ContextBudget | None = None
         self._load_config(config_path)
@@ -272,6 +275,19 @@ class GatewayClient:
         self.last_attempt_trace = []
         self.last_failover = None
 
+    def _reserve_provider_attempt(self) -> None:
+        hook = getattr(self, "before_provider_attempt", None)
+        if hook is not None:
+            hook()
+        lock = getattr(self, "_provider_attempts_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._provider_attempts_lock = lock
+        with lock:
+            self.provider_attempts_total = (
+                int(getattr(self, "provider_attempts_total", 0)) + 1
+            )
+
     def _record_attempt(
         self,
         *,
@@ -334,6 +350,7 @@ class GatewayClient:
         model_name: str,
         task_id: str = "",
         max_retries: int = 2,
+        routing_fallback_model: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """统一对话入口，支持故障切换链"""
@@ -353,6 +370,17 @@ class GatewayClient:
         last_error: ProviderError | None = None
         last_cause: Exception | None = None
         chain = self._get_failover_chain(model_name)
+        if (
+            routing_fallback_model
+            and routing_fallback_model in self.models
+            and routing_fallback_model != model_name
+            and self._unhealthy_models.get(routing_fallback_model, 0) <= time.time()
+        ):
+            chain = [
+                chain[0],
+                routing_fallback_model,
+                *(item for item in chain[1:] if item != routing_fallback_model),
+            ]
         tried_models = 0
         if chain and chain[0] != model_name:
             requested_config = self.models.get(model_name)
@@ -395,6 +423,7 @@ class GatewayClient:
 
             tried_models += 1
             for attempt in range(max_retries + 1):
+                self._reserve_provider_attempt()
                 try:
                     response = provider.chat(messages, model_config, **kwargs)
                     self._record_attempt(
@@ -481,6 +510,7 @@ class GatewayClient:
         model_name: str,
         task_id: str = "",
         max_retries: int = 2,
+        routing_fallback_model: str | None = None,
         **kwargs: Any,
     ):
         """统一流式对话入口，支持故障切换链；已开始输出后不再重试/切换"""
@@ -499,6 +529,17 @@ class GatewayClient:
         last_error: ProviderError | None = None
         last_cause: Exception | None = None
         chain = self._get_failover_chain(model_name)
+        if (
+            routing_fallback_model
+            and routing_fallback_model in self.models
+            and routing_fallback_model != model_name
+            and self._unhealthy_models.get(routing_fallback_model, 0) <= time.time()
+        ):
+            chain = [
+                chain[0],
+                routing_fallback_model,
+                *(item for item in chain[1:] if item != routing_fallback_model),
+            ]
         tried_models = 0
 
         if chain and chain[0] != model_name:
@@ -544,6 +585,7 @@ class GatewayClient:
             tried_models += 1
             chunks_yielded = 0
             for attempt in range(max_retries + 1):
+                self._reserve_provider_attempt()
                 try:
                     stream = provider.chat_stream(messages, model_config, **kwargs)
                     async for chunk in self._asyncify_stream(stream):
@@ -652,6 +694,7 @@ class GatewayClient:
             return {"success": False, "error": error.user_message, **error.to_dict()}
 
         started = time.perf_counter()
+        self._reserve_provider_attempt()
         try:
             response = provider.chat(
                 [ChatMessage(role="user", content="hi")],

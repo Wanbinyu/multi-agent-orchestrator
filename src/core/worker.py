@@ -51,6 +51,7 @@ class Worker:
         project_rules: str = "",
         permission_engine: PermissionRuleEngine | None = None,
         approval_mode: ApprovalMode = "auto",
+        memory_store: Any = None,
     ):
         self.gateway = gateway
         self.workers_config = workers_config
@@ -58,6 +59,7 @@ class Worker:
         self.project_rules = project_rules.strip()
         self.permission_engine = permission_engine or PermissionRuleEngine()
         self.approval_mode = approval_mode
+        self.memory_store = memory_store
 
     def execute(
         self,
@@ -197,6 +199,7 @@ class Worker:
                     permission_engine=self.permission_engine,
                     approval_mode=self.approval_mode,
                     command_state=command_state,
+                    memory_store=self.memory_store,
                 )
                 native_specs = native_tool_specs(response.content_blocks)
                 attach_tool_use_ids(tool_results, native_specs)
@@ -483,6 +486,7 @@ def process_tool_calls(
     permission_engine: PermissionRuleEngine | None = None,
     approval_mode: ApprovalMode = "auto",
     command_state: MutableMapping[str, Any] | None = None,
+    memory_store: Any = None,
 ) -> tuple[str, list[dict]]:
     """解析并执行工具调用，返回处理后的内容和工具结果列表"""
     pattern = r"```tool:(\w+)\n(.*?)(?:```|<\|tool_calls_section_end\|>|$)"
@@ -580,7 +584,13 @@ def process_tool_calls(
         if cached:
             result = read_cache[cache_key]  # type: ignore[index]
         else:
-            result = execute_tool_call(tool_name, params, base_dir, allowed_prefixes)
+            result = execute_tool_call(
+                tool_name,
+                params,
+                base_dir,
+                allowed_prefixes,
+                runtime_context={"memory_store": memory_store},
+            )
             if read_cache is not None and cache_key and result.success:
                 read_cache[cache_key] = result
             if read_cache is not None and should_invalidate_read_cache(tool_name):

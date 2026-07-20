@@ -55,6 +55,41 @@ integration 会确定性检查入口、路由目标、相对 import、package.js
 """
 
 
+WORKER_TYPE_ALIASES: dict[str, str] = {
+    "code_writer": "backend_dev",
+    "coder": "backend_dev",
+    "developer": "backend_dev",
+    "implementer": "backend_dev",
+    "backend": "backend_dev",
+    "frontend": "frontend_dev",
+    "qa": "tester",
+    "test": "tester",
+    "verifier": "tester",
+}
+
+SOFTWARE_WORKER_TYPE_ALIASES: dict[str, str] = {
+    "plot_designer": "architect",
+    "writer": "backend_dev",
+    "editor": "tester",
+    "continuity_checker": "tester",
+}
+
+
+def _normalize_task_text_fields(raw_task: object) -> dict:
+    """Normalize common LLM list output for free-form task text fields only."""
+    if not isinstance(raw_task, dict):
+        raise ValueError("模型输出的 tasks 条目必须是对象")
+    normalized = dict(raw_task)
+    for field in ("output_format", "acceptance"):
+        value = normalized.get(field)
+        if isinstance(value, list):
+            normalized[field] = "\n".join(
+                item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
+                for item in value
+            )
+    return normalized
+
+
 def _detect_scenario(user_request: str) -> str:
     """根据用户需求关键词检测场景类型"""
     text = user_request.lower()
@@ -130,16 +165,39 @@ class Orchestrator:
         )
 
         plan_data = self._parse_json(response.content)
-        tasks = [normalize_task_contract(Task(**t)) for t in plan_data.get("tasks", [])]
-
-        # 如果任务没有 assigned_model，补充默认模型
         available_workers = self.config.get("available_workers", {})
-        for task in tasks:
-            if not task.assigned_model:
-                default_model = available_workers.get(task.type, {}).get(
-                    "default_model"
-                )
-                task.assigned_model = self.gateway.resolve_model(default_model)
+        configured_models = getattr(self.gateway, "models", None)
+        configured_model_names = (
+            set(configured_models) if isinstance(configured_models, dict) else set()
+        )
+        tasks: list[Task] = []
+        for raw_task in plan_data.get("tasks", []):
+            task = Task(**_normalize_task_text_fields(raw_task))
+            worker_type = task.type.strip().lower()
+            if worker_type not in available_workers:
+                worker_type = WORKER_TYPE_ALIASES.get(worker_type, worker_type)
+            software_worker_changed = False
+            if scenario == "software":
+                software_type = SOFTWARE_WORKER_TYPE_ALIASES.get(worker_type)
+                if software_type in available_workers:
+                    worker_type = software_type
+                    software_worker_changed = True
+            if worker_type not in available_workers:
+                raise ValueError(f"模型输出了未配置的 worker 类型: {task.type}")
+            task.type = worker_type
+            task = normalize_task_contract(task)
+
+            # 模型有时会把角色名误填入 assigned_model；无效别名回退到该角色默认模型。
+            default_model = available_workers.get(task.type, {}).get("default_model")
+            preferred_model = (
+                "" if software_worker_changed else task.assigned_model.strip()
+            )
+            if configured_model_names and preferred_model not in configured_model_names:
+                preferred_model = ""
+            task.assigned_model = self.gateway.resolve_model(
+                preferred_model or default_model
+            )
+            tasks.append(task)
 
         raw_contract = plan_data.get("frontend_contract")
         plan = TaskPlan(
@@ -157,29 +215,51 @@ class Orchestrator:
 
     def _parse_json(self, text: str) -> dict:
         """从文本中提取 JSON"""
+        def normalize(value: object) -> dict:
+            if isinstance(value, dict):
+                return value
+            if isinstance(value, list):
+                if (
+                    len(value) == 1
+                    and isinstance(value[0], dict)
+                    and "tasks" in value[0]
+                ):
+                    return value[0]
+                if all(isinstance(item, dict) and "id" in item for item in value):
+                    return {"summary": "", "tasks": value}
+                raise ValueError(
+                    "模型输出的 JSON 顶层数组必须是任务对象列表，"
+                    "或只包含一个计划对象"
+                )
+            raise ValueError("模型输出的 JSON 顶层必须是对象或任务对象列表")
+
+        def parse(candidate: str) -> dict | None:
+            try:
+                return normalize(json.loads(candidate))
+            except json.JSONDecodeError:
+                return None
+
         # 先尝试直接解析
         text = text.strip()
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
+        parsed = parse(text)
+        if parsed is not None:
+            return parsed
 
         # 尝试从 ```json 代码块中提取
         pattern = r"```(?:json)?\n(.*?)```"
         match = re.search(pattern, text, re.DOTALL)
         if match:
-            try:
-                return json.loads(match.group(1).strip())
-            except json.JSONDecodeError:
-                pass
+            parsed = parse(match.group(1).strip())
+            if parsed is not None:
+                return parsed
 
-        # 尝试从第一个 { 到最后一个 } 提取
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
+        # 尝试从说明文字中提取第一个完整 JSON 对象或数组
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"[\[{]", text):
             try:
-                return json.loads(text[start : end + 1])
+                value, _ = decoder.raw_decode(text[match.start() :])
             except json.JSONDecodeError:
-                pass
+                continue
+            return normalize(value)
 
         raise ValueError(f"无法从模型输出中解析 JSON:\n{text}")

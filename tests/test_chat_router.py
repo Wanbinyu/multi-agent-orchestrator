@@ -247,6 +247,44 @@ def test_create_and_list_sessions(client):
     assert any(s["id"] == session_id for s in sessions)
 
 
+def test_execution_depth_api_persists_preference_without_provider_call(client):
+    session_id = client.post("/api/chat/sessions", json={"title": "depth"}).json()[
+        "session_id"
+    ]
+
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/depth",
+        json={"depth": "deep"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["depth"] == "deep"
+    assert chat_router.store.load(session_id).execution_depth == "deep"
+    assert client.get(f"/api/chat/sessions/{session_id}").json()[
+        "execution_depth"
+    ] == "deep"
+    chat_router.gateway.chat_with_main_model.assert_not_called()
+
+
+def test_model_routing_api_persists_fixed_constraint_without_provider_call(client):
+    session_id = client.post("/api/chat/sessions", json={"title": "routing"}).json()[
+        "session_id"
+    ]
+
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/routing",
+        json={"mode": "fixed"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["mode"] == "fixed"
+    assert chat_router.store.load(session_id).model_routing_mode == "fixed"
+    assert client.get(f"/api/chat/sessions/{session_id}").json()[
+        "model_routing_mode"
+    ] == "fixed"
+    chat_router.gateway.chat_with_main_model.assert_not_called()
+
+
 def test_get_session_not_found(client):
     r = client.get("/api/chat/sessions/nonexistent")
     assert r.status_code == 404

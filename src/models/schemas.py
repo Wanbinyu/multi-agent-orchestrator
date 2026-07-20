@@ -6,6 +6,13 @@ from pydantic import BaseModel, Field, field_validator
 
 TaskExecutionMode = Literal["read", "write", "verify"]
 CapabilityState = Literal["supported", "unsupported", "unverified"]
+ExecutionDepth = Literal["fast", "standard", "deep"]
+ExecutionDepthPreference = Literal["auto", "fast", "standard", "deep"]
+ModelRoutingMode = Literal["auto", "fixed"]
+CollaborationMode = Literal["auto", "single", "multi"]
+BenchmarkAgentStrategy = Literal["fixed-single", "auto-route", "multi-model"]
+ModelRoutingSource = Literal["automatic", "user_fixed", "user_fallback"]
+PriceComparison = Literal["cheaper", "equal", "higher", "unknown"]
 FrontendBuildStage = Literal[
     "architecture_scaffold",
     "pages",
@@ -293,6 +300,55 @@ class ModelConfig(BaseModel):
 
     def supports_capability(self, capability: str) -> bool:
         return self.get_capability_state(capability) == "supported"
+
+
+class ModelRoutingConstraints(BaseModel):
+    """User-owned boundaries for one deterministic routing decision."""
+
+    mode: ModelRoutingMode = "auto"
+    requested_model: str = ""
+    allowed_models: list[str] = Field(default_factory=list)
+    max_input_price_per_1m: float | None = Field(default=None, ge=0.0)
+    max_output_price_per_1m: float | None = Field(default=None, ge=0.0)
+    require_local: bool = False
+
+
+class ModelCandidateEvaluation(BaseModel):
+    model: str
+    provider: str
+    eligible: bool = False
+    healthy: bool = True
+    local: bool = False
+    capability_states: dict[str, CapabilityState] = Field(default_factory=dict)
+    context_known: bool = False
+    context_fits: bool = True
+    safe_input_tokens: int = Field(default=0, ge=0)
+    price_known: bool = False
+    estimated_cost_usd: float | None = Field(default=None, ge=0.0)
+    score: float = 0.0
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ModelRoutingDecision(BaseModel):
+    """Explainable model selection made before Provider failover starts."""
+
+    version: int = 1
+    task_kind: str
+    execution_depth: ExecutionDepth = "standard"
+    requested_model: str = ""
+    selected_model: str = ""
+    source: ModelRoutingSource = "user_fallback"
+    reason: str = ""
+    required_capabilities: list[str] = Field(default_factory=list)
+    context_tokens_required: int = Field(default=0, ge=0)
+    price_comparison: PriceComparison = "unknown"
+    savings_claim_allowed: bool = False
+    upgrade_count: int = Field(default=0, ge=0, le=1)
+    max_upgrades: int = Field(default=1, ge=1, le=1)
+    constraints: ModelRoutingConstraints = Field(
+        default_factory=ModelRoutingConstraints
+    )
+    candidates: list[ModelCandidateEvaluation] = Field(default_factory=list)
 
 
 class WorkerConfig(BaseModel):

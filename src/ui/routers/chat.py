@@ -20,7 +20,12 @@ from src.core.engineering import (
 from src.core.session import Session, SessionStore
 from src.gateway.client import GatewayClient
 from src.gateway.errors import ProviderError
-from src.models.schemas import ApprovalMode, ChatStreamEvent
+from src.models.schemas import (
+    ApprovalMode,
+    ChatStreamEvent,
+    ExecutionDepthPreference,
+    ModelRoutingMode,
+)
 from src.tools.paths import resolve_path
 from src.tools.search_tools import PROJECT_TREE_IGNORED_DIRS
 
@@ -67,6 +72,14 @@ class SendMessageForm(BaseModel):
 
 class UpdateModeForm(BaseModel):
     mode: ApprovalMode
+
+
+class UpdateExecutionDepthForm(BaseModel):
+    depth: ExecutionDepthPreference
+
+
+class UpdateModelRoutingForm(BaseModel):
+    mode: ModelRoutingMode
 
 
 class PermissionResponseForm(BaseModel):
@@ -236,6 +249,8 @@ def get_session(session_id: str) -> dict[str, Any]:
         "created_at": session.created_at,
         "updated_at": session.updated_at,
         "approval_mode": session.approval_mode,
+        "execution_depth": session.execution_depth,
+        "model_routing_mode": session.model_routing_mode,
         "plan_mode": session.plan_mode,
         "plan_artifact": session.plan_artifact.model_dump() if session.plan_artifact else None,
         "recovery": recovery.public_payload(),
@@ -412,6 +427,42 @@ def update_mode(session_id: str, form: UpdateModeForm) -> dict[str, Any]:
         agent.approval_mode = form.mode
         agent.session.approval_mode = form.mode
 
+    return {"success": True, "mode": form.mode}
+
+
+@router.post("/api/chat/sessions/{session_id}/depth")
+def update_execution_depth(
+    session_id: str, form: UpdateExecutionDepthForm
+) -> dict[str, Any]:
+    """Persist a user execution-depth preference for subsequent runs."""
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    session.execution_depth = form.depth
+    store.save(session)
+    agent = active_agents.get(session_id)
+    if agent is not None:
+        agent.session.execution_depth = form.depth
+    return {"success": True, "depth": form.depth}
+
+
+@router.post("/api/chat/sessions/{session_id}/routing")
+def update_model_routing(
+    session_id: str, form: UpdateModelRoutingForm
+) -> dict[str, Any]:
+    """Persist automatic or fixed model routing for subsequent runs."""
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    session.model_routing_mode = form.mode
+    store.save(session)
+    agent = active_agents.get(session_id)
+    if agent is not None:
+        agent.session.model_routing_mode = form.mode
     return {"success": True, "mode": form.mode}
 
 

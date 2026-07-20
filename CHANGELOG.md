@@ -6,6 +6,19 @@ All notable changes are documented here. MAO follows Semantic Versioning; beta r
 
 Next target: `v0.1.0-beta.5` (routing, execution depth, and reproducible benchmarks).
 
+### Added
+
+- B5.4 adds controlled `fixed-single`, `auto-route`, and `multi-model` benchmark profiles, a headless `mao benchmark-agent` entry point that uses the production Agent stream, an explicit live authorization/spend guard, and an optional Harbor `BaseInstalledAgent` adapter. The offline gate now produces 54 synthetic results across the three profiles without reading keys or calling a Provider.
+- B5.3 adds a deterministic, explainable model router using task type, verified capability states, traceable prices, safe context capacity, health cooldowns, local-model status, and user constraints. Automatic routing performs at most one upgrade, unknown prices never produce savings claims, `/routing fixed` pins the configured main model, runtime failures prefer that user model before the existing failover chain, and RunJournal v5 keeps the full candidate audit while CLI/Web show a concise reason.
+- B5.2 adds deterministic `fast`, `standard`, and `deep` execution budgets for main-agent/Worker tool rounds, context usage, Worker concurrency, collaboration review, and mutation verification. User preferences persist through `/depth` and the Web session API, while high-risk safety floors remain non-bypassable and every decision is journaled in RunJournal v4.
+- B5.1 adds a versioned public engineering benchmark contract for question, diagnosis, small-change, build, review, and migration tasks. Single-model and MAO strategies share isolated workspaces, deterministic response/file/command checks, mutation boundaries, stability signatures, and JSON/Markdown metrics.
+- The zero-Provider fixture gate runs both synthetic strategies three times in CI, rejects empty/timeout/provider-leak/unstable/unauthorized results, and labels all fixture usage as `synthetic_contract` so it cannot be mistaken for real-model evidence.
+
+### Fixed
+
+- Live benchmark Provider attempt ceilings are now reserved atomically before every network request across retries, streams, concurrent Workers, and Agent subcalls; reaching the limit blocks the next request instead of reporting an overrun only after the strategy returns.
+- Orchestrator plans now normalize top-level task arrays, list-form acceptance text, common Worker role aliases, invalid model-role placeholders, and creative Worker drift in software tasks before execution. Alias-only corrections preserve valid configured model choices.
+
 ## [0.1.0-beta.4] - 2026-07-19
 
 ### Added

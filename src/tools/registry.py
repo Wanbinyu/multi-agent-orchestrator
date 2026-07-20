@@ -225,6 +225,7 @@ class ToolRegistry:
         params: dict[str, Any],
         base_dir: str = ".",
         allowed_prefixes: list[str] | None = None,
+        runtime_context: dict[str, Any] | None = None,
     ) -> ToolResult:
         """执行工具调用（前后注入 Hooks）"""
         # pre-hooks：可改写 params 或拦截
@@ -232,7 +233,9 @@ class ToolRegistry:
         if abort is not None:
             return abort
 
-        result = self._execute_raw(name, params, base_dir, allowed_prefixes)
+        result = self._execute_raw(
+            name, params, base_dir, allowed_prefixes, runtime_context
+        )
 
         # post-hooks：可改写结果
         return self.hooks.run_post(name, params, result)
@@ -243,6 +246,7 @@ class ToolRegistry:
         params: dict[str, Any],
         base_dir: str,
         allowed_prefixes: list[str] | None,
+        runtime_context: dict[str, Any] | None,
     ) -> ToolResult:
         spec = self._tools.get(name)
         if spec is None:
@@ -258,6 +262,9 @@ class ToolRegistry:
             bound.arguments["base_dir"] = base_dir
         if "allowed_prefixes" in sig.parameters:
             bound.arguments["allowed_prefixes"] = allowed_prefixes
+        for key, value in (runtime_context or {}).items():
+            if key in sig.parameters and key not in bound.arguments:
+                bound.arguments[key] = value
         bound.apply_defaults()
 
         try:

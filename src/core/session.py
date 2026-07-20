@@ -10,7 +10,14 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field
 
-from src.models.schemas import ApprovalMode, ChatMessage, MessageContentBlock
+from src.models.schemas import (
+    ApprovalMode,
+    CollaborationMode,
+    ChatMessage,
+    ExecutionDepthPreference,
+    MessageContentBlock,
+    ModelRoutingMode,
+)
 
 
 PlanModeState = Literal["inactive", "pending", "active", "awaiting_approval"]
@@ -55,6 +62,10 @@ class Session(BaseModel):
     output_dir: str
     config_dir: str = "config"
     approval_mode: ApprovalMode = "auto"
+    execution_depth: ExecutionDepthPreference = "auto"
+    model_routing_mode: ModelRoutingMode = "auto"
+    model_routing_allowed_models: list[str] = Field(default_factory=list)
+    collaboration_mode: CollaborationMode = "auto"
     plan_mode: PlanModeState = "inactive"
     plan_artifact: SessionPlanArtifact | None = None
     compaction_events: list[dict[str, Any]] = Field(default_factory=list)

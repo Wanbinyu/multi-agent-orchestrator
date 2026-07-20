@@ -7,6 +7,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.models.schemas import (
+    ExecutionDepth,
+    ExecutionDepthPreference,
+    ModelRoutingDecision,
+)
+
 
 TaskKind = Literal[
     "unclassified",
@@ -47,6 +53,9 @@ RequirementStatus = Literal["unverified", "satisfied", "failed", "waived"]
 AuditStatus = Literal["not_required", "passed", "blocked", "failed"]
 PlanStatus = Literal["pending", "in_progress", "completed", "failed", "blocked"]
 RunStatus = Literal["running", "completed", "failed", "blocked"]
+ExecutionDepthSource = Literal["automatic", "user", "safety_override", "observed"]
+WorkerPolicy = Literal["disabled", "eligible"]
+ReviewerPolicy = Literal["disabled", "required_after_collaboration"]
 
 
 def utc_now() -> str:
@@ -75,6 +84,40 @@ class TaskIntent(BaseModel):
     classification_source: ClassificationSource = "fallback"
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     classification_note: str = ""
+
+
+class ExecutionBudget(BaseModel):
+    """One bounded execution profile; permissions remain a separate hard boundary."""
+
+    max_tool_iterations: int = Field(ge=0)
+    context_budget_ratio: float = Field(gt=0.0, le=1.0)
+    worker_policy: WorkerPolicy
+    max_workers: int = Field(ge=0)
+    worker_tool_iterations: int = Field(ge=0)
+    reviewer_policy: ReviewerPolicy
+    mutation_verification_floor: VerificationDepth
+
+    @model_validator(mode="after")
+    def validate_worker_budget(self) -> "ExecutionBudget":
+        if self.worker_policy == "disabled" and (
+            self.max_workers != 0 or self.worker_tool_iterations != 0
+        ):
+            raise ValueError("禁用 Worker 时并发数和工具轮次必须为 0")
+        if self.worker_policy == "eligible" and self.max_workers < 1:
+            raise ValueError("允许 Worker 时 max_workers 必须大于 0")
+        return self
+
+
+class ExecutionDepthDecision(BaseModel):
+    """Requested, recommended and effective execution depth for one run."""
+
+    requested: ExecutionDepthPreference = "auto"
+    recommended: ExecutionDepth = "standard"
+    actual: ExecutionDepth = "standard"
+    source: ExecutionDepthSource = "automatic"
+    reason: str = ""
+    budget: ExecutionBudget
+    resolved_at: str = Field(default_factory=utc_now)
 
 
 class ObservedMutation(BaseModel):
@@ -289,7 +332,7 @@ class CompletionAudit(BaseModel):
 class RunJournal(BaseModel):
     """单轮工程运行的可持久化记录。"""
 
-    version: int = 3
+    version: int = 5
     run_id: str
     session_id: str
     objective: str = Field(..., min_length=1)
@@ -298,6 +341,8 @@ class RunJournal(BaseModel):
     updated_at: str = Field(default_factory=utc_now)
     completed_at: str | None = None
     intent: TaskIntent = Field(default_factory=TaskIntent)
+    execution_depth: ExecutionDepthDecision | None = None
+    model_routing: ModelRoutingDecision | None = None
     effective_intent: TaskIntent | None = None
     observed_mutation: ObservedMutation = Field(default_factory=ObservedMutation)
     plan: WorkPlan | None = None
@@ -437,6 +482,23 @@ class RunJournal(BaseModel):
             "status": self.status,
             "objective": self.objective,
             "intent": self.intent.model_dump(),
+            "execution_depth": (
+                self.execution_depth.model_dump() if self.execution_depth else None
+            ),
+            "model_routing": (
+                {
+                    "selected_model": self.model_routing.selected_model,
+                    "requested_model": self.model_routing.requested_model,
+                    "source": self.model_routing.source,
+                    "reason": self.model_routing.reason,
+                    "price_comparison": self.model_routing.price_comparison,
+                    "savings_claim_allowed": (
+                        self.model_routing.savings_claim_allowed
+                    ),
+                }
+                if self.model_routing
+                else None
+            ),
             "effective_intent": (
                 self.effective_intent.model_dump() if self.effective_intent else None
             ),

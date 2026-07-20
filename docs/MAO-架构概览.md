@@ -85,6 +85,8 @@ Provider 异常由 `src/gateway/errors.py` 统一分类为可安全展示的 `Pr
 `Agent` 负责多轮对话、流式输出、工具循环、权限请求和协作触发。工程决策层在模型输出之外维护确定性状态：
 
 - `TaskIntent`：保存请求进入系统时的任务类型、风险、写入授权和验证深度。
+- `ExecutionDepthDecision`：保存 `fast/standard/deep` 的请求值、建议值、实际值、选择原因和执行预算。
+- `ModelRoutingDecision`：保存用户主模型、实际模型、路由来源、能力/上下文/健康/价格判断及完整候选审计。
 - `ObservedMutation / effective_intent`：根据真实写入动态收紧风险和完成审计；与初始权限意图分离，不能扩大本轮工具权限。
 - `WorkPlan`：带状态约束的计划步骤。
 - `Evidence`：来自真实工具、文件、测试或运行状态的证据。
@@ -103,10 +105,23 @@ Provider 异常由 `src/gateway/errors.py` 统一分类为可安全展示的 `Pr
 - `src/core/agent.py`
 - `src/core/native_content.py`
 - `src/core/engineering/classifier.py`
+- `src/core/engineering/execution_depth.py`
 - `src/core/engineering/evidence.py`
 - `src/core/engineering/verifier.py`
 - `src/core/engineering/audit.py`
 - `src/core/engineering/journal.py`
+- `src/core/engineering/benchmark.py`
+- `src/core/engineering/benchmark_agent.py`
+- `src/integrations/harbor_agent.py`
+- `src/gateway/router.py`
+
+`ExecutionDepthResolver` 根据任务类型、风险和验证深度自动建议执行档位，也接受会话级显式选择。显式选择不能低于安全下限；真实写入后的有效意图会重新收紧执行深度。三个档位确定性约束主 Agent/Worker 工具轮次、上下文比例、Worker 并发、协作 Reviewer 和变更验证下限，但不参与授权判断，也不能扩大工具权限。
+
+`ModelRouter` 在调用前完成一次有界选择：任务类型和执行深度决定所需能力，只有显式 `supported` 能力可以支持自动升级；价格、上下文和健康状态必须来自本地配置真值。未知价格不能形成节省结论，自动升级最多一次，`fixed` 模式始终使用用户主模型。路由失败先回退用户主模型，之后才进入 Gateway 原有的运行时 retry/failover；两层原因分别记录。
+
+`EngineeringBenchmarkHarness` 将版本化任务合同复制到逐策略、逐轮次隔离工作区，所有策略共用响应、文件、验证命令和越界修改验收。报告独立保存模型集合、路由、执行深度和协作 profile。`FixtureBenchmarkStrategy` 只验证 harness 合同并把数据标记为 `synthetic_contract`；它不读取 Provider 配置，也不能作为真实模型优劣证据。
+
+`benchmark_agent.py` 从新 Session 进入生产流式 Agent 链，不使用旧 `mao run` 代替。`MaoLiveBenchmarkStrategy` 通过同一 harness 运行真实策略，但构造前必须有所有者确认的 `LiveBenchmarkAuthorization`，三种策略共用 `LiveBenchmarkSpendGuard`。`allowed_models` 在调用前限制 Router 候选、Worker 回退和 failover。`harbor_agent.py` 是可选的 Harbor `BaseInstalledAgent` 边界，不进入默认运行依赖。
 
 ## 6. 多模型协作
 
@@ -178,7 +193,7 @@ Reviewer 默认使用 `restricted` 输入模式：只读取原始需求、计划
 - `SessionStore` 保存多轮消息和会话设置。
 - `Session` 持久化 Plan 状态与 artifact；未批准时整个调用链为只读。
 - `SessionRecoveryManager` 从最新 RunJournal 检测 running/blocked/未完成计划；CLI/Web 在显式继续或放弃前阻断新消息。继续仅把未完成步骤检查点交给一个新 run，旧 run、完成步骤和既有文件不自动重放。
-- `RunJournal` v3 保存每轮初始/有效意图、真实写入观察、计划、证据、验证和审计。
+- `RunJournal` v5 保存每轮初始/有效意图、执行深度、完整模型路由决策、真实写入观察、计划、证据、验证和审计；v3/v4 记录保持向后兼容。
 - `MemoryStore` 保存稳定项目事实，与任务检查点分离。
 - `ProjectIndexer` v2 按项目根持久化目录树、文件摘要与 SHA-256；mtime/size 未变时零内容读取，变化文件用 hash 决定是否重建摘要。`project_tree` 和 `search_project_files` 优先增量刷新，损坏或跨根索引自动重建。
 - `ContextBudgetManager` 根据模型窗口、输出预留和安全比例计算预算。
@@ -215,8 +230,8 @@ Plan 草案由主 Agent 先进行真实只读侦察，再交给 `PlanningCouncil
 
 ## 11. 当前主要缺口
 
-- CLI/Web 尚未完整展开计划、证据、验证和剩余风险。
-- 分层压缩、持久项目索引和完整长任务基准仍待完成。
+- 自动路由已有离线合同和 mock 执行证据，但尚无经授权的真实模型效果数据；不能据此宣传成本或完成率优势。
+- B5.1 只有程序化离线 benchmark 合同，尚无经授权的真实 Provider 对比数据。
 - Provider 能力和模型特例尚未形成可验证的兼容性矩阵。
 - 工具执行没有容器级沙箱。
 - 真实任务的 token 节省、完成率和误修改率尚缺公开基准。

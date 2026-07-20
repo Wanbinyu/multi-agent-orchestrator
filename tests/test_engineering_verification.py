@@ -370,7 +370,7 @@ def test_verification_matrix_and_audit_survive_journal_round_trip(tmp_path):
 
     loaded = store.load(journal.run_id)
 
-    assert loaded.version == 3
+    assert loaded.version == 5
     assert loaded.audit is not None
     assert loaded.audit.status == "passed"
     assert len(loaded.verification) == 2

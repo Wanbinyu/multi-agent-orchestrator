@@ -3,8 +3,11 @@
 from src.core.engineering.classifier import TaskIntentClassifier
 from src.core.engineering.audit import CompletionAuditor, MutationRiskEscalator
 from src.core.engineering.evidence import ToolEvidenceRecorder, file_mutation_metadata
+from src.core.engineering.execution_depth import ExecutionDepthResolver
 from src.core.engineering.models import (
     Evidence,
+    ExecutionBudget,
+    ExecutionDepthDecision,
     CompletionAudit,
     Hypothesis,
     ObservedMutation,
@@ -31,9 +34,33 @@ from src.core.engineering.recovery import (
     RecoveryState,
     SessionRecoveryManager,
 )
+from src.core.engineering.benchmark import (
+    BenchmarkAggregate,
+    BenchmarkExecution,
+    BenchmarkFileExpectation,
+    BenchmarkOfflineFixture,
+    BenchmarkReport,
+    BenchmarkRunResult,
+    BenchmarkStability,
+    BenchmarkStrategy,
+    BenchmarkStrategyProfile,
+    BenchmarkSuite,
+    BenchmarkTask,
+    BenchmarkVerificationContract,
+    EngineeringBenchmarkHarness,
+    FixtureBenchmarkStrategy,
+    LiveBenchmarkAuthorization,
+    LiveBenchmarkSpendGuard,
+    MaoLiveBenchmarkStrategy,
+    load_benchmark_suite,
+    write_benchmark_report,
+)
 
 __all__ = [
     "Evidence",
+    "ExecutionBudget",
+    "ExecutionDepthDecision",
+    "ExecutionDepthResolver",
     "CompletionAudit",
     "CompletionAuditor",
     "MutationRiskEscalator",
@@ -61,4 +88,23 @@ __all__ = [
     "VerificationGate",
     "WorkPlan",
     "WorkPlanStep",
+    "BenchmarkAggregate",
+    "BenchmarkExecution",
+    "BenchmarkFileExpectation",
+    "BenchmarkOfflineFixture",
+    "BenchmarkReport",
+    "BenchmarkRunResult",
+    "BenchmarkStability",
+    "BenchmarkStrategy",
+    "BenchmarkStrategyProfile",
+    "BenchmarkSuite",
+    "BenchmarkTask",
+    "BenchmarkVerificationContract",
+    "EngineeringBenchmarkHarness",
+    "FixtureBenchmarkStrategy",
+    "LiveBenchmarkAuthorization",
+    "LiveBenchmarkSpendGuard",
+    "MaoLiveBenchmarkStrategy",
+    "load_benchmark_suite",
+    "write_benchmark_report",
 ]

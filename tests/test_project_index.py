@@ -7,6 +7,7 @@ from pathlib import Path
 from src.core.memory import MemoryStore, ProjectIndexer
 from src.tools.memory_tools import search_project_files
 from src.tools.search_tools import project_tree
+from src.tools.registry import tool_registry
 
 
 def _store(tmp_path: Path) -> MemoryStore:
@@ -43,6 +44,22 @@ def test_unchanged_second_refresh_reads_zero_file_contents(tmp_path):
     assert second["reused"] == 2
     assert second["added"] == second["updated"] == 0
     assert all(entry.content_hash for entry in store.get_file_index().files.values())
+
+
+def test_registry_runtime_memory_store_keeps_index_outside_target_project(tmp_path):
+    store = _store(tmp_path)
+    root = _project(tmp_path)
+
+    result = tool_registry.execute(
+        "project_tree",
+        {"path": str(root)},
+        base_dir=str(root),
+        runtime_context={"memory_store": store},
+    )
+
+    assert result.success is True
+    assert store.file_index_path.is_file()
+    assert not (root / "config" / "memory" / "file_index.yaml").exists()
     assert store.get_file_index().root == str(root.resolve())
     assert "src/app.py" in store.get_file_index().tree_paths
     assert "src" in store.get_file_index().directories

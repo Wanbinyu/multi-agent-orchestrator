@@ -16,7 +16,9 @@ from src.cli.chat_command import (
     _format_tool_action,
     _parse_tree_args,
     _print_welcome,
+    _set_depth,
     _set_mode,
+    _set_routing_mode,
     _summarize_tool_activity,
 )
 from src.core.session import Session
@@ -55,6 +57,24 @@ def test_set_mode_invalid():
     assert _set_mode(session, agent, mode_ref, "invalid") is False
     assert session.approval_mode == "approve"
     assert mode_ref[0] == "approve"
+
+
+def test_set_execution_depth_persists_user_preference():
+    session = _make_session()
+
+    assert _set_depth(session, "deep") is True
+    assert session.execution_depth == "deep"
+    assert _set_depth(session, "invalid") is False
+    assert session.execution_depth == "deep"
+
+
+def test_set_model_routing_mode_persists_user_constraint():
+    session = _make_session()
+
+    assert _set_routing_mode(session, "fixed") is True
+    assert session.model_routing_mode == "fixed"
+    assert _set_routing_mode(session, "invalid") is False
+    assert session.model_routing_mode == "fixed"
 
 
 def test_set_mode_cycle_logic():

@@ -163,6 +163,26 @@ def test_chat_exhausts_retries_and_raises(tmp_path, monkeypatch):
     assert provider.chat.call_count == 3
 
 
+def test_chat_hard_attempt_guard_stops_before_network_call(tmp_path, monkeypatch):
+    client, provider = _make_client(tmp_path, monkeypatch)
+    reservations = 0
+
+    def reserve():
+        nonlocal reservations
+        if reservations >= 2:
+            raise RuntimeError("attempt ceiling reached")
+        reservations += 1
+
+    client.before_provider_attempt = reserve
+    provider.chat.side_effect = RuntimeError("retryable failure")
+
+    with pytest.raises(RuntimeError, match="attempt ceiling reached"):
+        client.chat([MagicMock()], "glm-ark", max_retries=5)
+
+    assert provider.chat.call_count == 2
+    assert client.provider_attempts_total == 2
+
+
 def test_chat_unknown_model_raises():
     client = GatewayClient.__new__(GatewayClient)
     client.models = {}

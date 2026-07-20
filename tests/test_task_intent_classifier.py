@@ -18,6 +18,7 @@ from src.core.engineering import TaskIntentClassifier
         ("开发登录功能", "build", True),
         ("写文件", "build", True),
         ("写文件 native.txt，内容为 hello", "build", True),
+        ("创建 src/main.py，并提供返回 ok 的 health 函数", "build", True),
         ("先做 Java 重构方案，不要修改文件", "plan", False),
         ("持续监控测试进程，完成后通知", "monitor", False),
     ],

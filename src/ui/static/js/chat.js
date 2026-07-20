@@ -1014,6 +1014,12 @@
         high: "高风险",
         external: "外部状态",
       };
+      const depth = run.execution_depth || {};
+      const depthLabels = {
+        fast: "快速",
+        standard: "标准",
+        deep: "深入",
+      };
       const toolCanWrite = Boolean(
         policy.allow_project_writes || policy.permission_follows_session
       );
@@ -1023,6 +1029,7 @@
       const intentDetail = [
         kindLabels[displayIntent.kind] || displayIntent.kind,
         riskLabels[displayIntent.risk_level] || displayIntent.risk_level,
+        depth.actual ? `${depthLabels[depth.actual] || depth.actual}执行` : "",
         writeState,
         Object.keys(effectiveIntent).length ? "按实际写入升级" : "",
       ].filter(Boolean).join(" · ");
@@ -1052,6 +1059,12 @@
       const verificationDetail = `验证门 ${Number(run.verification_count || 0)} 个 · 完成审计 ${
         auditLabels[audit.status] || audit.status || "进行中"
       }${auditGaps.length ? ` · 缺口 ${auditGaps.join("、")}` : ""}`;
+      const routing = run.model_routing || {};
+      const modelDetail = routing.selected_model
+        ? `模型 ${routing.selected_model} · 路由 ${routing.source || "unknown"} · ${
+            routing.reason || "未记录原因"
+          }`
+        : "";
       const detailState = state.runDetails[run.run_id] || {};
       let detailHtml = "";
       if (detailState.open) {
@@ -1068,6 +1081,7 @@
           <div class="turn-log-title">${icon} 工程记录 · ${escapeHtml(labels[run.status] || run.status)}</div>
           <div class="turn-log-detail">${escapeHtml(run.run_id)}</div>
           <div class="turn-log-detail">${escapeHtml(intentDetail)}</div>
+          ${modelDetail ? `<div class="turn-log-detail">${escapeHtml(modelDetail)}</div>` : ""}
           <div class="turn-log-detail">${escapeHtml(evidenceDetail)}</div>
           <div class="turn-log-detail">${escapeHtml(verificationDetail)}</div>
           <button type="button" class="run-detail-toggle" data-run-id="${escapeHtml(run.run_id)}">${
@@ -1160,6 +1174,42 @@
           writeState
         }`,
       ]);
+    }
+    if (run.execution_depth) {
+      const depth = run.execution_depth;
+      const budget = depth.budget || {};
+      addSection("执行深度", [
+        `请求 ${depth.requested || "auto"} · 建议 ${depth.recommended || "standard"} · 实际 ${
+          depth.actual || "standard"
+        } · 来源 ${depth.source || "automatic"}`,
+        `工具轮次 ${Number(budget.max_tool_iterations || 0)} · Worker ${Number(
+          budget.max_workers || 0
+        )} · 上下文比例 ${Math.round(Number(budget.context_budget_ratio || 0) * 100)}%`,
+        depth.reason || "",
+      ]);
+    }
+    if (run.model_routing) {
+      const routing = run.model_routing;
+      const lines = [
+        `${routing.requested_model || "无"} → ${routing.selected_model || "无"} · ${
+          routing.source || "unknown"
+        }`,
+        routing.reason || "",
+        `价格比较 ${routing.price_comparison || "unknown"} · 节省声明 ${
+          routing.savings_claim_allowed ? "允许" : "不允许"
+        } · 自动升级 ${Number(routing.upgrade_count || 0)}/${Number(
+          routing.max_upgrades || 1
+        )}`,
+      ];
+      (routing.candidates || []).forEach((candidate) => {
+        const mark = candidate.eligible ? "✓" : "×";
+        lines.push(
+          `${mark} ${candidate.model} · score ${Number(candidate.score || 0).toFixed(1)} · ${
+            (candidate.reasons || []).join("；") || "无说明"
+          }`
+        );
+      });
+      addSection("模型路由", lines);
     }
     if (run.effective_intent) {
       const intent = run.effective_intent;

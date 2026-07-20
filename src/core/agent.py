@@ -18,6 +18,8 @@ from src.core.context_budget import ContextBudgetManager
 from src.core.engineering import (
     CompletionAuditor,
     Evidence,
+    ExecutionDepthDecision,
+    ExecutionDepthResolver,
     MutationRiskEscalator,
     RunJournal,
     RunJournalStore,
@@ -40,11 +42,14 @@ from src.core.planning_council import PlanningCouncil, PlanningCouncilResult
 from src.core.session import Session
 from src.core.token_counter import count_messages_tokens
 from src.gateway.client import GatewayClient
+from src.gateway.router import ModelRouter
 from src.models.schemas import (
     ApprovalMode,
     ChatMessage,
     ChatStreamEvent,
     MessageContentBlock,
+    ModelRoutingConstraints,
+    ModelRoutingDecision,
     ModelConfig,
     StreamChunk,
     TaskResult,
@@ -207,10 +212,12 @@ class Agent:
         self._permission_results: dict[str, bool] = {}
         self._native_tools_cache: list[dict[str, Any]] | None = None
         self._native_tools_computed = False
+        self._native_tools_model = ""
         self.journal_store = journal_store or RunJournalStore.from_output_dir(
             session.output_dir
         )
         self.intent_classifier = intent_classifier or TaskIntentClassifier()
+        self.execution_depth_resolver = ExecutionDepthResolver()
         self.project_rule_resolver = project_rule_resolver or ProjectRuleResolver()
         self._active_project_rules = ProjectRuleBundle()
         self._configured_permission_engine = permission_rule_engine
@@ -255,6 +262,17 @@ class Agent:
             self.approval_mode,
             intent=intent,
         )
+        journal.execution_depth = self.execution_depth_resolver.resolve(
+            intent,
+            self.session.execution_depth,
+        )
+        journal.decisions.append(
+            f"[execution-depth] {journal.execution_depth.reason}"
+        )
+        journal.model_routing = self._resolve_model_routing(user_input, journal)
+        journal.decisions.append(
+            f"[model-routing] {journal.model_routing.reason}"
+        )
         try:
             self._active_project_rules = self.project_rule_resolver.resolve(user_input)
         except Exception as exc:  # project rules must never prevent a conversation
@@ -277,6 +295,7 @@ class Agent:
             confirmed_facts.append("provider_configured")
         journal.metrics["confirmed_facts"] = list(dict.fromkeys(confirmed_facts))
         journal.metrics["approval_mode"] = self.approval_mode
+        journal.metrics["collaboration_mode"] = self.session.collaboration_mode
         if self._active_project_rules.sources:
             journal.decisions.append(
                 f"加载 {len(self._active_project_rules.sources)} 个项目规则文件，"
@@ -298,6 +317,7 @@ class Agent:
         residual_risks: list[str] | None = None,
     ) -> dict[str, Any]:
         self.mutation_escalator.observe(journal, files_changed=files_changed)
+        self._refresh_execution_depth(journal)
         if files_changed and self._permission_allows_non_read_tools(journal.intent):
             journal.intent.write_authorized = True
         audit = self.completion_auditor.audit(journal, status)
@@ -430,14 +450,161 @@ class Agent:
             skipped=skipped,
         )
         mutation_changed = self.mutation_escalator.observe(journal)
-        changed = evidence_changed or verification_changed or mutation_changed
+        depth_changed = self._refresh_execution_depth(journal)
+        changed = (
+            evidence_changed or verification_changed or mutation_changed or depth_changed
+        )
         if changed:
             self.journal_store.save(journal)
         return changed
 
-    def _provider_type(self) -> str:
-        """获取主模型的 provider 类型（anthropic/openai/ollama/llamacpp）"""
-        main = self.gateway.main_model
+    def _resolve_model_routing(
+        self, user_input: str, journal: RunJournal
+    ) -> ModelRoutingDecision:
+        """Build one local routing decision; failure falls back to the user model."""
+        requested = getattr(self.gateway, "main_model", "")
+        if not isinstance(requested, str):
+            requested = ""
+        constraints = ModelRoutingConstraints(
+            mode=self.session.model_routing_mode,
+            requested_model=requested,
+            allowed_models=self.session.model_routing_allowed_models,
+        )
+        estimated_input = count_messages_tokens([
+            *self.session.messages,
+            ChatMessage(role="user", content=user_input),
+        ]) + 4096
+        depth = (
+            journal.execution_depth.actual
+            if journal.execution_depth is not None
+            else "standard"
+        )
+        router = getattr(self.gateway, "router", None)
+        if isinstance(router, ModelRouter):
+            try:
+                now = datetime.now(timezone.utc).timestamp()
+                unhealthy = {
+                    alias
+                    for alias, until in getattr(
+                        self.gateway, "_unhealthy_models", {}
+                    ).items()
+                    if float(until) > now
+                }
+                local_models = set()
+                for alias, config in router.models.items():
+                    provider = getattr(self.gateway, "providers", {}).get(
+                        config.provider
+                    )
+                    provider_type = getattr(
+                        getattr(provider, "config", None), "type", ""
+                    )
+                    if provider_type in {"ollama", "llamacpp"}:
+                        local_models.add(alias)
+                return router.route(
+                    task_kind=journal.intent.kind,
+                    execution_depth=depth,
+                    constraints=constraints,
+                    estimated_input_tokens=estimated_input,
+                    unhealthy_models=unhealthy,
+                    local_models=local_models,
+                )
+            except Exception as exc:
+                reason = (
+                    f"自动路由本地决策失败（{type(exc).__name__}）；"
+                    "回退到用户指定主模型，不执行额外升级。"
+                )
+        else:
+            reason = "当前 Gateway 未提供可解释路由器；使用用户指定主模型。"
+        return ModelRoutingDecision(
+            task_kind=journal.intent.kind,
+            execution_depth=depth,
+            requested_model=requested,
+            selected_model=requested,
+            source=(
+                "user_fixed"
+                if self.session.model_routing_mode == "fixed"
+                else "user_fallback"
+            ),
+            reason=reason,
+            context_tokens_required=estimated_input,
+            constraints=constraints,
+        )
+
+    def _run_model_alias(self, journal: RunJournal | None = None) -> str:
+        resolved = journal or self._active_run_journal
+        if resolved is not None and resolved.model_routing is not None:
+            selected = resolved.model_routing.selected_model
+            if selected:
+                return selected
+        main = getattr(self.gateway, "main_model", "")
+        return main if isinstance(main, str) else ""
+
+    def _chat_for_run(
+        self,
+        journal: RunJournal,
+        *,
+        messages: list[ChatMessage],
+        task_id: str,
+        **kwargs: Any,
+    ):
+        model = self._run_model_alias(journal)
+        models = getattr(self.gateway, "models", None)
+        if model and isinstance(models, dict) and model in models:
+            routing = journal.model_routing
+            fallback = (
+                routing.requested_model
+                if routing is not None and routing.requested_model != model
+                else None
+            )
+            return self.gateway.chat(
+                messages,
+                model,
+                task_id=task_id,
+                routing_fallback_model=fallback,
+                **kwargs,
+            )
+        return self.gateway.chat_with_main_model(
+            messages=messages,
+            task_id=task_id,
+            **kwargs,
+        )
+
+    async def _chat_stream_for_run(
+        self,
+        journal: RunJournal,
+        *,
+        messages: list[ChatMessage],
+        task_id: str,
+        **kwargs: Any,
+    ):
+        model = self._run_model_alias(journal)
+        models = getattr(self.gateway, "models", None)
+        if model and isinstance(models, dict) and model in models:
+            routing = journal.model_routing
+            fallback = (
+                routing.requested_model
+                if routing is not None and routing.requested_model != model
+                else None
+            )
+            async for chunk in self.gateway.chat_stream(
+                messages,
+                model,
+                task_id=task_id,
+                routing_fallback_model=fallback,
+                **kwargs,
+            ):
+                yield chunk
+            return
+        async for chunk in self.gateway.chat_with_main_model_stream(
+            messages=messages,
+            task_id=task_id,
+            **kwargs,
+        ):
+            yield chunk
+
+    def _provider_type(self, model_name: str | None = None) -> str:
+        """Return the selected model's Provider protocol type."""
+        main = model_name or self._run_model_alias()
         if not main:
             return ""
         try:
@@ -447,9 +614,9 @@ class Agent:
         except Exception:
             return ""
 
-    def _should_use_native_tools(self) -> bool:
+    def _should_use_native_tools(self, model_name: str | None = None) -> bool:
         """是否启用原生 tool_use：优先 native_tools 配置，否则按 capabilities 自动判断"""
-        main = self.gateway.main_model
+        main = model_name or self._run_model_alias()
         if not main:
             return False
         try:
@@ -462,36 +629,43 @@ class Agent:
             return cfg.native_tools
         return cfg.supports_capability("tool_use")
 
-    def _get_native_tools(self) -> list[dict[str, Any]] | None:
+    def _get_native_tools(
+        self, model_name: str | None = None
+    ) -> list[dict[str, Any]] | None:
         """获取原生工具 schema（缓存）。不启用原生时返回 None"""
-        if not self._native_tools_computed:
-            if self._should_use_native_tools():
-                ptype = self._provider_type()
+        selected = model_name or self._run_model_alias()
+        if not self._native_tools_computed or self._native_tools_model != selected:
+            if self._should_use_native_tools(selected):
+                ptype = self._provider_type(selected)
                 schema_type = "anthropic" if ptype == "anthropic" else "openai"
                 self._native_tools_cache = tool_registry.build_tool_schemas(schema_type)
             else:
                 self._native_tools_cache = None
             self._native_tools_computed = True
+            self._native_tools_model = selected
         return self._native_tools_cache
 
-    def _native_kwargs(self, read_only: bool = False) -> dict[str, Any]:
+    def _native_kwargs(
+        self, read_only: bool = False, model_name: str | None = None
+    ) -> dict[str, Any]:
         """构造传给 gateway 的工具相关 kwargs"""
-        if read_only and self._should_use_native_tools():
+        selected = model_name or self._run_model_alias()
+        if read_only and self._should_use_native_tools(selected):
             names = []
             for name in tool_registry.list_tools():
                 spec = tool_registry.get(name)
                 if spec and spec.category == "read":
                     names.append(name)
-            ptype = self._provider_type()
+            ptype = self._provider_type(selected)
             schema_type = "anthropic" if ptype == "anthropic" else "openai"
             tools = tool_registry.build_tool_schemas(schema_type, names)
         else:
-            tools = self._get_native_tools()
+            tools = self._get_native_tools(selected)
         return {"tools": tools} if tools else {}
 
     def _get_effective_max_context(self) -> int:
         """Return the current model's safe input budget for compaction."""
-        main_model = self.gateway.main_model
+        main_model = self._run_model_alias()
         if main_model:
             try:
                 cfg = self.gateway.get_model_config(main_model)
@@ -509,7 +683,7 @@ class Agent:
 
     def get_context_status(self) -> dict[str, Any]:
         """返回无需模型推测的上下文预算与压缩状态。"""
-        main_model = getattr(self.gateway, "main_model", None)
+        main_model = self._run_model_alias()
         if not isinstance(main_model, str):
             main_model = ""
 
@@ -573,7 +747,7 @@ class Agent:
         enabled = "已启用" if status["compaction_enabled"] else "未启用"
         return (
             "【MAO 运行时事实】\n"
-            f"- 当前主模型别名：{status['model_alias']}；Provider：{status['provider']}；"
+            f"- 当前本轮模型别名：{status['model_alias']}；Provider：{status['provider']}；"
             f"上游请求模型 ID：{status['model_id']}。\n"
             f"- 上游硬窗口：{status['context_window_tokens'] or '未知'} tokens（{source}）；"
             f"MAO 安全输入预算：{status['input_budget_tokens']} tokens；"
@@ -588,6 +762,12 @@ class Agent:
         max_ctx = self._get_effective_max_context()
         if max_ctx <= 0:
             return False
+        journal = self._active_run_journal
+        if journal is not None and journal.status == "running" and journal.execution_depth:
+            max_ctx = max(
+                1,
+                int(max_ctx * journal.execution_depth.budget.context_budget_ratio),
+            )
         compactor = ContextCompactor(
             self.gateway,
             max_context_tokens=max_ctx,
@@ -664,8 +844,7 @@ class Agent:
             }
         )
 
-    @staticmethod
-    def _task_policy_prompt(intent: TaskIntent) -> str:
+    def _task_policy_prompt(self, intent: TaskIntent) -> str:
         if intent.policy.allow_project_writes:
             access = "任务允许按会话权限模式申请项目写入"
         elif intent.policy.permission_follows_session:
@@ -677,12 +856,69 @@ class Agent:
             if intent.write_authorized
             else "未授权；如任务允许写入，仍须遵循 approve/readonly 边界"
         )
+        execution = (
+            self._active_run_journal.execution_depth
+            if self._active_run_journal is not None
+            else None
+        )
+        execution_line = ""
+        if execution is not None:
+            budget = execution.budget
+            execution_line = (
+                f"\n- 执行深度：{execution.actual}（{execution.source}）；"
+                f"工具轮次上限 {min(self.max_tool_iterations, budget.max_tool_iterations)}；"
+                f"Worker 上限 {budget.max_workers}；Reviewer {budget.reviewer_policy}；"
+                f"上下文预算比例 {budget.context_budget_ratio:.0%}。"
+            )
         return (
             "【本轮任务策略】\n"
             f"- 类型：{intent.kind}；风险：{intent.risk_level}；{access}。\n"
             f"- 写入授权：{authorization}；验证深度：{intent.policy.verification_depth}；"
-            f"需要计划：{'是' if intent.policy.requires_plan else '否'}。\n"
+            f"需要计划：{'是' if intent.policy.requires_plan else '否'}。"
+            f"{execution_line}\n"
             "必须遵守该策略；只读任务即使用户会话处于 auto 模式，也不得调用写入或命令工具。"
+        )
+
+    def _refresh_execution_depth(self, journal: RunJournal) -> bool:
+        """Raise budgets after observed mutations without widening permission."""
+        current = journal.execution_depth
+        requested = (
+            current.requested if current is not None else self.session.execution_depth
+        )
+        intent = journal.effective_intent or journal.intent
+        resolved = self.execution_depth_resolver.resolve(
+            intent,
+            requested,
+            observed=journal.effective_intent is not None,
+        )
+        if current is not None and (
+            current.requested,
+            current.recommended,
+            current.actual,
+            current.source,
+            current.reason,
+            current.budget.model_dump(),
+        ) == (
+            resolved.requested,
+            resolved.recommended,
+            resolved.actual,
+            resolved.source,
+            resolved.reason,
+            resolved.budget.model_dump(),
+        ):
+            return False
+        journal.execution_depth = resolved
+        decision = f"[execution-depth] {resolved.reason}"
+        if decision not in journal.decisions:
+            journal.decisions.append(decision)
+        return True
+
+    def _tool_iteration_limit(self, journal: RunJournal) -> int:
+        if journal.execution_depth is None:
+            return self.max_tool_iterations
+        return min(
+            self.max_tool_iterations,
+            journal.execution_depth.budget.max_tool_iterations,
         )
 
     def _plan_mode_prompt(self) -> str:
@@ -1020,7 +1256,12 @@ class Agent:
             if cached:
                 result = read_cache[cache_key]  # type: ignore[index]
             else:
-                result = execute_tool_call(tool_name, params, self.session.output_dir)
+                result = execute_tool_call(
+                    tool_name,
+                    params,
+                    self.session.output_dir,
+                    runtime_context={"memory_store": self.memory_store},
+                )
                 if read_cache is not None and cache_key and result.success:
                     read_cache[cache_key] = result
                 if read_cache is not None and should_invalidate_read_cache(tool_name):
@@ -1152,7 +1393,8 @@ class Agent:
         iterations = 0
         while True:
             self._maybe_compact_context()
-            response = self.gateway.chat_with_main_model(
+            response = self._chat_for_run(
+                run_journal,
                 messages=self.session.messages,
                 task_id=f"chat-{self.session.id}",
                 max_tokens=4096,
@@ -1206,7 +1448,7 @@ class Agent:
 
             if not self._has_tool_calls(response.content, response.content_blocks):
                 break
-            if iterations >= self.max_tool_iterations:
+            if iterations >= self._tool_iteration_limit(run_journal):
                 # 达到最大工具轮数，追加提示并要求模型直接给出最终结果
                 limit_specs = self._tool_specs(
                     response.content, response.content_blocks
@@ -1228,7 +1470,8 @@ class Agent:
                     limit_prompt,
                     tool_result_blocks(limit_calls, limit_prompt),
                 )
-                response = self.gateway.chat_with_main_model(
+                response = self._chat_for_run(
+                    run_journal,
                     messages=self.session.messages,
                     task_id=f"chat-{self.session.id}-finalize",
                     max_tokens=4096,
@@ -1276,7 +1519,8 @@ class Agent:
                 "保留用户要求、关键结论、证据、风险和下一步；不要调用任何工具，"
                 "不要在标题、表格或列表中途结束。只输出最终答复。",
             )
-            response = self.gateway.chat_with_main_model(
+            response = self._chat_for_run(
+                run_journal,
                 messages=self.session.messages,
                 task_id=f"chat-{self.session.id}-concise",
                 max_tokens=4096,
@@ -1433,7 +1677,11 @@ class Agent:
             self.approval_mode != "readonly"
             and not self._plan_mode_is_read_only()
             and run_journal.intent.policy.collaboration_allowed
-            and await self._should_collaborate(user_input, run_journal.intent)
+            and await self._should_collaborate(
+                user_input,
+                run_journal.intent,
+                run_journal.execution_depth,
+            )
         ):
             async for event in self._run_collaboration_stream(
                 user_input, billing_before, run_journal
@@ -1484,7 +1732,8 @@ class Agent:
             provider_payload: list[dict[str, Any]] = []
             output_before = total_output
             usage_observed = False
-            async for chunk in self.gateway.chat_with_main_model_stream(
+            async for chunk in self._chat_stream_for_run(
+                run_journal,
                 messages=self.session.messages,
                 task_id=f"chat-{self.session.id}",
                 max_tokens=4096,
@@ -1556,7 +1805,7 @@ class Agent:
 
             if not self._has_tool_calls(full_content, response_blocks):
                 break
-            if iterations >= self.max_tool_iterations:
+            if iterations >= self._tool_iteration_limit(run_journal):
                 # 达到最大工具轮数，追加提示并要求模型直接给出最终结果
                 limit_specs = self._tool_specs(full_content, response_blocks)
                 limit_calls = [
@@ -1580,7 +1829,8 @@ class Agent:
                 final_blocks: list[MessageContentBlock] = []
                 final_provider_payload: list[dict[str, Any]] = []
                 usage_observed = False
-                async for chunk in self.gateway.chat_with_main_model_stream(
+                async for chunk in self._chat_stream_for_run(
+                    run_journal,
                     messages=self.session.messages,
                     task_id=f"chat-{self.session.id}-finalize",
                     max_tokens=4096,
@@ -1847,7 +2097,8 @@ class Agent:
             concise_blocks: list[MessageContentBlock] = []
             concise_provider_payload: list[dict[str, Any]] = []
             usage_observed = False
-            async for chunk in self.gateway.chat_with_main_model_stream(
+            async for chunk in self._chat_stream_for_run(
+                run_journal,
                 messages=self.session.messages,
                 task_id=f"chat-{self.session.id}-concise",
                 max_tokens=4096,
@@ -1935,15 +2186,26 @@ class Agent:
         self,
         user_input: str,
         intent: TaskIntent | None = None,
+        execution_depth: ExecutionDepthDecision | None = None,
     ) -> bool:
         """是否需要多模型协作：先做关键字预筛，再交 LLM 判断"""
         resolved_intent = intent or self.intent_classifier.classify(
             user_input,
             self.approval_mode,
         )
+        if self.session.collaboration_mode == "single":
+            return False
         # 只读和未分类任务保持单 Agent，避免协作扩大权限或重复侦察。
         if not resolved_intent.policy.collaboration_allowed:
             return False
+        resolved_depth = execution_depth or self.execution_depth_resolver.resolve(
+            resolved_intent,
+            self.session.execution_depth,
+        )
+        if resolved_depth.budget.worker_policy == "disabled":
+            return False
+        if self.session.collaboration_mode == "multi":
+            return True
         # 关键字预筛：明确的项目/多步骤任务直接走协作
         if any(kw in user_input for kw in _COLLABORATION_KEYWORDS):
             return True
@@ -1953,13 +2215,23 @@ class Agent:
             ChatMessage(role="user", content=user_input),
         ]
         try:
-            response = await asyncio.to_thread(
-                self.gateway.chat_with_main_model,
-                messages=messages,
-                task_id=f"chat-{self.session.id}-decide",
-                max_tokens=64,
-                temperature=0.1,
-            )
+            if self._active_run_journal is not None:
+                response = await asyncio.to_thread(
+                    self._chat_for_run,
+                    self._active_run_journal,
+                    messages=messages,
+                    task_id=f"chat-{self.session.id}-decide",
+                    max_tokens=64,
+                    temperature=0.1,
+                )
+            else:
+                response = await asyncio.to_thread(
+                    self.gateway.chat_with_main_model,
+                    messages=messages,
+                    task_id=f"chat-{self.session.id}-decide",
+                    max_tokens=64,
+                    temperature=0.1,
+                )
             content = response.content.strip()
             # 尝试直接解析 JSON
             if content.startswith("{"):
@@ -2112,11 +2384,18 @@ class Agent:
                 worker = Worker(
                     self.gateway,
                     workers_config,
+                    max_tool_iterations=(
+                        run_journal.execution_depth.budget.worker_tool_iterations
+                    ),
                     project_rules=project_rules,
                     permission_engine=self._active_permission_engine,
                     approval_mode="auto",
+                    memory_store=self.memory_store,
                 )
-                dispatcher = Dispatcher(worker, max_workers=4)
+                dispatcher = Dispatcher(
+                    worker,
+                    max_workers=run_journal.execution_depth.budget.max_workers,
+                )
                 completed_results = dispatcher.dispatch(
                     plan,
                     output_dir=self.session.output_dir,

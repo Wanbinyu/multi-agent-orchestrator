@@ -33,6 +33,27 @@ _DEPENDENCY_MANIFESTS = {
     "yarn.lock",
 }
 
+_VERIFICATION_RANK = {
+    "none": 0,
+    "targeted": 1,
+    "standard": 2,
+    "deep": 3,
+}
+
+
+def _effective_verification_depth(journal: RunJournal, intent: TaskIntent) -> str:
+    """Execution depth may strengthen, but never weaken, mutation verification."""
+    depth = intent.policy.verification_depth
+    execution = journal.execution_depth
+    if execution is None or depth == "continuous":
+        return depth
+    floor = execution.budget.mutation_verification_floor
+    if floor == "continuous":
+        return depth
+    if _VERIFICATION_RANK.get(floor, 0) > _VERIFICATION_RANK.get(depth, 0):
+        return floor
+    return depth
+
 
 class MutationRiskEscalator:
     """根据真实写入生成审计用 effective intent，不扩大执行权限。"""
@@ -249,7 +270,7 @@ class CompletionAuditor:
             return audit
 
         required_checks = required_checks_for_depth(
-            effective_intent.policy.verification_depth
+            _effective_verification_depth(journal, effective_intent)
         )
         observed_evidence_ids = set(journal.observed_mutation.evidence_ids)
         change_evidence = [

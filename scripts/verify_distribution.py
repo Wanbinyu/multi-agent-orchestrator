@@ -14,6 +14,8 @@ import urllib.request
 import venv
 import zipfile
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_WHEEL_FILES = {
@@ -23,8 +25,16 @@ REQUIRED_WHEEL_FILES = {
     "src/ui/static/css/style.css",
     "src/ui/static/js/app.js",
     "src/ui/static/js/chat.js",
+    "src/core/engineering/benchmark_agent.py",
+    "src/integrations/harbor_agent.py",
 }
 FORBIDDEN_DISTRIBUTION_PARTS = {"tests", "docs", ".github", "reference-opencode"}
+REQUIRED_SDIST_FILES = {
+    "benchmarks/engineering_v1/README.md",
+    "benchmarks/engineering_v1/suite.yaml",
+    "scripts/benchmark_engineering.py",
+    "scripts/benchmark_live_smoke.py",
+}
 
 
 def _run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
@@ -61,10 +71,35 @@ def _assert_archive_contract(wheel: Path, sdist: Path) -> None:
 
     with tarfile.open(sdist, "r:gz") as archive:
         sdist_names = archive.getnames()
+        relative_names = {
+            Path(*Path(name).parts[1:]).as_posix()
+            for name in sdist_names
+            if len(Path(name).parts) > 1
+        }
         assert not any(
             set(Path(name).parts[1:]) & FORBIDDEN_DISTRIBUTION_PARTS
             for name in sdist_names
         ), "sdist contains development-only files"
+        missing = REQUIRED_SDIST_FILES - relative_names
+        assert not missing, f"sdist missing public benchmark assets: {sorted(missing)}"
+        suite_name = next(
+            name for name in sdist_names
+            if name.endswith("/benchmarks/engineering_v1/suite.yaml")
+        )
+        suite_file = archive.extractfile(suite_name)
+        assert suite_file is not None, "sdist benchmark suite cannot be read"
+        suite = yaml.safe_load(suite_file.read().decode("utf-8")) or {}
+        project_dirs = {
+            str(task.get("project_dir", "")).strip().replace("\\", "/")
+            for task in suite.get("tasks", [])
+            if isinstance(task, dict)
+        }
+        assert project_dirs, "sdist benchmark suite has no task projects"
+        for project_dir in project_dirs:
+            prefix = f"benchmarks/engineering_v1/{project_dir.rstrip('/')}/"
+            assert any(name.startswith(prefix) for name in relative_names), (
+                f"sdist missing benchmark project: {project_dir}"
+            )
 
 
 def _entrypoint(venv_dir: Path, name: str) -> Path:

@@ -74,6 +74,7 @@ _BUILD_PATTERNS = (
     r"搭建", r"从零", r"做一个", r"做一套", r"写一个", r"写个", r"^写(入)?文件(?:$|[\s：:，,])", r"重做",
     r"做一?(出来|起来|好|完)",
     r"创建一?(好|完|出来|起来|下)$",
+    r"创建\s*[^\s，,。；;]+\.(?:py|js|ts|tsx|jsx|java|go|rs|html|css|json|ya?ml|toml|ini|md)",
 )
 _CHANGE_PATTERNS = (
     r"修复", r"修改", r"改代码", r"调整", r"优化", r"重构", r"更新", r"升级", r"替换", r"删除", r"完善", r"补齐",

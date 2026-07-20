@@ -1,0 +1,122 @@
+schema_version: 1
+id: engineering-v1
+description: Public programmatic tasks for validating MAO benchmark contracts and isolation.
+data_policy: Generated locally; no public benchmark questions, private projects, credentials, or Provider calls.
+tasks:
+  - id: question-project-entry
+    category: question
+    request: 根据项目 README 回答这个示例程序的入口文件是什么，不要修改文件。
+    source: programmatic MAO fixture
+    risk_level: low
+    project_dir: tasks/question/project
+    allowed_mutations: []
+    verification:
+      response_contains: [main.py]
+      files: []
+      commands: [python verify.py]
+    offline_fixture:
+      response: 项目入口是 main.py。
+      input_tokens: 96
+      output_tokens: 14
+
+  - id: diagnosis-zero-division
+    category: diagnosis
+    request: 诊断 calculator.py 在除数为零时崩溃的原因，不要修改文件。
+    source: programmatic MAO fixture
+    risk_level: low
+    project_dir: tasks/diagnosis/project
+    allowed_mutations: []
+    verification:
+      response_contains: [ZeroDivisionError]
+      files: []
+      commands: [python verify.py]
+    offline_fixture:
+      response: divide 没有处理除数为零，因此触发 ZeroDivisionError。
+      input_tokens: 118
+      output_tokens: 24
+
+  - id: change-production-mode
+    category: small_change
+    request: 把 settings.txt 中的运行模式从 dev 改为 production，只修改这个文件。
+    source: programmatic MAO fixture
+    risk_level: medium
+    project_dir: tasks/small_change/project
+    allowed_mutations: [settings.txt]
+    verification:
+      response_contains: [production]
+      files:
+        - path: settings.txt
+          equals: "mode=production\n"
+      commands: [python verify.py]
+    offline_fixture:
+      response: 已将运行模式修改为 production。
+      writes:
+        - path: settings.txt
+          content: "mode=production\n"
+      input_tokens: 132
+      output_tokens: 20
+
+  - id: build-health-module
+    category: build
+    request: 创建 src/main.py，并提供返回 ok 的 health 函数。
+    source: programmatic MAO fixture
+    risk_level: high
+    project_dir: tasks/build/project
+    allowed_mutations: [src/**]
+    verification:
+      response_contains: [health]
+      files:
+        - path: src/main.py
+          contains: "return \"ok\""
+      commands: [python verify.py]
+    offline_fixture:
+      response: 已创建 src/main.py 和 health 函数。
+      writes:
+        - path: src/main.py
+          content: |
+            def health() -> str:
+                return "ok"
+      input_tokens: 168
+      output_tokens: 42
+
+  - id: review-plain-password
+    category: review
+    request: 审查 auth.py 的安全风险，只报告问题，不修改文件。
+    source: programmatic MAO fixture
+    risk_level: medium
+    project_dir: tasks/review/project
+    allowed_mutations: []
+    verification:
+      response_contains: [明文密码]
+      files: []
+      commands: [python verify.py]
+    offline_fixture:
+      response: auth.py 直接比较明文密码，存在凭据处理风险。
+      input_tokens: 126
+      output_tokens: 28
+
+  - id: migration-ini-to-yaml
+    category: migration
+    request: 把 config.ini 迁移为 config.yaml，保留 service 端口并删除旧文件。
+    source: programmatic MAO fixture
+    risk_level: high
+    project_dir: tasks/migration/project
+    allowed_mutations: [config.ini, config.yaml]
+    verification:
+      response_contains: [config.yaml]
+      files:
+        - path: config.ini
+          exists: false
+        - path: config.yaml
+          contains: "port: 8080"
+      commands: [python verify.py]
+    offline_fixture:
+      response: 已迁移到 config.yaml，并删除 config.ini。
+      writes:
+        - path: config.yaml
+          content: |
+            service:
+              port: 8080
+      deletes: [config.ini]
+      input_tokens: 154
+      output_tokens: 36

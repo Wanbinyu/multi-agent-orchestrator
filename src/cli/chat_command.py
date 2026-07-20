@@ -53,6 +53,8 @@ SLASH_COMMANDS: list[tuple[str, str, str]] = [
     ("/memory index", "/memory index", "重建项目文件索引"),
     ("/memory summarize", "/memory summarize", "总结当前会话并保存到记忆"),
     ("/mode", "/mode <auto|approve|readonly>", "切换权限模式"),
+    ("/depth", "/depth <auto|fast|standard|deep>", "设置执行深度"),
+    ("/routing", "/routing <auto|fixed>", "设置模型路由"),
     ("/auto", "/auto", "自动执行工具"),
     ("/approve", "/approve", "每次执行前确认"),
     ("/readonly", "/readonly", "只读模式"),
@@ -102,6 +104,8 @@ class SlashCommandCompleter(Completer):
 
 
 MODES = ["auto", "approve", "readonly"]
+DEPTHS = ["auto", "fast", "standard", "deep"]
+ROUTING_MODES = ["auto", "fixed"]
 
 
 def _summarize_params(params: dict) -> str:
@@ -321,6 +325,9 @@ async def _stream_turn(agent: Agent, user_input: str):
     engineering_verification_count = 0
     engineering_audit_status = ""
     engineering_audit_gaps: list[str] = []
+    engineering_routed_model = ""
+    engineering_routing_source = ""
+    engineering_routing_reason = ""
 
     def _start_spinner(message: str):
         nonlocal spinner_task, spinner_message
@@ -417,6 +424,17 @@ async def _stream_turn(agent: Agent, user_input: str):
                         *(audit.get("missing_checks") or []),
                         *(audit.get("failed_checks") or []),
                     ]))
+                routing = engineering.get("model_routing") or {}
+                if routing:
+                    engineering_routed_model = str(
+                        routing.get("selected_model", engineering_routed_model)
+                    )
+                    engineering_routing_source = str(
+                        routing.get("source", engineering_routing_source)
+                    )
+                    engineering_routing_reason = str(
+                        routing.get("reason", engineering_routing_reason)
+                    )
                 _start_spinner("🧠 思考中")
             elif event.type == "permission_request":
                 live.stop()
@@ -577,18 +595,26 @@ async def _stream_turn(agent: Agent, user_input: str):
         console.print(Panel(file_text, title="交付文件", border_style="green"))
 
     # 模型归属信息
-    main_model = agent.gateway.get_main_model() or "unknown"
+    configured_main_model = agent.gateway.get_main_model() or "unknown"
+    main_model = engineering_routed_model or configured_main_model
     if is_collaboration:
         model_line = f"主模型：{main_model}"
         if models_used:
             model_line += f" | 协作模型：{', '.join(sorted(models_used))}"
     else:
         model_line = f"模型：{main_model}"
+    if main_model != configured_main_model:
+        model_line += f"（配置主模型：{configured_main_model}）"
 
     console.print(
         f"[dim]{model_line}  |  输入 token: {input_tokens}  输出 token: {output_tokens}  "
         f"成本: ${cost_usd:.6f}[/dim]"
     )
+    if engineering_routing_reason:
+        console.print(
+            f"[dim]模型路由：{engineering_routing_source or 'unknown'} · "
+            f"{engineering_routing_reason}[/dim]"
+        )
     if engineering_run_id:
         intent_parts = [part for part in (
             engineering_kind,
@@ -800,6 +826,18 @@ def _print_run_detail(journal) -> None:
         f"{intent.confidence:.2f}）  风险：{intent.risk_level}  "
         f"写入授权：{'是' if intent.write_authorized else '否'}"
     )
+    if journal.model_routing is not None:
+        routing = journal.model_routing
+        console.print(
+            f"模型路由：{routing.requested_model or '无'} → "
+            f"{routing.selected_model or '无'}（{routing.source}）"
+        )
+        console.print(f"路由理由：{routing.reason}")
+        console.print(
+            f"价格比较：{routing.price_comparison}；"
+            f"允许节省声明：{'是' if routing.savings_claim_allowed else '否'}；"
+            f"升级次数：{routing.upgrade_count}/{routing.max_upgrades}"
+        )
 
     if journal.plan:
         plan = journal.plan
@@ -1051,6 +1089,34 @@ def _set_mode(session, agent, mode_ref: list[str], mode: str) -> bool:
     return True
 
 
+def _set_depth(session, depth: str) -> bool:
+    """设置持久化执行深度；安全下限仍由每轮任务合同决定。"""
+    if depth not in DEPTHS:
+        console.print(
+            f"[bold red]未知执行深度：{depth}，可选：{' / '.join(DEPTHS)}[/bold red]"
+        )
+        return False
+    session.execution_depth = depth
+    console.print(f"[cyan]已设置执行深度：{depth}[/cyan]")
+    if depth != "auto":
+        console.print("[dim]高风险任务仍会按不可绕过的验证边界自动提升。[/dim]")
+    return True
+
+
+def _set_routing_mode(session, mode: str) -> bool:
+    """设置自动路由或固定使用用户主模型。"""
+    if mode not in ROUTING_MODES:
+        console.print(
+            f"[bold red]未知路由模式：{mode}，可选："
+            f"{' / '.join(ROUTING_MODES)}[/bold red]"
+        )
+        return False
+    session.model_routing_mode = mode
+    label = "自动选择并保守回退" if mode == "auto" else "固定使用主模型"
+    console.print(f"[cyan]已设置模型路由：{mode}（{label}）[/cyan]")
+    return True
+
+
 def _cmd_context(agent: Agent) -> dict[str, Any]:
     """显示本地运行时上下文状态，不调用模型、不消耗 token。"""
     status = agent.get_context_status()
@@ -1295,6 +1361,22 @@ def run_chat_loop(
                             store.save(session)
                         continue
                     if _set_mode(session, agent, mode_ref, arg.strip()):
+                        store.save(session)
+                elif cmd == "/depth":
+                    if not arg:
+                        console.print(
+                            f"当前执行深度：{session.execution_depth}；"
+                            f"可选：{' / '.join(DEPTHS)}"
+                        )
+                    elif _set_depth(session, arg.strip().lower()):
+                        store.save(session)
+                elif cmd == "/routing":
+                    if not arg:
+                        console.print(
+                            f"当前模型路由：{session.model_routing_mode}；"
+                            f"可选：{' / '.join(ROUTING_MODES)}"
+                        )
+                    elif _set_routing_mode(session, arg.strip().lower()):
                         store.save(session)
                 elif cmd == "/auto":
                     if _set_mode(session, agent, mode_ref, "auto"):

@@ -738,6 +738,13 @@ def execute_tool_call(
     params: dict,
     base_dir: str,
     allowed_prefixes: list[str] | None = None,
+    runtime_context: dict[str, Any] | None = None,
 ) -> ToolResult:
     """统一分发工具调用（向后兼容入口）"""
-    return tool_registry.execute(tool_name, params, base_dir, allowed_prefixes)
+    return tool_registry.execute(
+        tool_name,
+        params,
+        base_dir,
+        allowed_prefixes,
+        runtime_context,
+    )
