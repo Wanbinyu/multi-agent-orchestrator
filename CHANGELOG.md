@@ -6,6 +6,10 @@ All notable changes are documented here. MAO follows Semantic Versioning; beta r
 
 Next target: `v0.2.0` entry conditions (external users, reproducible real benchmarks, and a Plugin API compatibility policy).
 
+### Fixed
+
+- `run_command` now rejects interpreter inline-code execution (`python -c`, `node -e`/`--eval`/`-p`/`--print`). Previously the prefix allowlist permitted these and no inline-code check existed (unlike `frontend_smoke` and `benchmark`), allowing arbitrary code execution via prompt injection that could read `.env`, write out of bounds, or exfiltrate data. `python -m <module> -c` (e.g. `python -m pytest -c config`) is still allowed because `-c` belongs to the module, not the interpreter.
+
 ## [0.1.0-beta.6] - 2026-07-21
 
 ### Added

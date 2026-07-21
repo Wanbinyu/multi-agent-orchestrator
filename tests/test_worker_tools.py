@@ -85,10 +85,45 @@ def test_run_command_custom_whitelist(tmp_path):
 
 
 def test_run_command_timeout(tmp_path):
-    # 用 sleep 测试超时，Windows 没有 sleep 命令，用 python 代替
-    result = run_command("python -c \"import time; time.sleep(5)\"", str(tmp_path), timeout=1)
+    # 用临时脚本测试超时（不能用 python -c 内联代码，会被 preflight 拒绝）
+    sleep_script = tmp_path / "_mao_sleep.py"
+    sleep_script.write_text("import time\ntime.sleep(5)\n", encoding="utf-8")
+    result = run_command(f"python {sleep_script.as_posix()}", str(tmp_path), timeout=1)
     assert result.success is False
     assert "超时" in result.error
+
+
+def test_run_command_rejects_inline_interpreter_code(tmp_path):
+    # 允许前缀（python / node）的命令到达内联代码检查并被拒绝
+    for command in [
+        'python -c "import os; os.system(\'id\')"',
+        'node -e "console.log(1)"',
+        'node --eval "console.log(1)"',
+        'node -p "1+1"',
+        'node --print "1+1"',
+    ]:
+        result = run_command(command, str(tmp_path))
+        assert result.success is False, command
+        assert result.metadata["error_code"] == "inline_interpreter_code", command
+
+
+def test_run_command_allows_module_mode_with_c_flag(tmp_path, monkeypatch):
+    # python -m pytest -c config 中 -c 归属 pytest，不应被内联代码检查误拒
+    completed = MagicMock(returncode=0, stdout="ok\n", stderr="")
+    run = MagicMock(return_value=completed)
+    monkeypatch.setattr("src.tools.worker_tools.subprocess.run", run)
+    result = run_command("python -m pytest -c pytest.ini", str(tmp_path))
+    assert result.success is True
+    assert result.metadata["argv"] == ["python", "-m", "pytest", "-c", "pytest.ini"]
+
+
+def test_run_command_allows_script_file(tmp_path):
+    # python script.py 不应被内联代码检查误拒
+    script = tmp_path / "_ok.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+    result = run_command(f"python {script.as_posix()}", str(tmp_path))
+    assert result.success is True
+    assert "ok" in result.output
 
 
 def test_run_command_uses_structured_cwd_and_records_trace(tmp_path, monkeypatch):

@@ -108,10 +108,15 @@ DEFAULT_ALLOWED_PREFIXES = [
     "git log",
 ]
 
+# 解释器内联代码执行（python -c / node -e 等）允许任意代码执行，
+# 会绕过路径归属与 permission_rules，必须在 preflight 拒绝。
+_INLINE_CODE_INTERPRETERS = {"python", "python.exe", "python3", "py", "node", "node.exe"}
+
 _COMMAND_PREFLIGHT_ERRORS = {
     "empty_command",
     "inline_cwd",
     "shell_syntax",
+    "inline_interpreter_code",
     "command_not_allowed",
     "cwd_not_found",
     "cwd_not_directory",
@@ -186,6 +191,29 @@ def _contains_shell_syntax(command: str) -> bool:
             return True
         index += 1
     return False
+
+
+def _has_inline_interpreter_code(command: str) -> bool:
+    """检测 python -c / node -e 等解释器内联代码（任意代码执行风险）。
+
+    与 run_command 的 argv 解析一致使用 shlex.split。python 的 -c 为解释器
+    内联模式；若同时出现 -m（模块模式），-c 归属模块（如
+    `python -m pytest -c config`），不拒绝。node 的 -e/--eval/-p/--print
+    为内联代码。命中则 preflight 拒绝，避免绕过路径归属与 permission_rules。
+    """
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return False
+    if len(argv) < 2:
+        return False
+    executable = Path(argv[0]).name.casefold()
+    if executable not in _INLINE_CODE_INTERPRETERS:
+        return False
+    args = [part.casefold() for part in argv[1:]]
+    if executable in {"python", "python.exe", "python3", "py"}:
+        return "-c" in args and "-m" not in args
+    return bool({"-e", "--eval", "-p", "--print"}.intersection(args))
 
 
 def _command_metadata(
@@ -504,6 +532,19 @@ def run_command(
                     error_code="command_not_allowed",
                     suggested_tool="discover_project_commands",
                     suggested_params={"path": cwd},
+                ),
+            )
+        if _has_inline_interpreter_code(command):
+            return ToolResult(
+                success=False,
+                error=(
+                    "禁止解释器内联代码（python -c / node -e 等）；"
+                    "请把代码写入项目内脚本后再运行，不要重复原调用。"
+                ),
+                metadata=_command_metadata(
+                    cwd=cwd,
+                    error_code="inline_interpreter_code",
+                    suggested_action="先用 write_file 写入脚本文件，再 run_command 执行该脚本",
                 ),
             )
 
