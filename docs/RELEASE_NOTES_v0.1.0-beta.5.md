@@ -40,7 +40,8 @@ Python 3.11 or 3.12 is required. Runtime configuration, keys, sessions and index
 - `python scripts/benchmark_engineering.py`: the three fixture strategies each run three times across six task categories, producing 54 stable synthetic results with consistent stability signatures and zero Provider calls.
 - Distribution acceptance builds wheel/sdist, checks archive contents, installs dependencies in a clean virtual environment without inherited system packages, and verifies clean CLI plus Web `/health`.
 - `pip-audit -r requirements.txt` reports no known vulnerabilities.
-- The checksum-verified gitleaks 8.24.3 scan runs in CI; the local Windows host could not run the gitleaks binary without an external download, so the authoritative secret scan is the CI job.
+- The checksum-verified gitleaks 8.24.3 scan runs in CI and reports no leaks; the local Windows host could not run the gitleaks binary without an external download, so the authoritative secret scan is the CI job.
+- Remote CI [run 29829436563](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29829436563) passed on Windows/Ubuntu × Python 3.11/3.12 plus the security job (pip-audit and gitleaks). B5.6 release finalization caught a previously undetected CI failure: the `build/` gitignore rule had hidden the benchmark's build-task fixture, so it was never committed and CI failed while local tests passed; anchoring the rule to `/build/` and tracking the fixture resolved it.
 - Python compileall, JavaScript syntax checks and diff hygiene pass locally.
 - Real paid Provider calls were not made during unattended acceptance. The earlier private `multi-model` live smoke is not part of the public release and is not used to claim any model advantage.
 

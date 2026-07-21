@@ -137,7 +137,8 @@
 - 版本号：`src/version.py`、`pyproject.toml`、`tests/test_version.py` 同步升至 `0.1.0b5`；`python run.py --version` 输出 `MAO 0.1.0b5`。
 - 文档：CHANGELOG `[Unreleased]` 转为 `[0.1.0-beta.5] - 2026-07-21` 并新增指向 beta.6 的 `[Unreleased]`；新增 `docs/RELEASE_NOTES_v0.1.0-beta.5.md`（Highlights、Install、Upgrade Notes、Verification、Known Limitations）；README 徽章与状态段落更新。
 - 验证：全量回归 `799 passed, 1 warning`（唯一 warning 为 Starlette/httpx 上游弃用）；`pip-audit -r requirements.txt` 无已知漏洞；`python -m compileall`、`node --check`（app.js/chat.js）、`git diff --check` 通过；`python scripts/verify_distribution.py` 构建 wheel/sdist、校验归档合同、干净虚拟环境安装、空目录 CLI 与 Web `/health` 通过。
-- 安全扫描边界：gitleaks 8.24.3 在本地 Windows 无法下载二进制（auto 模式拒绝外部下载），权威密钥扫描仍为远端 CI 作业；推送后记录结果。
+- 安全扫描边界：gitleaks 8.24.3 在本地 Windows 无法下载二进制（auto 模式拒绝外部下载），权威密钥扫描为远端 CI 作业，已在 [run 29829436563](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29829436563) 通过。
+- 复核中发现 `cbcf056`（B5.5）远端 CI 实际失败但此前未记录：`build/` gitignore 规则误藏基准 `tasks/build/` 夹具，文件未提交导致 CI 失败而本地测试通过。`737ac8e` 将规则锚定为 `/build/` 并补齐 `tasks/build/project/{README.md,verify.py}` 后修复，远端 CI 全绿（Windows/Ubuntu × Python 3.11/3.12 与 security job）。
 - 真实 Provider 调用：无人在场验收期间未调用付费 Provider；此前的 `multi-model` private live smoke 不计入公开发布，也不用于声明任何模型优势。
 - Tag 和 GitHub pre-release：不自动执行，待所有者确认。
 

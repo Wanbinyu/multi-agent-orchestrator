@@ -25,6 +25,7 @@ Next target: `v0.1.0-beta.6` (Plugin API v0 and release wrap-up).
 - Live benchmark Provider attempt ceilings are now reserved atomically before every network request across retries, streams, concurrent Workers, and Agent subcalls; reaching the limit blocks the next request instead of reporting an overrun only after the strategy returns.
 - Orchestrator plans now normalize top-level task arrays, list-form acceptance text, common Worker role aliases, invalid model-role placeholders, and creative Worker drift in software tasks before execution. Alias-only corrections preserve valid configured model choices.
 - The CLI `ark` Coding Plan preset now sources model data from the catalog instead of a hardcoded duplicate, so capability and metadata fields stay consistent with the rest of the catalog.
+- The `build/` gitignore pattern (for the setuptools build directory) also matched the benchmark's `tasks/build/` category, so the build-task fixture was never committed and CI failed while local tests passed. The pattern is now anchored to `/build/`, and the missing fixture files are tracked.
 
 ## [0.1.0-beta.4] - 2026-07-19
 
