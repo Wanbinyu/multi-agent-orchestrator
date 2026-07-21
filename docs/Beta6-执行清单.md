@@ -73,9 +73,15 @@
 
 ## 4. B6.4 示例插件
 
-- [ ] `examples/plugins/mao_wordcount_plugin/` 独立可安装包 + entry point。
-- [ ] 集成测试：discover -> enable -> load -> execute -> shutdown（真实 entry point）。
-- [ ] 不兼容 API 版本插件被拒绝。
+- [x] `examples/plugins/mao_wordcount_plugin/` 独立可安装包 + entry point。
+- [x] 集成测试：discover -> enable -> load -> execute -> shutdown（真实 entry point）。
+- [x] 不兼容 API 版本插件被拒绝（B6.2 单元测试覆盖；示例插件走兼容路径）。
+
+### B6.4 完成记录（2026-07-21）
+
+- `examples/plugins/mao_wordcount_plugin/`：独立可安装包，`pyproject.toml` 声明 `[project.entry-points."mao.plugins"]` `wordcount = "mao_wordcount_plugin:create_plugin"`；`mao_wordcount_plugin/__init__.py` 的 `WordCountPlugin` 实现 `Plugin` 协议（manifest id=`mao-wordcount`、API `0.1`、capabilities=`[tools]`、permissions=`[read_files]`；`load` 注册只读 `word_count` 工具；`shutdown` 空实现），`create_plugin()` 为 entry point 工厂。README 说明安装/启用/安全模型。
+- `tests/test_plugin_example_integration.py` 4 条：用真实 `importlib.metadata.entry_points(group="mao.plugins")` 发现机制（临时 dist-info + sys.path，不 pip 安装）驱动示例插件 -- 发现、enable/load/execute（`word_count` 输出字符/单词/行数）/shutdown（工具注销）、list_status（能力/权限/来源可见）、manifest 声明 v0 API。wheel 安装环境验收留 B6.6 `verify_distribution.py`。
+- 全量回归 `851 passed, 1 warning`，无回归。B6.3 远端 CI `success`（[run 29838695324](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29838695324)）。
 
 ## 5. B6.5 Web 可见性
 

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mao-wordcount-plugin"
+version = "0.1.0"
+description = "Example MAO plugin contributing a read-only word_count tool (Plugin API v0)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Wanbinyu" }]
+
+# 本示例插件导入 MAO 的 src 包（src.plugins.api、src.tools.tool_result）。
+# 请在已安装 MAO 的环境中安装；MAO 尚未发布到 PyPI，故不在此声明硬依赖。
+
+[project.entry-points."mao.plugins"]
+wordcount = "mao_wordcount_plugin:create_plugin"
+
+[tool.setuptools]
+packages = ["mao_wordcount_plugin"]
