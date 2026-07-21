@@ -125,11 +125,22 @@
 
 ## 6. B5.6 发布收口
 
-- [ ] 全量测试、安全扫描、分发验收和干净安装通过。
-- [ ] 基准任务来源、生成方式、运行命令和结果可公开复现。
-- [ ] CHANGELOG、Release Notes、版本号和升级说明完成。
+- [x] 全量测试、安全扫描、分发验收和干净安装通过。
+- [x] 基准任务来源、生成方式、运行命令和结果可公开复现。
+- [x] CHANGELOG、Release Notes、版本号和升级说明完成。
 - [ ] Tag 和 GitHub pre-release 仍需所有者单独确认。
+
+### B5.6 完成记录（2026-07-21）
+
+- 模型目录单一真值审计：CLI（`provider_presets.py`、`agent_setup.py`）与 Web（`src/ui/presets/builtin/*`）均经 `BUILTIN_MODELS[alias].to_model_data()` 取值；发现并修复 CLI `ark` Coding Plan 预设硬编码 `glm-ark` 漂离 catalog 的小问题，使其与 Web `ark-coding` 预设和其余预设一致。新增 `test_preset_models_are_sourced_from_catalog` 防漂移回归测试。
+- 公开基准可复现性：`benchmarks/engineering_v1/README.md` 与 `suite.yaml` 记录任务来源（`programmatic MAO fixture`）、运行命令（`python scripts/benchmark_engineering.py`）、`data_policy`（无公开原题/私有项目/密钥/Provider 调用）与 `synthetic_contract` 标记；sdist 含全套任务项目与运行脚本。
+- 版本号：`src/version.py`、`pyproject.toml`、`tests/test_version.py` 同步升至 `0.1.0b5`；`python run.py --version` 输出 `MAO 0.1.0b5`。
+- 文档：CHANGELOG `[Unreleased]` 转为 `[0.1.0-beta.5] - 2026-07-21` 并新增指向 beta.6 的 `[Unreleased]`；新增 `docs/RELEASE_NOTES_v0.1.0-beta.5.md`（Highlights、Install、Upgrade Notes、Verification、Known Limitations）；README 徽章与状态段落更新。
+- 验证：全量回归 `799 passed, 1 warning`（唯一 warning 为 Starlette/httpx 上游弃用）；`pip-audit -r requirements.txt` 无已知漏洞；`python -m compileall`、`node --check`（app.js/chat.js）、`git diff --check` 通过；`python scripts/verify_distribution.py` 构建 wheel/sdist、校验归档合同、干净虚拟环境安装、空目录 CLI 与 Web `/health` 通过。
+- 安全扫描边界：gitleaks 8.24.3 在本地 Windows 无法下载二进制（auto 模式拒绝外部下载），权威密钥扫描仍为远端 CI 作业；推送后记录结果。
+- 真实 Provider 调用：无人在场验收期间未调用付费 Provider；此前的 `multi-model` private live smoke 不计入公开发布，也不用于声明任何模型优势。
+- Tag 和 GitHub pre-release：不自动执行，待所有者确认。
 
 ## 7. 当前下一步
 
-B5.5 的对抗测试和本地模型路由合同已完成离线验收。下一步进入 B5.6 发布收口：先审计模型目录单一真值、公开基准说明、版本号和升级说明，再执行安全扫描与候选发布验收。B5.4 真实 `multi-model` 评测仍单独暂停；只有所有者重新给出新的累计次数边界后，才允许继续 private smoke。详见 [`B5.4-真实能力评测操作手册.md`](B5.4-真实能力评测操作手册.md)。
+B5.6 发布收口已在本地完成。下一步等所有者确认 `v0.1.0-beta.5` Tag 和 GitHub pre-release（不自动执行），确认后进入 `beta.6` Plugin API v0。B5.4 真实 `multi-model` 评测仍单独暂停；只有所有者重新给出新的累计次数边界后，才允许继续 private smoke。详见 [`B5.4-真实能力评测操作手册.md`](B5.4-真实能力评测操作手册.md)。

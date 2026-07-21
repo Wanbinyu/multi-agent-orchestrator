@@ -4,7 +4,9 @@ All notable changes are documented here. MAO follows Semantic Versioning; beta r
 
 ## [Unreleased]
 
-Next target: `v0.1.0-beta.5` (routing, execution depth, and reproducible benchmarks).
+Next target: `v0.1.0-beta.6` (Plugin API v0 and release wrap-up).
+
+## [0.1.0-beta.5] - 2026-07-21
 
 ### Added
 
@@ -15,12 +17,14 @@ Next target: `v0.1.0-beta.5` (routing, execution depth, and reproducible benchma
 - B5.2 adds deterministic `fast`, `standard`, and `deep` execution budgets for main-agent/Worker tool rounds, context usage, Worker concurrency, collaboration review, and mutation verification. User preferences persist through `/depth` and the Web session API, while high-risk safety floors remain non-bypassable and every decision is journaled in RunJournal v4.
 - B5.1 adds a versioned public engineering benchmark contract for question, diagnosis, small-change, build, review, and migration tasks. Single-model and MAO strategies share isolated workspaces, deterministic response/file/command checks, mutation boundaries, stability signatures, and JSON/Markdown metrics.
 - The zero-Provider fixture gate runs both synthetic strategies three times in CI, rejects empty/timeout/provider-leak/unstable/unauthorized results, and labels all fixture usage as `synthetic_contract` so it cannot be mistaken for real-model evidence.
+- Catalog single source of truth: CLI and Web model presets now both derive every entry from `src/models/catalog.py`, and a regression test guards against preset drift.
 
 ### Fixed
 
 - The Web adversarial toggle remains readable without overlap at 320px, 390px, and desktop widths; narrow layouts move workspace controls to a separate row instead of compressing the label character by character.
 - Live benchmark Provider attempt ceilings are now reserved atomically before every network request across retries, streams, concurrent Workers, and Agent subcalls; reaching the limit blocks the next request instead of reporting an overrun only after the strategy returns.
 - Orchestrator plans now normalize top-level task arrays, list-form acceptance text, common Worker role aliases, invalid model-role placeholders, and creative Worker drift in software tasks before execution. Alias-only corrections preserve valid configured model choices.
+- The CLI `ark` Coding Plan preset now sources model data from the catalog instead of a hardcoded duplicate, so capability and metadata fields stay consistent with the rest of the catalog.
 
 ## [0.1.0-beta.4] - 2026-07-19
 
