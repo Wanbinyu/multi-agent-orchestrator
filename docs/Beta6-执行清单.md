@@ -56,10 +56,20 @@
 
 ## 3. B6.3 CLI `mao plugin`
 
-- [ ] `mao plugin list` / `doctor` / `enable <id>` / `disable <id>`。
-- [ ] `known_commands` 加入 `plugin`；命令名再审查 CLI 一致性。
-- [ ] `config/plugins.yaml` 读写与 `.gitignore`。
-- [ ] 针对性测试 + CLI 交互。
+- [x] `mao plugin list` / `doctor` / `enable <id>` / `disable <id>`。
+- [x] `known_commands` 加入 `plugin`；命令名再审查 CLI 一致性。
+- [x] `config/plugins.yaml` 读写与 `.gitignore`。
+- [x] 针对性测试 + CLI 交互。
+
+### B6.3 完成记录（2026-07-21）
+
+- `run.py` 新增 `plugin` typer 子应用：`list`（已发现插件 + 启用态/能力/权限/来源）、`doctor`（发现+兼容+加载健康，用临时 ToolRegistry/预设注册表做 dry-run，不影响运行中的注册表）、`enable <id>`/`disable <id>`（写 `config/plugins.yaml`）。`_maybe_insert_run_subcommand` 的 `known_commands` 加入 `"plugin"`。
+- 命令名审查：`list/doctor/enable/disable` 与既有子命令风格一致（kebab-case、`--config/-c` 选项）；未发现冲突。
+- `src/plugins/runtime.py`：进程级单例 `get_plugin_manager`/`load_plugins`/`get_plugin_status`/`shutdown_plugins`/`new_plugin_manager`（CLI 子命令用独立实例）。`load_plugins()` 幂等，发现+加载已启用插件到当前 `tool_registry`。
+- 启动接线：`chat_command.py` 在 `load_extensions()` 后 `load_plugins()` 并打印加载/诊断；`app.py` lifespan 在扩展后加载插件、`finally` 中 `shutdown_plugins()` 再 `shutdown_extensions()`。
+- `.gitignore` 新增 `config/plugins.yaml`（与 providers.yaml/workers.yaml 一致，用户本地启用态不入库）。
+- `tests/test_plugin_cli.py` 10 条：help 列子命令、无插件 list/doctor、enable 写配置、enable/disable 往返、list 显示发现插件与启用态/权限、doctor 加载已启用插件、enable 未知 id 提示、运行时单例 load/shutdown 安全。
+- 全量回归 `847 passed, 1 warning`，无回归。B6.1+B6.2 远端 CI `success`（[run 29837884580](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29837884580)）。
 
 ## 4. B6.4 示例插件
 

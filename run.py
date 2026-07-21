@@ -286,10 +286,116 @@ def build_review_section(review) -> str:
     return "\n".join(lines)
 
 
+plugin_app = typer.Typer(help="管理 MAO 插件（发现、诊断、启用、禁用）")
+
+
+class _ThrowawayPresets:
+    """``mao plugin doctor`` 用的临时预设注册表，避免污染真实注册中心。"""
+
+    def __init__(self) -> None:
+        self.presets: dict[str, dict] = {}
+
+    def register_preset(self, key: str, preset: dict) -> None:
+        self.presets[key] = preset
+
+    def unregister_preset(self, key: str) -> None:
+        self.presets.pop(key, None)
+
+
+@plugin_app.command("list")
+def plugin_list(
+    config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
+):
+    """列出已发现的插件及其启用态、能力与权限"""
+    from src.plugins.runtime import new_plugin_manager
+
+    mgr = new_plugin_manager(config_dir)
+    statuses = mgr.list_status()
+    if not statuses:
+        console.print("未发现插件。安装声明 mao.plugins entry point 的包后再试。")
+        return
+    console.print("[bold]已发现插件：[/bold]")
+    for s in statuses:
+        compat = "兼容" if s["api_compatible"] else f"不兼容(API {s['mao_api_version']})"
+        enabled = "已启用" if s["enabled"] else "未启用"
+        console.print(
+            f"  • [bold]{s['id']}[/bold] {s['name']} v{s['version']} "
+            f"[{enabled}] [{compat}]"
+        )
+        if s["capabilities"]:
+            console.print(f"      能力：{', '.join(s['capabilities'])}")
+        if s["permissions"]:
+            console.print(f"      权限：{', '.join(s['permissions'])}")
+        if s["source"]:
+            console.print(f"      来源：{s['source']}")
+
+
+@plugin_app.command("doctor")
+def plugin_doctor(
+    config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
+):
+    """诊断插件发现、兼容与加载健康（不影响运行中的工具注册表）"""
+    from src.plugins.manager import PluginManager
+    from src.tools.registry import ToolRegistry
+
+    mgr = PluginManager(
+        ToolRegistry(), preset_registry=_ThrowawayPresets(), config_dir=config_dir
+    )
+    mgr.discover()
+    result = mgr.load_enabled()
+    console.print(
+        f"发现 {result.discovered}，加载 {result.loaded}，"
+        f"不兼容 {result.rejected_incompatible}，未启用 {result.skipped_disabled}，"
+        f"失败 {result.failed}"
+    )
+    if result.loaded_ids:
+        console.print(f"[green]已加载：{', '.join(result.loaded_ids)}[/green]")
+    for d in result.diagnostics:
+        entry = d.get("entry") or d.get("source", "plugin")
+        console.print(f"  - [yellow]{entry}[/yellow]: {d['message']}；{d['action']}")
+    if not result.diagnostics and result.failed == 0:
+        console.print("[green]插件诊断无异常。[/green]")
+
+
+@plugin_app.command("enable")
+def plugin_enable(
+    plugin_id: str = typer.Argument(..., help="插件 id"),
+    config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
+):
+    """启用一个插件（下次启动 mao 时加载）"""
+    from src.plugins.runtime import new_plugin_manager
+
+    mgr = new_plugin_manager(config_dir)
+    mgr.enable(plugin_id)
+    discovered_ids = {s["id"] for s in mgr.list_status()}
+    if discovered_ids and plugin_id not in discovered_ids:
+        console.print(
+            f"[yellow]已记录启用 {plugin_id}，但当前未发现该插件；安装后将自动加载。[/yellow]"
+        )
+    else:
+        console.print(f"[green]已启用插件 {plugin_id}（下次启动 mao 时加载）[/green]")
+
+
+@plugin_app.command("disable")
+def plugin_disable(
+    plugin_id: str = typer.Argument(..., help="插件 id"),
+    config_dir: str = typer.Option("config", "--config", "-c", help="配置目录"),
+):
+    """禁用一个插件"""
+    from src.plugins.runtime import new_plugin_manager
+
+    mgr = new_plugin_manager(config_dir)
+    mgr.disable(plugin_id)
+    console.print(f"[green]已禁用插件 {plugin_id}[/green]")
+
+
+app.add_typer(plugin_app, name="plugin")
+
+
 def _maybe_insert_run_subcommand(argv: list[str]) -> list[str]:
     """如果没有显式指定子命令，默认插入 run 子命令"""
     known_commands = {
-        "setup", "agent-setup", "chat", "web", "run", "benchmark-agent",
+        "setup", "agent-setup", "chat", "web", "run", "benchmark-agent", "plugin",
         "--help", "-h", "--version",
     }
     if len(argv) > 1 and argv[1] not in known_commands:

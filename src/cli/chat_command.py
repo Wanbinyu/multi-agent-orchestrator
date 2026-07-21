@@ -1234,6 +1234,25 @@ def run_chat_loop(
             )
         if len(diagnostics) > 3:
             console.print(Text("  - 其余问题请在 Web 扩展诊断接口中查看。", style="dim"))
+    # 加载已启用插件（幂等），失败隔离不影响核心功能
+    from src.plugins.runtime import load_plugins
+
+    plugin_result = load_plugins()
+    if plugin_result.loaded:
+        console.print(
+            Text(
+                f"已加载 {plugin_result.loaded} 个插件："
+                f"{', '.join(plugin_result.loaded_ids)}",
+                style="cyan",
+            )
+        )
+    for diagnostic in plugin_result.diagnostics[:3]:
+        console.print(
+            Text(
+                f"  - 插件 {diagnostic.get('entry', '?')}: {diagnostic['message']}",
+                style="yellow",
+            )
+        )
     agent = Agent(gateway, session, memory_store=memory_store)
 
     _print_welcome(session.id, mode_ref[0])

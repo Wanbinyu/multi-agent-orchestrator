@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时加载 Hooks + MCP 工具源"""
+    """启动时加载 Hooks + MCP 工具源 + 已启用插件"""
     from src.tools.extensions import load_extensions, shutdown_extensions
+    from src.plugins.runtime import load_plugins, shutdown_plugins
 
     extension_status = load_extensions()
     app.state.extension_status = extension_status
@@ -35,9 +36,17 @@ async def lifespan(app: FastAPI):
             "see GET /api/diagnostics/extensions",
             len(extension_status["diagnostics"]),
         )
+    plugin_result = load_plugins()
+    app.state.plugin_status = plugin_result.to_summary()
+    if plugin_result.diagnostics:
+        logger.warning(
+            "MAO plugin loader reported %d issues; see GET /api/plugins",
+            len(plugin_result.diagnostics),
+        )
     try:
         yield
     finally:
+        shutdown_plugins()
         shutdown_extensions()
 
 

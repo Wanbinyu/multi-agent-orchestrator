@@ -34,6 +34,7 @@ env/
 *.env
 config/providers.yaml
 config/workers.yaml
+config/plugins.yaml
 
 # IDE
 .vscode/
