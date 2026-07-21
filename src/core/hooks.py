@@ -49,6 +49,18 @@ class HookRegistry:
     def add_post(self, fn: PostToolHook) -> None:
         self._post.append(fn)
 
+    def remove_pre(self, fn: PreToolHook) -> bool:
+        """Remove a pre-hook by identity. Returns True if it was present."""
+        before = len(self._pre)
+        self._pre = [h for h in self._pre if h is not fn]
+        return len(self._pre) != before
+
+    def remove_post(self, fn: PostToolHook) -> bool:
+        """Remove a post-hook by identity. Returns True if it was present."""
+        before = len(self._post)
+        self._post = [h for h in self._post if h is not fn]
+        return len(self._post) != before
+
     def clear(self) -> None:
         self._pre.clear()
         self._post.clear()

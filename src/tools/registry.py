@@ -82,6 +82,21 @@ class ToolRegistry:
                 except Exception:
                     pass
 
+    def unregister_tool(self, name: str) -> bool:
+        """Remove a locally registered tool by name. Returns True if it existed.
+
+        Used by the plugin manager to roll back a failed plugin load. Does not
+        affect tools contributed by external ``ToolSource`` instances.
+        """
+        return self._tools.pop(name, None) is not None
+
+    def remove_source(self, source: ToolSource) -> None:
+        """Remove a specific external tool source without shutting it down.
+
+        The caller is responsible for calling ``source.shutdown()`` if needed.
+        """
+        self._sources = [s for s in self._sources if s is not source]
+
     def register(
         self,
         name: str,
