@@ -60,3 +60,17 @@ def test_all_presets_have_required_fields():
         assert preset["type"] in ("anthropic", "openai")
         assert preset["env_var"]
         # 自定义 provider 允许空 base_url 和空 models
+
+
+def test_preset_models_are_sourced_from_catalog():
+    """CLI 预设的模型数据必须来自 catalog.py 单一真值源，不得硬编码漂移。"""
+    from src.models.catalog import BUILTIN_MODELS
+
+    for key, preset in PROVIDER_PRESETS.items():
+        for alias, model_data in preset.get("models", {}).items():
+            # 自定义 provider 可能在 catalog 之外追加模型，跳过未注册别名。
+            if alias not in BUILTIN_MODELS:
+                continue
+            assert model_data == BUILTIN_MODELS[alias].to_model_data(), (
+                f"preset '{key}' model '{alias}' 漂离 catalog 单一真值源"
+            )

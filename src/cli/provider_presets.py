@@ -71,11 +71,10 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "base_url": "https://ark.cn-beijing.volces.com/api/coding",
         "env_var": "ARK_API_KEY",
         "models": {
-            "glm-ark": {
-                "model_id": "ark-code-latest",
-                "input_price_per_1m": 1.0,
-                "output_price_per_1m": 1.0,
-            },
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in (
+                "glm-ark",
+            )
         },
     },
     "custom_anthropic": {
