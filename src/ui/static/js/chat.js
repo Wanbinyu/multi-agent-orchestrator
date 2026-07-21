@@ -82,8 +82,13 @@
     btnReportToday: document.getElementById("btn-report-today"),
     tabContext: document.getElementById("tab-context"),
     tabFiles: document.getElementById("tab-files"),
+    tabPlugins: document.getElementById("tab-plugins"),
     rightbarContextPanel: document.getElementById("rightbar-context-panel"),
     rightbarFilesPanel: document.getElementById("rightbar-files-panel"),
+    rightbarPluginsPanel: document.getElementById("rightbar-plugins-panel"),
+    pluginList: document.getElementById("plugin-list"),
+    pluginLoadSummary: document.getElementById("plugin-load-summary"),
+    btnRefreshPlugins: document.getElementById("btn-refresh-plugins"),
     projectRootInput: document.getElementById("project-root-input"),
     projectIncludeHidden: document.getElementById("project-include-hidden"),
     btnRefreshTree: document.getElementById("btn-refresh-tree"),
@@ -786,15 +791,68 @@
   }
 
   function setRightbarTab(tab) {
-    const showFiles = tab === "files";
-    state.rightbarTab = showFiles ? "files" : "context";
-    els.tabContext?.classList.toggle("active", !showFiles);
-    els.tabFiles?.classList.toggle("active", showFiles);
-    els.tabContext?.setAttribute("aria-selected", String(!showFiles));
-    els.tabFiles?.setAttribute("aria-selected", String(showFiles));
-    els.rightbarContextPanel?.classList.toggle("hidden", showFiles);
-    els.rightbarFilesPanel?.classList.toggle("hidden", !showFiles);
-    if (showFiles && !state.projectTreeLoaded) loadProjectTree();
+    const tabs = ["context", "files", "plugins"];
+    state.rightbarTab = tabs.includes(tab) ? tab : "context";
+    const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    tabs.forEach((t) => {
+      const isActive = t === state.rightbarTab;
+      const tabBtn = els["tab" + cap(t)];
+      const panel = els["rightbar" + cap(t) + "Panel"];
+      tabBtn?.classList.toggle("active", isActive);
+      tabBtn?.setAttribute("aria-selected", String(isActive));
+      panel?.classList.toggle("hidden", !isActive);
+    });
+    if (state.rightbarTab === "files" && !state.projectTreeLoaded) loadProjectTree();
+    if (state.rightbarTab === "plugins") loadPlugins();
+  }
+
+  function renderPlugins(statuses, loadSummary) {
+    if (!els.pluginList) return;
+    if (!statuses || statuses.length === 0) {
+      els.pluginList.innerHTML = '<div class="empty-item">未发现插件。安装声明 mao.plugins entry point 的包后再试。</div>';
+    } else {
+      els.pluginList.innerHTML = statuses
+        .map((s) => {
+          const compat = s.api_compatible
+            ? '<span class="plugin-badge plugin-badge-ok">兼容</span>'
+            : `<span class="plugin-badge plugin-badge-warn">不兼容(API ${s.mao_api_version})</span>`;
+          const enabled = s.enabled
+            ? '<span class="plugin-badge plugin-badge-ok">已启用</span>'
+            : '<span class="plugin-badge plugin-badge-muted">未启用</span>';
+          const caps = s.capabilities && s.capabilities.length
+            ? `<div class="plugin-meta">能力：${s.capabilities.join("、")}</div>`
+            : "";
+          const perms = s.permissions && s.permissions.length
+            ? `<div class="plugin-meta">权限：${s.permissions.join("、")}</div>`
+            : "";
+          const source = s.source ? `<div class="plugin-meta">来源：${s.source}</div>` : "";
+          return `<div class="plugin-item">
+            <div class="plugin-item-head"><strong>${s.id}</strong> ${s.name} v${s.version} ${enabled} ${compat}</div>
+            ${caps}${perms}${source}
+          </div>`;
+        })
+        .join("");
+    }
+    if (els.pluginLoadSummary) {
+      if (loadSummary) {
+        els.pluginLoadSummary.textContent =
+          `发现 ${loadSummary.discovered}，加载 ${loadSummary.loaded}，` +
+          `不兼容 ${loadSummary.rejected_incompatible}，失败 ${loadSummary.failed}`;
+      } else {
+        els.pluginLoadSummary.textContent = "";
+      }
+    }
+  }
+
+  async function loadPlugins() {
+    try {
+      const data = await api("/api/plugins");
+      renderPlugins(data.statuses || [], data.load || null);
+    } catch (err) {
+      if (els.pluginList) {
+        els.pluginList.innerHTML = '<div class="empty-item">插件列表加载失败。</div>';
+      }
+    }
   }
 
   function setProjectTreeStatus(message, isError = false) {
@@ -1795,6 +1853,8 @@
   els.btnCloseRightbar?.addEventListener("click", () => setRightbarOpen(false));
   els.tabContext?.addEventListener("click", () => setRightbarTab("context"));
   els.tabFiles?.addEventListener("click", () => setRightbarTab("files"));
+  els.tabPlugins?.addEventListener("click", () => setRightbarTab("plugins"));
+  els.btnRefreshPlugins?.addEventListener("click", loadPlugins);
   els.btnRefreshTree?.addEventListener("click", loadProjectTree);
   els.projectIncludeHidden?.addEventListener("change", loadProjectTree);
   els.projectRootInput?.addEventListener("keydown", (event) => {

@@ -44,6 +44,22 @@ class TestPages:
         data = res.json()
         assert set(data) == {"hooks", "mcp_sources", "diagnostics"}
 
+    def test_plugins_endpoint_returns_status(self, client):
+        res = client.get("/api/plugins")
+        assert res.status_code == 200
+        data = res.json()
+        assert "statuses" in data
+        assert isinstance(data["statuses"], list)
+        # load 可为 None（未加载）或摘要 dict
+        assert "load" in data
+
+    def test_chat_page_exposes_plugins_tab(self, client):
+        res = client.get("/chat")
+        assert res.status_code == 200
+        body = res.text
+        assert "tab-plugins" in body
+        assert "rightbar-plugins-panel" in body
+
     def test_clean_directory_starts_configuration_ui(self, tmp_path, monkeypatch):
         from src.tools import extensions
 

@@ -85,9 +85,19 @@
 
 ## 5. B6.5 Web 可见性
 
-- [ ] `/api/plugins` 端点（清单 + 启用态 + 权限）。
-- [ ] chat.html 只读插件/权限展示，320/390/1280px 无溢出。
-- [ ] 针对性测试。
+- [x] `/api/plugins` 端点（清单 + 启用态 + 权限）。
+- [x] chat.html 只读插件/权限展示，320/390/1280px 无溢出。
+- [x] 针对性测试。
+
+### B6.5 完成记录（2026-07-21）
+
+- `src/ui/app.py` 新增 `GET /api/plugins`，返回 `get_plugin_status()`（`statuses` 列表 + `load` 摘要）；与 `/api/diagnostics/extensions` 一样不影响 `/health`。
+- `chat.html` 右栏新增「插件」标签 + `rightbar-plugins-panel`（只读）：插件 id/名称/版本/启用/兼容徽章/能力/权限/来源，加载摘要，以及"可信本机代码、权限仅作同意展示"提示；`chat.js` 缓存版本升至 `20260721-plugins1`。
+- `chat.js`：`setRightbarTab` 重构为通用 3 标签循环；新增 `loadPlugins()`（fetch `/api/plugins` -> `renderPlugins`）；`tab-plugins`/`btn-refresh-plugins` 点击监听。
+- `style.css`：`.rightbar-tabs` 网格由 2 列改 3 列（容纳「上下文/文件/插件」短标签，窄视口不溢出）；新增 `.plugin-item/.plugin-badge/.plugin-meta/.plugin-hint` 等样式，`plugin-item-head` 用 `flex-wrap`。
+- 视口：3 个 2 字短标签在 3 列网格于 320/390/1280px 均可容纳（结构 + CSS 验证，与 B5.5 一致未跑 MAO UI Playwright）。
+- `tests/test_ui.py` 新增 2 条：`/api/plugins` 返回 `statuses` 列表与 `load`；`/chat` 页面含 `tab-plugins`/`rightbar-plugins-panel`。
+- 全量回归 `853 passed, 1 warning`，无回归。B6.4 远端 CI `success`（[run 29839280653](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29839280653)）。
 
 ## 6. B6.6 发布收口
 

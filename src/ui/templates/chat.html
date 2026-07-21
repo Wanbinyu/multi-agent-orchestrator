@@ -87,6 +87,7 @@
       <div class="rightbar-tabs" role="tablist" aria-label="工作区视图">
         <button id="tab-context" class="rightbar-tab active" type="button" role="tab" aria-selected="true" aria-controls="rightbar-context-panel">上下文</button>
         <button id="tab-files" class="rightbar-tab" type="button" role="tab" aria-selected="false" aria-controls="rightbar-files-panel">文件</button>
+        <button id="tab-plugins" class="rightbar-tab" type="button" role="tab" aria-selected="false" aria-controls="rightbar-plugins-panel">插件</button>
       </div>
 
       <div id="rightbar-context-panel" class="rightbar-panel" role="tabpanel" aria-labelledby="tab-context">
@@ -200,6 +201,20 @@
           <pre id="file-preview-content" class="file-preview-content"></pre>
         </section>
       </div>
+
+      <div id="rightbar-plugins-panel" class="rightbar-panel hidden" role="tabpanel" aria-labelledby="tab-plugins">
+        <div class="rightbar-section">
+          <div class="rightbar-section-title">
+            <span>已发现插件</span>
+            <button id="btn-refresh-plugins" class="btn btn-icon" type="button" title="刷新" aria-label="刷新插件列表">🔄</button>
+          </div>
+          <div id="plugin-list" class="plugin-list">
+            <div class="empty-item">切换到此标签后加载…</div>
+          </div>
+          <div id="plugin-load-summary" class="plugin-load-summary"></div>
+          <p class="plugin-hint">Python 插件为可信本机代码，与 MAO 进程同权限；权限仅作同意展示，不构成沙箱。用 <code>mao plugin enable &lt;id&gt;</code> 启用。</p>
+        </div>
+      </div>
     </aside>
     <button id="chat-backdrop" class="chat-backdrop" type="button" aria-label="关闭工作区面板"></button>
   </main>
@@ -219,6 +234,6 @@
     </form>
   </dialog>
 
-  <script src="/static/js/chat.js?v=20260720-adversarial1"></script>
+  <script src="/static/js/chat.js?v=20260721-plugins1"></script>
 </body>
 </html>

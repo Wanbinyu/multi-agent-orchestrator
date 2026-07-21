@@ -923,7 +923,7 @@ body::before {
 
 .rightbar-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-height: 34px;
   padding: 3px;
   border: 1px solid var(--panel-border);
@@ -2480,4 +2480,73 @@ body::before {
     grid-column: 2;
     justify-self: end;
   }
+}
+
+/* 插件面板（只读可见） */
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.plugin-item {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  padding: 0.45rem 0.5rem;
+  background: var(--surface-2, rgba(0, 0, 0, 0.02));
+}
+
+.plugin-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+}
+
+.plugin-meta {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--text-muted, #6b7280);
+  word-break: break-all;
+}
+
+.plugin-badge {
+  display: inline-block;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.plugin-badge-ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+
+.plugin-badge-warn {
+  background: rgba(234, 179, 8, 0.18);
+  color: #a16207;
+}
+
+.plugin-badge-muted {
+  background: rgba(107, 114, 128, 0.15);
+  color: #6b7280;
+}
+
+.plugin-load-summary {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--text-muted, #6b7280);
+}
+
+.plugin-hint {
+  margin-top: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--text-muted, #6b7280);
+  line-height: 1.4;
+}
+
+.plugin-hint code {
+  word-break: break-all;
 }

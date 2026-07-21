@@ -86,3 +86,11 @@ async def extension_diagnostics() -> dict:
     from src.tools.extensions import get_extension_status
 
     return get_extension_status()
+
+
+@app.get("/api/plugins")
+async def plugins_status() -> dict:
+    """已发现插件的清单、启用态、能力、权限与加载摘要（只读）。"""
+    from src.plugins.runtime import get_plugin_status
+
+    return get_plugin_status()
