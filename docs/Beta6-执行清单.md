@@ -39,10 +39,20 @@
 
 ## 2. B6.2 插件管理器
 
-- [ ] `src/plugins/manager.py`：`PluginManager` discover（entry_points `mao.plugins`）/ 版本拒绝 / 启用态（`config/plugins.yaml`）/ 隔离加载 / shutdown / 诊断。
-- [ ] 失败插件不阻塞其他插件与无插件启动。
-- [ ] 与现有 `load_extensions()` 并存，无插件时零行为变化。
-- [ ] 针对性测试（隔离、无插件、重复/幂等）。
+- [x] `src/plugins/manager.py`：`PluginManager` discover（entry_points `mao.plugins`）/ 版本拒绝 / 启用态（`config/plugins.yaml`）/ 隔离加载 / shutdown / 诊断。
+- [x] 失败插件不阻塞其他插件与无插件启动。
+- [x] 与现有 `load_extensions()` 并存（独立模块，无插件时零行为变化；启动接线在 B6.3）。
+- [x] 针对性测试（隔离、无插件、重复/幂等）。
+
+### B6.2 完成记录（2026-07-21）
+
+- `src/plugins/manager.py`：`PluginManager` 通过 `importlib.metadata.entry_points(group="mao.plugins")` 发现插件（支持注入 finder 便于测试），逐个 `ep.load()` 调工厂得 `Plugin`；duck-type 校验 manifest/load/shutdown；同 id 去重。
+- 启用态：`config/plugins.yaml`（`enabled`/`disabled`，默认全关）；`enable/disable/is_enabled` 读写回；`disabled` 覆盖 `enabled`。
+- 加载：`load_enabled()` 幂等；不兼容 API 版本拒绝并记 `plugin_api_incompatible` 诊断；未启用跳过；已启用逐个 `plugin.load(ctx)`，失败则 `ctx.rollback()` 清半加载状态并记 `plugin_load_error`，不阻塞其他插件或无插件启动。
+- `shutdown()` 逐个 `plugin.shutdown()` + `ctx.rollback()` 注销贡献；`list_status()` 供 CLI/Web 展示 id/name/version/api 版本/兼容/启用/能力/权限/来源。
+- 诊断复用 `extension_diagnostics` 有界脱敏（source=`plugin`）。
+- `tests/test_plugin_manager.py` 15 条：发现（兼容/不兼容/去重/坏 entry point 隔离）、启用门控、不兼容拒绝、失败插件不阻塞其他且回滚半加载、无插件零变化、幂等加载、shutdown 注销工具与关闭工具源、enable/disable 往返、disable 覆盖 enable、list_status。
+- 全量回归 `837 passed, 1 warning`，无回归。
 
 ## 3. B6.3 CLI `mao plugin`
 
