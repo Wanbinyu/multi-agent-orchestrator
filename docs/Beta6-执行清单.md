@@ -105,7 +105,7 @@
 - [x] 全量回归、pip-audit、compileall/JS/diff、干净安装通过。
 - [x] CHANGELOG、Release Notes、版本号 `0.1.0b6`、升级说明完成。
 - [x] 远端 CI 全绿（含 gitleaks）（[run 29841673789](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29841673789)）。
-- [ ] Tag 和 GitHub pre-release 仍需所有者单独确认。
+- [x] Tag 和 GitHub pre-release 已由所有者确认并创建（`v0.1.0-beta.6` 指向 `6de8531`）。
 
 ### B6.6 完成记录（2026-07-21）
 
@@ -115,8 +115,8 @@
 - 验证：全量回归 `853 passed, 1 warning`；`pip-audit -r requirements.txt` 无已知漏洞；`python -m compileall`、`node --check`（app.js/chat.js）、`git diff --check` 通过；`verify_distribution.py` 通过。
 - 安全扫描边界：gitleaks 8.24.3 本地 Windows 仍无法下载二进制，权威扫描为远端 CI 作业；[run 29841673789](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29841673789) 的 security job（pip-audit、gitleaks）通过。
 - 真实 Provider 调用：无人值守验收期间未调用。
-- Tag 和 GitHub pre-release：不自动执行，待所有者确认。
+- Tag 和 GitHub pre-release：已由所有者确认并创建。`v0.1.0-beta.6` 指向 `6de8531`，GitHub pre-release 使用仓库内 `RELEASE_NOTES_v0.1.0-beta.6.md`。
 
 ## 7. 当前下一步
 
-B6.1-B6.6 已完成本地发布收口。下一步等所有者确认 `v0.1.0-beta.6` Tag 和 GitHub pre-release（不自动执行），确认后按 `v0.2.0` 进入条件推进（外部用户、可复现真实基准、Plugin API 兼容策略）。B5.4 真实多模型评测仍单独暂停。
+B6.1-B6.6 完成，`v0.1.0-beta.6` 已发布（Tag + GitHub pre-release）。beta.3-beta.6 核心契约落地。下一步按 `v0.2.0` 进入条件推进（外部用户、可复现真实基准、Plugin API 兼容策略）。B5.4 真实多模型评测仍单独暂停，只有所有者重新给出累计次数边界后才允许继续 private smoke。
