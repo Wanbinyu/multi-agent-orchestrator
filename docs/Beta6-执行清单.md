@@ -101,12 +101,22 @@
 
 ## 6. B6.6 发布收口
 
-- [ ] `verify_distribution.py` 含示例插件发现/启用/执行/关闭。
-- [ ] 全量回归、pip-audit、compileall/JS/diff、干净安装通过。
-- [ ] CHANGELOG、Release Notes、版本号 `0.1.0b6`、升级说明完成。
+- [x] `verify_distribution.py` 含示例插件发现/启用/执行/关闭。
+- [x] 全量回归、pip-audit、compileall/JS/diff、干净安装通过。
+- [x] CHANGELOG、Release Notes、版本号 `0.1.0b6`、升级说明完成。
 - [ ] 远端 CI 全绿（含 gitleaks）。
 - [ ] Tag 和 GitHub pre-release 仍需所有者单独确认。
 
+### B6.6 完成记录（2026-07-21）
+
+- `scripts/verify_distribution.py` 扩展：构建 MAO wheel/sdist 与示例插件 wheel（独立 example-dist 目录），`twine check` 三者；干净 venv 安装 MAO 后再装示例插件，`mao plugin list` 见到 `mao-wordcount`，`mao plugin enable` 写 `config/plugins.yaml`，再以运行时单例 `load_plugins` -> 执行 `word_count`（`字符数：11`）-> `shutdown_plugins`（工具注销）端到端验证发现/启用/执行/关闭。
+- 版本号 `0.1.0b5` -> `0.1.0b6`（`src/version.py`、`pyproject.toml`、`tests/test_version.py`）；`python run.py --version` 输出 `MAO 0.1.0b6`。
+- 文档：CHANGELOG 新增 `[0.1.0-beta.6] - 2026-07-21` 并把 `[Unreleased]` 指向 `v0.2.0` 进入条件；新增 `docs/RELEASE_NOTES_v0.1.0-beta.6.md`；README 徽章与状态段、`项目进度与关键操作.md` 当前状态/未完成/继续入口更新。
+- 验证：全量回归 `853 passed, 1 warning`；`pip-audit -r requirements.txt` 无已知漏洞；`python -m compileall`、`node --check`（app.js/chat.js）、`git diff --check` 通过；`verify_distribution.py` 通过。
+- 安全扫描边界：gitleaks 8.24.3 本地 Windows 仍无法下载二进制，权威扫描为远端 CI 作业，推送后记录。
+- 真实 Provider 调用：无人值守验收期间未调用。
+- Tag 和 GitHub pre-release：不自动执行，待所有者确认。
+
 ## 7. 当前下一步
 
-从 B6.1 Plugin API v0 契约开始：定义 manifest、context、Plugin 协议与 API 版本兼容判定，配套单元测试。
+B6.1-B6.6 已完成本地发布收口。下一步等所有者确认 `v0.1.0-beta.6` Tag 和 GitHub pre-release（不自动执行），确认后按 `v0.2.0` 进入条件推进（外部用户、可复现真实基准、Plugin API 兼容策略）。B5.4 真实多模型评测仍单独暂停。

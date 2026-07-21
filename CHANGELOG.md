@@ -4,7 +4,18 @@ All notable changes are documented here. MAO follows Semantic Versioning; beta r
 
 ## [Unreleased]
 
-Next target: `v0.1.0-beta.6` (Plugin API v0 and release wrap-up).
+Next target: `v0.2.0` entry conditions (external users, reproducible real benchmarks, and a Plugin API compatibility policy).
+
+## [0.1.0-beta.6] - 2026-07-21
+
+### Added
+
+- Plugin API v0 contract: `PluginManifest` (id/name/version/mao_api_version + capability and permission whitelists), `PluginContext` (registers tools, tool sources, hooks, provider presets and model capabilities, with rollback for isolated load-failure recovery), the `Plugin` protocol, and `MAO_PLUGIN_API_VERSION="0.1"` with `is_supported_api_version`. Incompatible API versions are explicitly rejected.
+- Plugin manager discovers plugins via the standard `mao.plugins` entry-point group (no workspace scanning), gates them on explicit user enable state in `config/plugins.yaml` (default off), and loads each enabled plugin in its own try/except. A failed plugin is rolled back and reported as a diagnostic without blocking other plugins or a pluginless startup; `shutdown` unregisters each plugin's contributions.
+- `mao plugin list/doctor/enable/disable` CLI. `list` shows discovered plugins with enable state, capabilities, permissions and source; `doctor` dry-runs discovery and load into throwaway registries; `enable`/`disable` write `config/plugins.yaml`. Plugin loading is wired into CLI chat and Web startup alongside Hooks/MCP.
+- Example plugin `examples/plugins/mao_wordcount_plugin`: an independent installable package declaring a `mao.plugins` entry point, contributing a read-only `word_count` tool, validating discover -> enable -> load -> execute -> shutdown.
+- Web `GET /api/plugins` and a read-only "插件" tab in the chat rightbar expose plugin list, enable state, capabilities, permissions and load summary.
+- `ToolRegistry.unregister_tool/remove_source` and `HookRegistry.remove_pre/remove_post` so a failed or disabled plugin can be rolled back without affecting other contributions.
 
 ## [0.1.0-beta.5] - 2026-07-21
 

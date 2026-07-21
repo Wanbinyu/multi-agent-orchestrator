@@ -170,6 +170,8 @@ Reviewer 默认使用 `restricted` 输入模式：只读取原始需求、计划
 
 可选 Hook/MCP 扩展使用进程内幂等加载器。配置缺失时静默跳过；单个坏条目不会阻止合法条目或核心启动。加载结果最多保留 10 条脱敏诊断，只包含稳定错误码、固定说明、操作建议、配置文件名、条目索引和异常类型，不保留异常文本、完整路径、命令参数或环境变量。CLI 启动时显示简短摘要，Web 通过 `/api/diagnostics/extensions` 提供独立状态；可选扩展失败不会让 `/health` 变为不健康。
 
+Plugin API v0（`src/plugins/`）把工具、ToolSource、Hooks、Provider 预设与模型能力数据统一为可诊断、可版本约束、必须显式启用的扩展接口。插件经标准 Python entry point 组 `mao.plugins` 发现（不扫描工作区），由 `PluginManifest` 声明 id/版本/`mao_api_version`/能力/权限；默认关闭，用户在 `config/plugins.yaml` 显式启用后由 `PluginManager` 在启动时隔离加载。`PluginContext` 记录每个插件的全部贡献，加载失败或禁用时 `rollback` 撤销，不影响其他插件或无插件启动；`shutdown` 注销贡献并关闭资源。`MAO_PLUGIN_API_VERSION="0.1"`，不兼容版本被拒绝。Python 插件为可信本机代码，与 MAO 进程同权限，权限仅作同意展示、不构成沙箱；外部工具仍优先 MCP 进程边界。CLI `mao plugin list/doctor/enable/disable` 与 Web `GET /api/plugins` + chat「插件」只读标签暴露插件清单与权限。
+
 权限有两层：
 
 - 会话模式：`auto`、`approve`、`readonly`。
@@ -191,6 +193,9 @@ Reviewer 默认使用 `restricted` 输入模式：只读取原始需求、计划
 - `src/core/hooks.py`
 - `src/core/permission_rules.py`
 - `src/core/project_rules.py`
+- `src/plugins/api.py`
+- `src/plugins/manager.py`
+- `src/plugins/runtime.py`
 
 ## 8. 会话、上下文与记忆
 

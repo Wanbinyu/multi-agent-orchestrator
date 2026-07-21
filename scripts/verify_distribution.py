@@ -127,7 +127,7 @@ def _wait_for_json(url: str, timeout: float = 30.0) -> dict:
     raise RuntimeError(f"Timed out waiting for {url}: {type(last_error).__name__}")
 
 
-def _smoke_installed_wheel(wheel: Path, temp_root: Path) -> None:
+def _smoke_installed_wheel(wheel: Path, temp_root: Path, example_wheel: Path) -> None:
     venv_dir = temp_root / "venv"
     venv.EnvBuilder(with_pip=True, system_site_packages=False).create(venv_dir)
     python = _entrypoint(venv_dir, "python")
@@ -181,6 +181,43 @@ def _smoke_installed_wheel(wheel: Path, temp_root: Path) -> None:
             process.kill()
             process.wait(timeout=5)
 
+    _smoke_example_plugin(mao, python, clean_dir, env, example_wheel)
+
+
+def _smoke_example_plugin(mao: Path, python: Path, clean_dir: Path, env: dict, example_wheel: Path) -> None:
+    """在干净 wheel 环境中验证示例插件发现、启用、执行、关闭。"""
+    _run([str(python), "-m", "pip", "install", "--force-reinstall", "--no-deps", str(example_wheel)])
+
+    # 发现：mao plugin list 见到 mao-wordcount
+    listing = _run([str(mao), "plugin", "list"], cwd=clean_dir, env=env)
+    assert "mao-wordcount" in listing.stdout, listing.stdout
+
+    # 启用：写 config/plugins.yaml
+    config_dir = clean_dir / "config"
+    _run(
+        [str(mao), "plugin", "enable", "mao-wordcount", "--config", str(config_dir)],
+        cwd=clean_dir,
+        env=env,
+    )
+    assert (config_dir / "plugins.yaml").is_file()
+
+    # 加载、执行、关闭：通过运行时单例在已安装环境中端到端验证
+    snippet = (
+        "from src.plugins.runtime import load_plugins, shutdown_plugins\n"
+        "from src.tools.registry import tool_registry\n"
+        "result = load_plugins()\n"
+        "assert result.loaded == 1, result.to_summary()\n"
+        "assert 'word_count' in tool_registry.list_tools()\n"
+        "out = tool_registry.execute('word_count', {'text': 'hello world'})\n"
+        "assert out.success, out\n"
+        "assert '字符数：11' in out.output, out.output\n"
+        "shutdown_plugins()\n"
+        "assert 'word_count' not in tool_registry.list_tools()\n"
+        "print('PLUGIN_SMOKE_OK')\n"
+    )
+    result = _run([str(python), "-c", snippet], cwd=clean_dir, env=env)
+    assert "PLUGIN_SMOKE_OK" in result.stdout, result.stdout + result.stderr
+
 
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="mao-dist-") as temp:
@@ -190,14 +227,21 @@ def main() -> None:
             [sys.executable, "-m", "build", "--no-isolation", "--outdir", str(dist_dir)],
             cwd=ROOT,
         )
+        example_plugin_dir = ROOT / "examples" / "plugins" / "mao_wordcount_plugin"
+        example_dist = temp_root / "example-dist"
+        _run(
+            [sys.executable, "-m", "build", "--no-isolation", "--outdir", str(example_dist)],
+            cwd=example_plugin_dir,
+        )
         wheel = next(dist_dir.glob("*.whl"))
         sdist = next(dist_dir.glob("*.tar.gz"))
+        example_wheel = next(example_dist.glob("*.whl"))
         _assert_archive_contract(wheel, sdist)
-        _run([sys.executable, "-m", "twine", "check", str(wheel), str(sdist)])
-        _smoke_installed_wheel(wheel, temp_root)
+        _run([sys.executable, "-m", "twine", "check", str(wheel), str(sdist), str(example_wheel)])
+        _smoke_installed_wheel(wheel, temp_root, example_wheel)
     print(
         "Distribution acceptance passed: archives, twine metadata, clean CLI, "
-        "and Web health are valid."
+        "Web health, and example plugin discovery/enable/execute/shutdown are valid."
     )
 
 

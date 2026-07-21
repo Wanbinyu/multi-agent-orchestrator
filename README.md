@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB)
-![Status](https://img.shields.io/badge/status-v0.1.0--beta.5-2ea44f)
+![Status](https://img.shields.io/badge/status-v0.1.0--beta.6-2ea44f)
 
 MAO 面向需要接入多个模型服务的开发者：它在 CLI 和 WebUI 中执行工程任务，并用明确的读写边界、工具证据、验证门和有界 Worker 协作约束模型行为。核心目标不是单纯增加并发，而是在选择不同模型能力与成本的同时，让使用者知道系统做了什么、为什么能结束、还有哪些风险。
 
-当前公开版本为 [`v0.1.0-beta.5`](https://github.com/Wanbinyu/multi-agent-orchestrator/releases/tag/v0.1.0-beta.5)；主分支开始进入 `beta.6` 的 Plugin API 与收口阶段。它适合在可信本机和可审查项目中试用，不是 Claude Code、Codex 或容器沙箱的完整替代品。
+当前公开版本为 [`v0.1.0-beta.6`](https://github.com/Wanbinyu/multi-agent-orchestrator/releases/tag/v0.1.0-beta.6)；beta.3-beta.6 的核心契约均已落地，下一步按 v0.2.0 进入条件推进。它适合在可信本机和可审查项目中试用，不是 Claude Code、Codex 或容器沙箱的完整替代品。
 
 ## 为什么做 MAO
 
@@ -230,7 +230,7 @@ MAO 会从目标项目按层级加载 `AGENTS.md`、`CLAUDE.md`、`.mao/rules/*.
 
 后续上下文能力将按“模型窗口真值 → 动态安全预算 → 分层压缩 → 持久项目上下文 → 长任务基准”推进，详见 [`docs/上下文扩展与长任务稳定性计划.md`](docs/上下文扩展与长任务稳定性计划.md)。在上游限制未经确认前，默认预算保持 32K。
 
-公开版 `v0.1.0-beta.5` 已完成可复现工程基准、执行深度合同、可解释模型路由、受控多模型基准入口与默认关闭的对抗测试；Windows/Ubuntu、Python 3.11/3.12 和安全 CI 全部通过。B5.1-B5.3 与 B5.5 已完成离线验收，B5.4 的三策略离线合同、无交互执行入口和 Harbor adapter 也已就绪；真实多模型对比因累计授权已耗尽而暂停，需所有者重新给出次数与费用边界后才恢复。后续版本范围见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)，评测手册见 [`docs/B5.4-真实能力评测操作手册.md`](docs/B5.4-真实能力评测操作手册.md)。
+公开版 `v0.1.0-beta.6` 已完成受控 Plugin API v0：通过 `mao.plugins` entry point 发现插件、默认关闭需显式启用、API 版本约束、加载失败隔离、`mao plugin list/doctor/enable/disable`、示例插件与 Web 可见性；Windows/Ubuntu、Python 3.11/3.12 和安全 CI 全部通过。beta.3-beta.5 的 Provider 可信接入、工程透明度、会话恢复、分层压缩、项目索引、模型路由、可复现基准与对抗测试均已落地。真实多模型对比因累计授权已耗尽而暂停，需所有者重新给出次数与费用边界后才恢复。插件开发见 `examples/plugins/mao_wordcount_plugin`，版本范围见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)。
 
 B5 的公开离线合同可直接运行 `python scripts/benchmark_engineering.py`。它在隔离工作区对六类程序化任务分别执行固定单模型、自动路由和多模型 fixture 策略三次，共 54 条结果，全程不读取 Key、不调用 Provider；输出属于合成合同数据，不代表真实模型效果。
 
