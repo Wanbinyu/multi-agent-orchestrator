@@ -128,7 +128,7 @@
 - [x] 全量测试、安全扫描、分发验收和干净安装通过。
 - [x] 基准任务来源、生成方式、运行命令和结果可公开复现。
 - [x] CHANGELOG、Release Notes、版本号和升级说明完成。
-- [ ] Tag 和 GitHub pre-release 仍需所有者单独确认。
+- [x] Tag 和 GitHub pre-release 已由所有者确认并创建（`v0.1.0-beta.5` 指向 `6f95f27`）。
 
 ### B5.6 完成记录（2026-07-21）
 
@@ -140,8 +140,8 @@
 - 安全扫描边界：gitleaks 8.24.3 在本地 Windows 无法下载二进制（auto 模式拒绝外部下载），权威密钥扫描为远端 CI 作业，已在 [run 29829436563](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29829436563) 通过。
 - 复核中发现 `cbcf056`（B5.5）远端 CI 实际失败但此前未记录：`build/` gitignore 规则误藏基准 `tasks/build/` 夹具，文件未提交导致 CI 失败而本地测试通过。`737ac8e` 将规则锚定为 `/build/` 并补齐 `tasks/build/project/{README.md,verify.py}` 后修复，远端 CI 全绿（Windows/Ubuntu × Python 3.11/3.12 与 security job）。
 - 真实 Provider 调用：无人在场验收期间未调用付费 Provider；此前的 `multi-model` private live smoke 不计入公开发布，也不用于声明任何模型优势。
-- Tag 和 GitHub pre-release：不自动执行，待所有者确认。
+- Tag 和 GitHub pre-release：已由所有者确认并创建。`v0.1.0-beta.5` 指向 `6f95f27`，GitHub pre-release 使用仓库内 `RELEASE_NOTES_v0.1.0-beta.5.md`。
 
 ## 7. 当前下一步
 
-B5.6 发布收口已在本地完成。下一步等所有者确认 `v0.1.0-beta.5` Tag 和 GitHub pre-release（不自动执行），确认后进入 `beta.6` Plugin API v0。B5.4 真实 `multi-model` 评测仍单独暂停；只有所有者重新给出新的累计次数边界后，才允许继续 private smoke。详见 [`B5.4-真实能力评测操作手册.md`](B5.4-真实能力评测操作手册.md)。
+B5.6 发布收口完成，`v0.1.0-beta.5` 已发布（Tag + GitHub pre-release）。下一步进入 `beta.6` Plugin API v0。B5.4 真实 `multi-model` 评测仍单独暂停；只有所有者重新给出新的累计次数边界后，才允许继续 private smoke。详见 [`B5.4-真实能力评测操作手册.md`](B5.4-真实能力评测操作手册.md)。
