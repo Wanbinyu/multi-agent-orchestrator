@@ -104,7 +104,7 @@
 - [x] `verify_distribution.py` 含示例插件发现/启用/执行/关闭。
 - [x] 全量回归、pip-audit、compileall/JS/diff、干净安装通过。
 - [x] CHANGELOG、Release Notes、版本号 `0.1.0b6`、升级说明完成。
-- [ ] 远端 CI 全绿（含 gitleaks）。
+- [x] 远端 CI 全绿（含 gitleaks）（[run 29841673789](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29841673789)）。
 - [ ] Tag 和 GitHub pre-release 仍需所有者单独确认。
 
 ### B6.6 完成记录（2026-07-21）
@@ -113,7 +113,7 @@
 - 版本号 `0.1.0b5` -> `0.1.0b6`（`src/version.py`、`pyproject.toml`、`tests/test_version.py`）；`python run.py --version` 输出 `MAO 0.1.0b6`。
 - 文档：CHANGELOG 新增 `[0.1.0-beta.6] - 2026-07-21` 并把 `[Unreleased]` 指向 `v0.2.0` 进入条件；新增 `docs/RELEASE_NOTES_v0.1.0-beta.6.md`；README 徽章与状态段、`项目进度与关键操作.md` 当前状态/未完成/继续入口更新。
 - 验证：全量回归 `853 passed, 1 warning`；`pip-audit -r requirements.txt` 无已知漏洞；`python -m compileall`、`node --check`（app.js/chat.js）、`git diff --check` 通过；`verify_distribution.py` 通过。
-- 安全扫描边界：gitleaks 8.24.3 本地 Windows 仍无法下载二进制，权威扫描为远端 CI 作业，推送后记录。
+- 安全扫描边界：gitleaks 8.24.3 本地 Windows 仍无法下载二进制，权威扫描为远端 CI 作业；[run 29841673789](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29841673789) 的 security job（pip-audit、gitleaks）通过。
 - 真实 Provider 调用：无人值守验收期间未调用。
 - Tag 和 GitHub pre-release：不自动执行，待所有者确认。
 
