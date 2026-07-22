@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-agent-orchestrator"
-version = "0.1.0b6"
+version = "0.1.0b7"
 description = "Evidence-driven multi-model engineering agent with explicit execution boundaries."
 readme = "README.md"
 requires-python = ">=3.11"

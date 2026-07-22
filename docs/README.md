@@ -38,6 +38,7 @@
 - [`RELEASE_NOTES_v0.1.0-beta.4.md`](RELEASE_NOTES_v0.1.0-beta.4.md)
 - [`RELEASE_NOTES_v0.1.0-beta.5.md`](RELEASE_NOTES_v0.1.0-beta.5.md)
 - [`RELEASE_NOTES_v0.1.0-beta.6.md`](RELEASE_NOTES_v0.1.0-beta.6.md)
+- [`RELEASE_NOTES_v0.1.0-beta.7.md`](RELEASE_NOTES_v0.1.0-beta.7.md)
 - [`acceptance/发布验收记录.md`](acceptance/发布验收记录.md)
 
 ## 历史归档
