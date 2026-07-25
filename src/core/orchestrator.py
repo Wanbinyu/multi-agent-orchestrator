@@ -12,6 +12,8 @@ from src.core.config_paths import resolve_workers_config_path
 from src.core.frontend_contract import (
     bind_and_validate_frontend_contract,
     is_high_risk_frontend_request,
+    normalize_frontend_stage,
+    repair_frontend_contract_payload,
 )
 from src.models.schemas import ChatMessage, FrontendBuildContract, Task, TaskPlan
 
@@ -152,7 +154,7 @@ def _normalize_task_text_fields(raw_task: object) -> dict:
             continue
         normalized[field] = _coerce_task_text(normalized.get(field))
     # id / type / assigned_model 也常见被包成对象，尽量抽字符串
-    for field in ("id", "type", "assigned_model", "frontend_stage"):
+    for field in ("id", "type", "assigned_model"):
         value = normalized.get(field)
         if isinstance(value, dict):
             for key in ("id", "name", "type", "value", "model", "alias"):
@@ -163,6 +165,13 @@ def _normalize_task_text_fields(raw_task: object) -> dict:
                 normalized[field] = _coerce_task_text(value)
         elif value is not None and not isinstance(value, str):
             normalized[field] = str(value)
+    # frontend_stage: 别名映射；非法值置空（后续合同校验再报缺阶段）
+    if "frontend_stage" in normalized:
+        normalized["frontend_stage"] = normalize_frontend_stage(
+            normalized.get("frontend_stage")
+        )
+    # 合同只允许挂在 TaskPlan 上；子任务上的残缺 contract 直接丢弃，避免 ValidationError
+    normalized.pop("frontend_contract", None)
     return normalized
 
 
@@ -317,85 +326,200 @@ class Orchestrator:
                 "多模型协作需要至少一个可执行子任务。"
             )
 
-        raw_contract = plan_data.get("frontend_contract")
         plan = TaskPlan(
             summary=plan_data.get("summary", ""),
             tasks=tasks,
-            frontend_contract=(
-                FrontendBuildContract(**raw_contract) if raw_contract else None
-            ),
+            frontend_contract=None,
         )
         self.last_response = response
         if high_risk_frontend:
-            bind_and_validate_frontend_contract(plan)
+            from src.core.frontend_contract import REQUIRED_FRONTEND_STAGES
+
+            _backfill_frontend_stages(plan)
+            _ensure_frontend_integration_depends(plan)
+            have_stages = {
+                task.frontend_stage for task in plan.tasks if task.frontend_stage
+            }
+            complete_stages = have_stages >= REQUIRED_FRONTEND_STAGES
+            if complete_stages:
+                try:
+                    from pathlib import Path
+
+                    repaired = repair_frontend_contract_payload(
+                        plan_data.get("frontend_contract"),
+                        tasks=plan.tasks,
+                        workspace=Path.cwd(),
+                    )
+                    if repaired is not None:
+                        plan.frontend_contract = FrontendBuildContract(**repaired)
+                    bind_and_validate_frontend_contract(plan)
+                except Exception as exc:
+                    # 合同仍不合法时降级为普通多 Worker 计划，避免整轮规划失败
+                    for task in plan.tasks:
+                        task.frontend_stage = None
+                        task.frontend_contract = None
+                    plan.frontend_contract = None
+                    if plan.summary:
+                        plan.summary = (
+                            f"{plan.summary}（前端固定合同未通过校验，已降级为普通协作）"
+                        )
+                    else:
+                        plan.summary = "前端固定合同未通过校验，已降级为普通协作"
+            else:
+                # 模型未拆出完整四阶段：不硬套高风险合同，按普通协作执行
+                for task in plan.tasks:
+                    task.frontend_stage = None
+                    task.frontend_contract = None
+                plan.frontend_contract = None
+                note = (
+                    f"模型未输出完整前端四阶段（现有 {sorted(s for s in have_stages if s)}），"
+                    "已降级为普通多模型协作"
+                )
+                plan.summary = f"{plan.summary}（{note}）" if plan.summary else note
+        elif plan_data.get("frontend_contract"):
+            # 非高风险但模型塞了合同：忽略，避免非法字段炸规划
+            plan.frontend_contract = None
         validate_collaboration_plan(plan)
         return plan
 
-    def _diversify_collapsed_task_models(self, tasks: list[Task]) -> None:
-        """When every task resolved to one model, spread work across configured models."""
-        if len(tasks) < 2:
-            return
-        available = list(getattr(self.gateway, "models", {}) or {})
-        if len(available) < 2:
-            return
-        assigned = [task.assigned_model for task in tasks if task.assigned_model]
-        if not assigned or len(set(assigned)) > 1:
-            return
-        # Prefer keeping main model on first/architect-like tasks when present
-        main = self.gateway.get_main_model()
-        pool = list(available)
-        if main and main in pool:
-            pool = [main] + [m for m in pool if m != main]
-        for index, task in enumerate(tasks):
-            task.assigned_model = pool[index % len(pool)]
 
-    def _parse_json(self, text: str) -> dict:
-        """从文本中提取 JSON"""
-        def normalize(value: object) -> dict:
-            if isinstance(value, dict):
-                return value
-            if isinstance(value, list):
-                if (
-                    len(value) == 1
-                    and isinstance(value[0], dict)
-                    and "tasks" in value[0]
-                ):
-                    return value[0]
-                if all(isinstance(item, dict) and "id" in item for item in value):
-                    return {"summary": "", "tasks": value}
-                raise ValueError(
-                    "模型输出的 JSON 顶层数组必须是任务对象列表，"
-                    "或只包含一个计划对象"
+def _backfill_frontend_stages(plan: TaskPlan) -> None:
+    """When stages missing, assign fixed stages by worker type / order."""
+    from src.core.frontend_contract import REQUIRED_FRONTEND_STAGES as _STAGES
+
+    have = {t.frontend_stage for t in plan.tasks if t.frontend_stage}
+    if have >= _STAGES:
+        return
+
+    frontend_devs = [t for t in plan.tasks if t.type in {"frontend_dev", "frontend"}]
+    for task in plan.tasks:
+        if task.frontend_stage:
+            continue
+        if task.type in {"tester", "test", "qa"}:
+            task.frontend_stage = "integration"
+            task.execution_mode = "verify"
+        elif task.type == "architect":
+            task.frontend_stage = "architecture_scaffold"
+
+    remaining_fd = [t for t in frontend_devs if not t.frontend_stage]
+    if len(remaining_fd) == 1:
+        remaining_fd[0].frontend_stage = "pages"
+    elif len(remaining_fd) >= 2:
+        remaining_fd[0].frontend_stage = "pages"
+        remaining_fd[1].frontend_stage = "data_api"
+        for extra in remaining_fd[2:]:
+            if not extra.frontend_stage:
+                extra.frontend_stage = "pages"
+
+    have = {t.frontend_stage for t in plan.tasks if t.frontend_stage}
+    missing = [s for s in _STAGES if s not in have]
+    unstaged = [t for t in plan.tasks if not t.frontend_stage]
+    for stage, task in zip(sorted(missing), unstaged):
+        task.frontend_stage = stage  # type: ignore[assignment]
+        if stage == "integration":
+            task.execution_mode = "verify"
+
+
+def _ensure_frontend_integration_depends(plan: TaskPlan) -> None:
+    """integration 必须直接依赖 architecture/pages/data_api。"""
+    by_stage = {
+        task.frontend_stage: task
+        for task in plan.tasks
+        if task.frontend_stage
+    }
+    integration = by_stage.get("integration")
+    if integration is None:
+        return
+    required_ids = [
+        by_stage[stage].id
+        for stage in ("architecture_scaffold", "pages", "data_api")
+        if stage in by_stage
+    ]
+    integration.depends_on = list(
+        dict.fromkeys([*integration.depends_on, *required_ids])
+    )
+    architecture = by_stage.get("architecture_scaffold")
+    if architecture is not None:
+        for stage in ("pages", "data_api"):
+            task = by_stage.get(stage)
+            if task is not None and architecture.id not in task.depends_on:
+                task.depends_on = list(
+                    dict.fromkeys([*task.depends_on, architecture.id])
                 )
-            raise ValueError("模型输出的 JSON 顶层必须是对象或任务对象列表")
 
-        def parse(candidate: str) -> dict | None:
-            try:
-                return normalize(json.loads(candidate))
-            except json.JSONDecodeError:
-                return None
 
-        # 先尝试直接解析
-        text = text.strip()
-        parsed = parse(text)
+# --- methods restored on Orchestrator (were accidentally nested) ---
+def _install_orchestrator_helpers() -> None:
+    pass
+
+
+def _diversify_collapsed_task_models(self, tasks: list[Task]) -> None:
+    """When every task resolved to one model, spread work across configured models."""
+    if len(tasks) < 2:
+        return
+    available = list(getattr(self.gateway, "models", {}) or {})
+    if len(available) < 2:
+        return
+    assigned = [task.assigned_model for task in tasks if task.assigned_model]
+    if not assigned or len(set(assigned)) > 1:
+        return
+    main = self.gateway.get_main_model()
+    pool = list(available)
+    if main and main in pool:
+        pool = [main] + [m for m in pool if m != main]
+    for index, task in enumerate(tasks):
+        task.assigned_model = pool[index % len(pool)]
+
+
+def _parse_json(self, text: str) -> dict:
+    """从文本中提取 JSON"""
+
+    def normalize(value: object) -> dict:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, list):
+            if (
+                len(value) == 1
+                and isinstance(value[0], dict)
+                and "tasks" in value[0]
+            ):
+                return value[0]
+            if all(isinstance(item, dict) and "id" in item for item in value):
+                return {"summary": "", "tasks": value}
+            raise ValueError(
+                "模型输出的 JSON 顶层数组必须是任务对象列表，"
+                "或只包含一个计划对象"
+            )
+        raise ValueError("模型输出的 JSON 顶层必须是对象或任务对象列表")
+
+    def parse(candidate: str) -> dict | None:
+        try:
+            return normalize(json.loads(candidate))
+        except json.JSONDecodeError:
+            return None
+
+    text = text.strip()
+    parsed = parse(text)
+    if parsed is not None:
+        return parsed
+
+    pattern = r"```(?:json)?\n(.*?)```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        parsed = parse(match.group(1).strip())
         if parsed is not None:
             return parsed
 
-        # 尝试从 ```json 代码块中提取
-        pattern = r"```(?:json)?\n(.*?)```"
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            parsed = parse(match.group(1).strip())
-            if parsed is not None:
-                return parsed
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"[\[{]", text):
+        try:
+            value, _ = decoder.raw_decode(text[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        return normalize(value)
 
-        # 尝试从说明文字中提取第一个完整 JSON 对象或数组
-        decoder = json.JSONDecoder()
-        for match in re.finditer(r"[\[{]", text):
-            try:
-                value, _ = decoder.raw_decode(text[match.start() :])
-            except json.JSONDecodeError:
-                continue
-            return normalize(value)
+    raise ValueError(f"无法从模型输出中解析 JSON:\n{text}")
 
-        raise ValueError(f"无法从模型输出中解析 JSON:\n{text}")
+
+Orchestrator._diversify_collapsed_task_models = _diversify_collapsed_task_models  # type: ignore[method-assign]
+Orchestrator._parse_json = _parse_json  # type: ignore[method-assign]

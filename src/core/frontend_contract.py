@@ -6,6 +6,7 @@ import ntpath
 import re
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 
 from src.core.collaboration import CollaborationPlanError
 from src.models.schemas import FrontendBuildContract, Task, TaskPlan
@@ -17,14 +18,266 @@ REQUIRED_FRONTEND_STAGES = {
     "data_api",
     "integration",
 }
+
+# 模型常输出的阶段别名 → 固定四阶段
+FRONTEND_STAGE_ALIASES: dict[str, str] = {
+    "architecture": "architecture_scaffold",
+    "architecture_scaffold": "architecture_scaffold",
+    "scaffold": "architecture_scaffold",
+    "arch": "architecture_scaffold",
+    "design": "architecture_scaffold",
+    "setup": "architecture_scaffold",
+    "pages": "pages",
+    "page": "pages",
+    "ui": "pages",
+    "frontend": "pages",
+    "view": "pages",
+    "views": "pages",
+    "implementation": "pages",
+    "implement": "pages",
+    "feature": "pages",
+    "features": "pages",
+    "data_api": "data_api",
+    "data": "data_api",
+    "api": "data_api",
+    "mock": "data_api",
+    "backend_api": "data_api",
+    "state": "data_api",
+    "integration": "integration",
+    "integrate": "integration",
+    "test": "integration",
+    "tests": "integration",
+    "tester": "integration",
+    "verify": "integration",
+    "qa": "integration",
+    "smoke": "integration",
+}
+
+
+def normalize_frontend_stage(value: object) -> str | None:
+    """Map free-form stage names to the fixed four-stage contract."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    key = text.casefold().replace("-", "_").replace(" ", "_")
+    if key in REQUIRED_FRONTEND_STAGES:
+        return key
+    mapped = FRONTEND_STAGE_ALIASES.get(key)
+    if mapped:
+        return mapped
+    # partial contains
+    for alias, stage in FRONTEND_STAGE_ALIASES.items():
+        if alias in key or key in alias:
+            return stage
+    return None
+
+
+def repair_frontend_contract_payload(
+    raw: object,
+    *,
+    tasks: list[Task],
+    workspace: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Repair incomplete LLM frontend_contract into a minimal valid payload.
+
+    Models often emit partial objects (string routes, missing smoke, etc.).
+    Rather than fail planning entirely, fill conservative defaults so Workers
+    can still execute; bind_and_validate still enforces stage/ownership rules.
+    """
+    if raw is None:
+        data: dict[str, Any] = {}
+    elif isinstance(raw, dict):
+        data = dict(raw)
+    else:
+        return None
+
+    root = Path(workspace or Path.cwd()).expanduser().resolve()
+    project_root = str(data.get("project_root") or "").strip()
+    if not project_root:
+        project_root = str(root / "weather-dashboard")
+    elif not (Path(project_root).is_absolute() or ntpath.isabs(project_root)):
+        project_root = str((root / project_root).resolve())
+    data["project_root"] = project_root
+
+    # routes: ["/", "/x"] or [{path, target}] or [{path: "/"}]
+    routes_raw = data.get("routes") or []
+    routes: list[dict[str, str]] = []
+    if isinstance(routes_raw, list):
+        for item in routes_raw:
+            if isinstance(item, str) and item.strip():
+                path = item.strip()
+                if not path.startswith("/"):
+                    path = "/" + path
+                target = (
+                    "src/pages/Home.tsx"
+                    if path in {"/", "/index", "/home"}
+                    else f"src/pages{path.replace('/', '/').rstrip('/') or '/Home'}.tsx"
+                )
+                if path == "/":
+                    target = "src/pages/Home.tsx"
+                elif path == "/weather-dashboard":
+                    target = "src/pages/WeatherDashboard.tsx"
+                else:
+                    slug = path.strip("/").replace("/", "_") or "Page"
+                    target = f"src/pages/{slug}.tsx"
+                routes.append({"path": path, "target": target})
+            elif isinstance(item, dict):
+                path = str(item.get("path") or item.get("route") or "").strip()
+                target = str(item.get("target") or item.get("file") or "").strip()
+                if path and not target:
+                    slug = path.strip("/").replace("/", "_") or "Home"
+                    target = f"src/pages/{slug}.tsx"
+                if path and target:
+                    if not path.startswith("/"):
+                        path = "/" + path
+                    routes.append({"path": path, "target": target})
+    if not routes:
+        routes = [
+            {"path": "/", "target": "src/pages/Home.tsx"},
+            {"path": "/weather-dashboard", "target": "src/pages/WeatherDashboard.tsx"},
+        ]
+    data["routes"] = routes
+
+    entrypoints = data.get("entrypoints")
+    if not isinstance(entrypoints, list) or not entrypoints:
+        data["entrypoints"] = ["index.html", "src/main.tsx", "src/App.tsx"]
+    else:
+        data["entrypoints"] = [str(x).strip() for x in entrypoints if str(x).strip()]
+
+    dependencies = data.get("dependencies")
+    if not isinstance(dependencies, list) or not dependencies:
+        data["dependencies"] = ["react", "react-dom", "vite"]
+    else:
+        data["dependencies"] = [str(x).strip() for x in dependencies if str(x).strip()]
+
+    ownership: dict[str, list[str]] = {}
+    raw_ownership = data.get("ownership")
+    if isinstance(raw_ownership, dict):
+        ownership = {
+            str(k): [str(p) for p in (v or []) if str(p).strip()]
+            for k, v in raw_ownership.items()
+            if str(k).strip()
+        }
+    # Fill missing ownership from stages / owned_paths
+    for task in tasks:
+        if task.id in ownership and ownership[task.id]:
+            continue
+        if task.owned_paths:
+            ownership[task.id] = list(task.owned_paths)
+        elif task.frontend_stage == "architecture_scaffold":
+            ownership[task.id] = [
+                f"{project_root}/package.json",
+                f"{project_root}/vite.config.ts",
+                f"{project_root}/index.html",
+                f"{project_root}/src/main.tsx",
+                f"{project_root}/src/App.tsx",
+            ]
+        elif task.frontend_stage == "pages":
+            ownership[task.id] = [f"{project_root}/src/pages"]
+        elif task.frontend_stage == "data_api":
+            ownership[task.id] = [
+                f"{project_root}/src/api",
+                f"{project_root}/src/services",
+            ]
+        elif task.frontend_stage == "integration":
+            ownership[task.id] = []
+        else:
+            ownership[task.id] = [f"{project_root}/src/{task.id}"]
+    if not ownership and tasks:
+        ownership = {tasks[0].id: [f"{project_root}/src"]}
+    data["ownership"] = ownership
+
+    # Align task.owned_paths with ownership when empty
+    for task in tasks:
+        declared = data["ownership"].get(task.id)
+        if declared is not None and not task.owned_paths:
+            task.owned_paths = list(declared)
+
+    verification = data.get("verification_commands")
+    if not isinstance(verification, list) or not verification:
+        data["verification_commands"] = ["npm install", "npm run build"]
+    else:
+        data["verification_commands"] = [
+            str(x).strip() for x in verification if str(x).strip()
+        ]
+
+    smoke_paths = data.get("smoke_paths")
+    if not isinstance(smoke_paths, list) or not smoke_paths:
+        data["smoke_paths"] = [route["path"] for route in routes]
+    else:
+        data["smoke_paths"] = [str(x).strip() for x in smoke_paths if str(x).strip()]
+
+    smoke = data.get("smoke")
+    if not isinstance(smoke, dict):
+        smoke = {}
+    start_command = smoke.get("start_command")
+    if not isinstance(start_command, list) or not start_command:
+        smoke["start_command"] = ["npm", "run", "dev", "--", "--port", "{port}", "--host"]
+    def _default_assertions() -> list[dict[str, Any]]:
+        return [{"selector": "body", "check": "visible", "min_count": 1}]
+
+    smoke_routes = smoke.get("routes")
+    if not isinstance(smoke_routes, list) or not smoke_routes:
+        smoke["routes"] = [
+            {"path": path, "assertions": _default_assertions()}
+            for path in data["smoke_paths"]
+        ]
+    else:
+        fixed: list[dict[str, Any]] = []
+        for item in smoke_routes:
+            if isinstance(item, str):
+                path = item if item.startswith("/") else f"/{item}"
+                fixed.append({"path": path, "assertions": _default_assertions()})
+            elif isinstance(item, dict):
+                path = str(item.get("path") or "/").strip() or "/"
+                assertions = item.get("assertions") or item.get("checks")
+                if not isinstance(assertions, list) or not assertions:
+                    assertions = _default_assertions()
+                else:
+                    # normalize check aliases
+                    norm_assert = []
+                    for assertion in assertions:
+                        if not isinstance(assertion, dict):
+                            continue
+                        a = dict(assertion)
+                        if "kind" in a and "check" not in a:
+                            a["check"] = a.pop("kind")
+                        if "selector" not in a:
+                            a["selector"] = "body"
+                        if "check" not in a:
+                            a["check"] = "visible"
+                        norm_assert.append(a)
+                    assertions = norm_assert or _default_assertions()
+                fixed.append({"path": path, "assertions": assertions})
+        smoke["routes"] = fixed or [
+            {"path": "/", "assertions": _default_assertions()}
+        ]
+    data["smoke"] = smoke
+
+    # Drop unknown free-form keys that confuse validators later
+    allowed = {
+        "project_root",
+        "entrypoints",
+        "routes",
+        "dependencies",
+        "ownership",
+        "verification_commands",
+        "smoke_paths",
+        "smoke",
+    }
+    return {k: v for k, v in data.items() if k in allowed}
 _FRONTEND_MARKERS = (
     "前端", "frontend", "react", "vue", "vite", "页面", "网站", "dashboard", "看板",
+    "大屏", "可视化", "ui",
 )
 _BUILD_MARKERS = (
-    "做一套", "做一个", "创建", "开发", "实现", "搭建", "构建", "build", "create",
+    "做一套", "做一个", "创建", "开发", "实现", "搭建", "构建", "build", "create", "做",
 )
 _HIGH_SCOPE_MARKERS = (
     "项目", "系统", "多页面", "完整", "一套", "矿区", "矿山", "后台", "管理平台",
+    "大屏",
 )
 _IMPORT_PATTERN = re.compile(
     r"(?:import\s+(?:[^;]*?\s+from\s+)?|export\s+[^;]*?\s+from\s+|import\s*\()"

@@ -278,6 +278,90 @@ available_workers:
     assert plan.tasks[1].execution_mode == "verify"
 
 
+def test_plan_repairs_bad_frontend_stage_and_partial_contract(tmp_path):
+    """天气大屏类请求：implementation 阶段 + 残缺 contract 不应 ValidationError。"""
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text(
+        _sample_workers_yaml()
+        + """
+  architect:
+    default_model: glm-ark
+  frontend_dev:
+    default_model: deepseek-chat
+  tester:
+    default_model: deepseek-chat
+""",
+        encoding="utf-8",
+    )
+    root = str(tmp_path / "weather-dashboard")
+    plan_data = {
+        "summary": "天气大屏",
+        "frontend_contract": {
+            "routes": ["/", "/weather-dashboard"],
+            "api_source": "open-meteo",
+            "install": "项目内可安装运行",
+        },
+        "tasks": [
+            {
+                "id": "architecture",
+                "type": "architect",
+                "title": "架构",
+                "input": "设计",
+                "assigned_model": "glm-ark",
+                "frontend_stage": "architecture_scaffold",
+                "owned_paths": [root],
+            },
+            {
+                "id": "impl",
+                "type": "frontend_dev",
+                "title": "实现",
+                "input": "页面",
+                "assigned_model": "deepseek-chat",
+                "frontend_stage": "implementation",
+                "depends_on": ["architecture"],
+                "owned_paths": [f"{root}/src/pages"],
+                "frontend_contract": {"api_source": "x"},
+            },
+            {
+                "id": "data",
+                "type": "frontend_dev",
+                "title": "数据",
+                "input": "api",
+                "assigned_model": "glm-ark",
+                "frontend_stage": "data_api",
+                "depends_on": ["architecture"],
+                "owned_paths": [f"{root}/src/api"],
+            },
+            {
+                "id": "integration",
+                "type": "tester",
+                "title": "集成",
+                "input": "测",
+                "assigned_model": "deepseek-chat",
+                "frontend_stage": "integration",
+                "execution_mode": "verify",
+                "depends_on": ["architecture", "impl", "data"],
+            },
+        ],
+    }
+    gateway = _mock_gateway(json.dumps(plan_data, ensure_ascii=False))
+    gateway.models = {"glm-ark": object(), "deepseek-chat": object()}
+    gateway.resolve_model = MagicMock(
+        side_effect=lambda preferred: preferred
+        if preferred in gateway.models
+        else "glm-ark"
+    )
+    plan = Orchestrator(gateway, config_path=str(config_path)).plan(
+        "做一个能实时显示天气的大屏的项目"
+    )
+    assert len(plan.tasks) == 4
+    impl = next(t for t in plan.tasks if t.id == "impl")
+    assert impl.frontend_stage == "pages"
+    assert impl.frontend_contract is None
+    assert plan.frontend_contract is not None
+    assert any(r.path == "/weather-dashboard" for r in plan.frontend_contract.routes)
+
+
 def test_plan_rejects_empty_tasks(tmp_path):
     config_path = tmp_path / "workers.yaml"
     config_path.write_text(_sample_workers_yaml(), encoding="utf-8")

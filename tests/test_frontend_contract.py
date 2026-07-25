@@ -80,7 +80,77 @@ def test_detects_project_sized_frontend_build_but_not_small_page_request():
     assert is_high_risk_frontend_request(
         "我现在接了一个智慧矿区的项目，现在给我做一个纯前端的项目"
     )
+    assert is_high_risk_frontend_request(
+        "做一个能实时显示天气的大屏的项目"
+    )
     assert not is_high_risk_frontend_request("用 React 做个登录页面")
+
+
+def test_normalize_frontend_stage_aliases():
+    from src.core.frontend_contract import normalize_frontend_stage
+
+    assert normalize_frontend_stage("implementation") == "pages"
+    assert normalize_frontend_stage("architecture") == "architecture_scaffold"
+    assert normalize_frontend_stage("data") == "data_api"
+    assert normalize_frontend_stage("verify") == "integration"
+
+
+def test_repair_frontend_contract_accepts_string_routes_and_partial_payload(tmp_path):
+    from src.core.frontend_contract import repair_frontend_contract_payload
+    from src.models.schemas import FrontendBuildContract, Task
+
+    tasks = [
+        Task(
+            id="a",
+            type="architect",
+            title="arch",
+            input="i",
+            assigned_model="m",
+            frontend_stage="architecture_scaffold",
+            owned_paths=[f"{tmp_path}/package.json"],
+        ),
+        Task(
+            id="p",
+            type="frontend_dev",
+            title="pages",
+            input="i",
+            assigned_model="m",
+            frontend_stage="pages",
+            owned_paths=[f"{tmp_path}/src/pages"],
+        ),
+        Task(
+            id="d",
+            type="frontend_dev",
+            title="data",
+            input="i",
+            assigned_model="m",
+            frontend_stage="data_api",
+            owned_paths=[f"{tmp_path}/src/api"],
+        ),
+        Task(
+            id="t",
+            type="tester",
+            title="test",
+            input="i",
+            assigned_model="m",
+            frontend_stage="integration",
+            execution_mode="verify",
+            depends_on=["a", "p", "d"],
+        ),
+    ]
+    raw = {
+        "routes": ["/", "/weather-dashboard"],
+        "api_source": "{{architecture.output}}",
+        "install": "项目内可安装运行",
+    }
+    repaired = repair_frontend_contract_payload(
+        raw, tasks=tasks, workspace=tmp_path
+    )
+    contract = FrontendBuildContract(**repaired)
+    assert contract.project_root
+    assert {route.path for route in contract.routes} == {"/", "/weather-dashboard"}
+    assert contract.smoke_paths
+    assert contract.smoke.start_command
 
 
 def test_bind_contract_requires_all_stages_and_all_integration_dependencies(tmp_path):
