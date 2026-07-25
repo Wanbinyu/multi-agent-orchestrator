@@ -2,14 +2,16 @@
 
 MAO is a local, self-hostable, evidence-driven multi-model engineering agent. It connects multiple model services, executes bounded engineering tools, splits complex tasks, preserves evidence, and runs a deterministic completion audit before declaring a task done.
 
-This is a beta release (`v0.1.0-beta.6`). It is meant for trusted local machines and reviewable projects, not a drop-in replacement for Claude Code, Codex, or a container sandbox.
+This is a beta release (`v0.1.0-beta.7`). It is meant for trusted local machines and reviewable projects, not a drop-in replacement for Claude Code, Codex, or a container sandbox.
+
+**Trust boundary:** permission modes (`auto` / `approve` / `readonly`), path rules, command allowlists, and plugin enablement are application-level authorization controls. They are **not** an OS/container sandbox. Plugins and MCP servers run with the same privileges as the MAO process. Prefer `approve` by default; use `readonly` for untrusted trees. Capability and pricing truth for presets lives in `src/models/catalog.py`; values marked `unverified` do not drive automatic model upgrades or savings claims. See [`Provider兼容矩阵.md`](Provider兼容矩阵.md) and [`../SECURITY.md`](../SECURITY.md).
 
 ## 1. Install
 
 Python 3.11 or 3.12 is required.
 
 ```bash
-pipx install git+https://github.com/Wanbinyu/multi-agent-orchestrator.git@v0.1.0-beta.6
+pipx install git+https://github.com/Wanbinyu/multi-agent-orchestrator.git@v0.1.0-beta.7
 mao --version
 ```
 
@@ -51,6 +53,15 @@ One-shot orchestration:
 ```bash
 mao run "检查当前项目并给出风险"
 ```
+
+For scripts and headless automation, use machine-readable events:
+
+```bash
+mao run "检查当前项目并给出风险" --output-format json
+mao run "检查当前项目并给出风险" --output-format streaming-json
+```
+
+`json` emits one object containing the run summary and events. `streaming-json` emits JSONL lines as the run progresses. Both include plan, model, tool, file-change, command, verification, approval, usage, error, and end events; Worker response bodies are excluded.
 
 Permission modes (Shift+Tab in the CLI, or set per session):
 
@@ -96,6 +107,7 @@ Python plugins run as trusted local code with the same privileges as MAO; permis
 ## 8. Next
 
 - Architecture: [`MAO-架构概览.md`](MAO-架构概览.md)
-- Version plan: [`版本计划-v0.1.0-beta.3至beta.6.md`](版本计划-v0.1.0-beta.3至beta.6.md)
+- Current optimization plan: [`MAO-优化与后续开发规划.md`](MAO-优化与后续开发规划.md)
+- Historical version plan: [`archive/completed-beta/版本计划-v0.1.0-beta.3至beta.6.md`](archive/completed-beta/版本计划-v0.1.0-beta.3至beta.6.md)
 - Release notes: [`RELEASE_NOTES_v0.1.0-beta.6.md`](RELEASE_NOTES_v0.1.0-beta.6.md)
 - Contributing: [`CONTRIBUTING.md`](../CONTRIBUTING.md)

@@ -14,6 +14,7 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.shortcuts import CompleteStyle
+from prompt_toolkit.styles import Style
 from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
@@ -76,7 +77,7 @@ def _build_commands_help() -> str:
         "",
         "提示：",
         "  - 输入 / 可打开命令列表，继续输入会实时过滤",
-        "  - Shift+Tab 可快速切换权限模式",
+        "  - Shift+Tab 切换权限模式（当前模式看屏幕底部工具栏，不在行首）",
         "  - 权限询问时输入 auto/always 可切换到自动模式并批准当前请求",
     ])
     return "\n".join(lines)
@@ -265,43 +266,110 @@ def _mode_rich_style(mode: str) -> str:
     return "bold green"
 
 
-def _make_prompt_session(mode_ref: list[str]) -> PromptSession:
-    """创建支持 Shift+Tab 切换模式的 prompt_toolkit 会话"""
+# 底部栏：无反白底，普通亮字（Windows/多数终端）
+_CLI_PROMPT_STYLE = Style.from_dict(
+    {
+        "bottom-toolbar": "noreverse bg:default #e8e8e8",
+        "bottom-toolbar.text": "noreverse bg:default #e8e8e8",
+    }
+)
+
+# 欢迎区小猫：下巴+双爪搭台沿
+_MAO_MASCOT = """\
+           /\\_/\\
+          ( ° ° )
+     ══o══(  ω  )══o══"""
+
+
+def _format_usage_toolbar(usage: dict[str, Any] | None) -> str:
+    """底部工具栏里的 token / 成本摘要。"""
+    if not usage:
+        return "token: —"
+    last_in = int(usage.get("last_in", 0) or 0)
+    last_out = int(usage.get("last_out", 0) or 0)
+    total_in = int(usage.get("total_in", 0) or 0)
+    total_out = int(usage.get("total_out", 0) or 0)
+    total_cost = float(usage.get("total_cost", 0.0) or 0.0)
+    # 效率：本轮输出/输入，>1 表示答比问长
+    if last_in > 0:
+        eff = last_out / last_in
+        eff_s = f"效率 {eff:.2f}x"
+    else:
+        eff_s = "效率 —"
+    return (
+        f"本轮 ↑{last_in} ↓{last_out} | 会话 ↑{total_in} ↓{total_out} "
+        f"| ${total_cost:.4f} | {eff_s}"
+    )
+
+
+def _make_prompt_session(
+    mode_ref: list[str],
+    *,
+    on_mode_change: Any | None = None,
+    usage_ref: dict[str, Any] | None = None,
+) -> PromptSession:
+    """创建支持 Shift+Tab 切换模式的 prompt_toolkit 会话。
+
+    模式与 token 用量显示在底部工具栏（实时刷新），行首仅 ``>``。
+    底部栏使用 noreverse，避免默认白底黑字。
+    """
     kb = KeyBindings()
 
     @kb.add(Keys.BackTab)
     def _switch_mode(event):
-        idx = MODES.index(mode_ref[0])
+        idx = MODES.index(mode_ref[0]) if mode_ref[0] in MODES else 0
         mode_ref[0] = MODES[(idx + 1) % len(MODES)]
+        if on_mode_change is not None:
+            try:
+                on_mode_change(mode_ref[0])
+            except Exception:
+                pass
         event.app.invalidate()
+
+    def _toolbar() -> HTML:
+        mode = mode_ref[0] if mode_ref else "approve"
+        usage_text = _format_usage_toolbar(usage_ref)
+        return HTML(
+            f" 权限:<{_mode_color(mode)}><b>{mode}</b></{_mode_color(mode)}> "
+            f"| {usage_text} "
+            f"| Shift+Tab 切换 | / 命令 "
+        )
 
     return PromptSession(
         key_bindings=kb,
         completer=SlashCommandCompleter(),
         complete_while_typing=True,
         complete_style=CompleteStyle.COLUMN,
-        bottom_toolbar=lambda: HTML(
-            f" Mode: <{_mode_color(mode_ref[0])}><b>{mode_ref[0]}</b></{_mode_color(mode_ref[0])}> "
-            f"| Shift+Tab 切换 | 输入 / 查看命令 "
-        ),
+        bottom_toolbar=_toolbar,
+        style=_CLI_PROMPT_STYLE,
     )
+
+
+def _prompt_message() -> HTML:
+    """固定简洁提示符；当前模式与 token 见底部工具栏。"""
+    return HTML("\n<b>&gt;</b> ")
 
 
 def _print_welcome(session_id: str, mode: str):
-    mode_line = f"当前权限模式: [{_mode_rich_style(mode)}]{mode}[/{_mode_rich_style(mode)}]（auto=自动执行，approve=需批准，readonly=只读）"
-    console.print(
-        Panel.fit(
-            f"进入 Multi-Agent Orchestrator 对话模式\n"
-            f"会话 ID: {session_id}\n"
-            f"{mode_line}\n"
-            "输入 / 查看命令，输入 /help 查看完整帮助",
-            title="MAO Chat",
-        )
+    mode_line = (
+        f"当前权限: [{_mode_rich_style(mode)}]{mode}[/{_mode_rich_style(mode)}] "
+        f"（auto=自动 · approve=需批准 · readonly=只读）"
     )
+    body = (
+        f"[cyan]{_MAO_MASCOT}[/cyan]\n\n"
+        f"[bold]MAO Chat[/bold]  ·  多模型工程对话\n"
+        f"会话: [dim]{session_id}[/dim]\n"
+        f"{mode_line}\n"
+        f"[dim]底部栏显示权限与 token 用量 · Shift+Tab 切换模式 · 输入 / 看命令[/dim]"
+    )
+    console.print(Panel.fit(body, title="你好", border_style="cyan"))
 
 
-async def _stream_turn(agent: Agent, user_input: str):
-    """流式执行一轮，使用 Rich Live 渲染 Markdown，仿 Claude Code 风格"""
+async def _stream_turn(agent: Agent, user_input: str) -> dict[str, Any]:
+    """流式执行一轮，使用 Rich Live 渲染 Markdown，仿 Claude Code 风格。
+
+    返回本轮 token/成本摘要，供底部工具栏刷新。
+    """
     tool_calls: list[dict[str, Any]] = []
     files_written: list[str] = []
     input_tokens = 0
@@ -674,6 +742,12 @@ async def _stream_turn(agent: Agent, user_input: str):
                 f"[dim]验证门：{engineering_verification_count} 个 · "
                 f"完成审计：{audit_text}{gap_text}[/dim]"
             )
+
+    return {
+        "last_in": int(input_tokens or 0),
+        "last_out": int(output_tokens or 0),
+        "last_cost": float(cost_usd or 0.0),
+    }
 
 
 def _cmd_new(store: SessionStore, title: str = ""):
@@ -1061,18 +1135,46 @@ def _cmd_test_models(gateway: GatewayClient):
     """诊断所有已配置模型的连通性并更新进程内健康状态。"""
     console.print("[bold]🔍 正在测试所有模型连通性...[/bold]")
     console.print("[dim]每个模型会发送一个最小请求，可能产生少量 token 消耗。[/dim]")
+    config_path = getattr(gateway, "config_path", "config/providers.yaml")
+    console.print(f"[dim]配置：{config_path} · 工作目录：{Path.cwd()}[/dim]")
+    console.print(
+        "[dim]说明：CLI 与 Web「测试连接」都应读同一项目下的 .env；"
+        "若 Key 显示 unresolved_env_ref，说明变量未展开。[/dim]"
+    )
     for model_name in gateway.models:
+        model_cfg = gateway.models[model_name]
+        key_status = gateway.describe_key_status(model_cfg.provider)
         result = gateway.test_model(model_name)
-        detail = result.get("error", "") if not result.get("success") else f"{result.get('response_time_ms', 0):.0f}ms"
+        detail = (
+            result.get("error", "")
+            if not result.get("success")
+            else f"{result.get('response_time_ms', 0):.0f}ms"
+        )
         line = Text(f"  {model_name}: ")
         if result.get("success"):
             line.append("✅ 正常", style="green")
         else:
             line.append("❌ 失败", style="red")
+        line.append(
+            f"  [provider={model_cfg.provider} key={key_status}]",
+            style="dim",
+        )
         if detail:
             line.append(f" {detail}")
         console.print(line)
-    console.print("[dim]可恢复的失败模型会进入健康冷却；认证或配置错误不会自动切换。[/dim]")
+        if not result.get("success") and "unresolved" in key_status:
+            console.print(
+                Text(
+                    f"    → Key 未解析。请确认在「{Path.cwd()}」下有 .env，"
+                    f"且存在与 Provider 名对应的变量"
+                    f"（如 provider「deepseek」→ DEEPSEEK_API_KEY）。"
+                    f"Web 能通而 CLI 不通时，多半是终端启动目录与 Web 不是同一项目。",
+                    style="yellow",
+                )
+            )
+    console.print(
+        "[dim]可恢复的失败模型会进入健康冷却；认证或配置错误不会自动切换。[/dim]"
+    )
 
 
 def _cmd_tools():
@@ -1091,16 +1193,21 @@ def _cmd_tools():
     )
 
 
-def _set_mode(session, agent, mode_ref: list[str], mode: str) -> bool:
-    """设置会话权限模式"""
+def _set_mode(session, agent, mode_ref: list[str], mode: str, *, quiet: bool = False) -> bool:
+    """设置会话权限模式。
+
+    quiet=True 时不打印（用于 Shift+Tab 即时同步，避免刷屏）。
+    """
     if mode not in MODES:
         console.print(f"[bold red]未知模式：{mode}，可选：{' / '.join(MODES)}[/bold red]")
         return False
     session.approval_mode = mode  # type: ignore[assignment]
     agent.approval_mode = mode  # type: ignore[assignment]
     mode_ref[0] = mode
-    style = _mode_rich_style(mode)
-    console.print(f"[{style}]已切换权限模式：{mode}[/{style}]")
+    if not quiet:
+        style = _mode_rich_style(mode)
+        console.print(f"[{style}]已切换权限模式：{mode}[/{style}]")
+        console.print("[dim]（当前模式请看屏幕底部工具栏）[/dim]")
     return True
 
 
@@ -1207,7 +1314,6 @@ def run_chat_loop(
         session = _cmd_new(store)
 
     mode_ref = [session.approval_mode]
-    pt_session = _make_prompt_session(mode_ref)
     memory_store = MemoryStore()
     # 加载扩展（Hooks + MCP 工具源），幂等
     from src.tools.extensions import load_extensions
@@ -1255,14 +1361,48 @@ def run_chat_loop(
         )
     agent = Agent(gateway, session, memory_store=memory_store)
 
+    def _on_mode_change(mode: str) -> None:
+        """Shift+Tab 时立刻写入 session/agent，避免只改了底部栏、逻辑仍是旧模式。"""
+        if mode not in MODES:
+            return
+        session.approval_mode = mode  # type: ignore[assignment]
+        agent.approval_mode = mode  # type: ignore[assignment]
+
+    # 底部栏实时 token 用量（本轮 + 会话累计）
+    usage_ref: dict[str, Any] = {
+        "last_in": 0,
+        "last_out": 0,
+        "last_cost": 0.0,
+        "total_in": 0,
+        "total_out": 0,
+        "total_cost": 0.0,
+    }
+
+    def _refresh_usage(last: dict[str, Any] | None = None) -> None:
+        if last:
+            usage_ref["last_in"] = int(last.get("last_in", 0) or 0)
+            usage_ref["last_out"] = int(last.get("last_out", 0) or 0)
+            usage_ref["last_cost"] = float(last.get("last_cost", 0.0) or 0.0)
+        try:
+            summary = gateway.billing.summary()
+            usage_ref["total_in"] = int(summary.get("total_input_tokens", 0) or 0)
+            usage_ref["total_out"] = int(summary.get("total_output_tokens", 0) or 0)
+            usage_ref["total_cost"] = float(summary.get("total_cost_usd", 0.0) or 0.0)
+        except Exception:
+            pass
+
+    pt_session = _make_prompt_session(
+        mode_ref,
+        on_mode_change=_on_mode_change,
+        usage_ref=usage_ref,
+    )
+
     _print_welcome(session.id, mode_ref[0])
 
     try:
         while True:
             try:
-                user_input = pt_session.prompt(
-                    HTML(f"\n<b>[<{_mode_color(mode_ref[0])}>{mode_ref[0]}</{_mode_color(mode_ref[0])}>] &gt;</b> ")
-                ).strip()
+                user_input = pt_session.prompt(_prompt_message).strip()
             except (EOFError, KeyboardInterrupt):
                 console.print("\n退出对话。")
                 break
@@ -1270,9 +1410,9 @@ def run_chat_loop(
             if not user_input:
                 continue
 
-            # 同步 agent 与 session 的模式（可能通过 Shift+Tab 切换）
-            if agent.approval_mode != mode_ref[0]:
-                _set_mode(session, agent, mode_ref, mode_ref[0])
+            # 同步 agent 与 session 的模式（Shift+Tab 已即时写入；命令路径安静对齐）
+            if agent.approval_mode != mode_ref[0] or session.approval_mode != mode_ref[0]:
+                _set_mode(session, agent, mode_ref, mode_ref[0], quiet=True)
 
             if user_input.startswith("/"):
                 parts = user_input.split(" ", 1)
@@ -1285,7 +1425,11 @@ def run_chat_loop(
                     store.save(session)
                     session = _cmd_new(store, title=arg)
                     mode_ref[0] = session.approval_mode
-                    pt_session = _make_prompt_session(mode_ref)
+                    pt_session = _make_prompt_session(
+                        mode_ref,
+                        on_mode_change=_on_mode_change,
+                        usage_ref=usage_ref,
+                    )
                     agent = Agent(gateway, session, memory_store=memory_store)
                 elif cmd == "/load":
                     if not arg:
@@ -1296,7 +1440,11 @@ def run_chat_loop(
                     if loaded:
                         session = loaded
                         mode_ref[0] = session.approval_mode
-                        pt_session = _make_prompt_session(mode_ref)
+                        pt_session = _make_prompt_session(
+                            mode_ref,
+                            on_mode_change=_on_mode_change,
+                            usage_ref=usage_ref,
+                        )
                         agent = Agent(gateway, session, memory_store=memory_store)
                 elif cmd == "/resume":
                     if _cmd_resume(store, session, arg):
@@ -1364,7 +1512,10 @@ def run_chat_loop(
                                 "请严格按照下面已经批准的方案开始实施；遵守当前项目规则和权限规则，"
                                 "完成后运行与风险匹配的验证。\n\n" + approved_plan
                             )
-                            asyncio.run(_stream_turn(agent, implementation_request))
+                            last = asyncio.run(
+                                _stream_turn(agent, implementation_request)
+                            )
+                            _refresh_usage(last)
                             store.save(session)
                     elif plan_action == "cancel":
                         session.cancel_plan_mode()
@@ -1456,7 +1607,8 @@ def run_chat_loop(
             try:
                 if _print_recovery_notice(session):
                     continue
-                asyncio.run(_stream_turn(agent, user_input))
+                last = asyncio.run(_stream_turn(agent, user_input))
+                _refresh_usage(last)
                 store.save(session)
             except Exception as e:
                 console.print(Text(f"错误：{e}", style="bold red"))

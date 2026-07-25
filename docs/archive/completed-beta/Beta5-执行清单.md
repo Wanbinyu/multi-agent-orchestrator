@@ -144,4 +144,4 @@
 
 ## 7. 当前下一步
 
-B5.6 发布收口完成，`v0.1.0-beta.5` 已发布（Tag + GitHub pre-release）。下一步进入 `beta.6` Plugin API v0。B5.4 真实 `multi-model` 评测仍单独暂停；只有所有者重新给出新的累计次数边界后，才允许继续 private smoke。详见 [`B5.4-真实能力评测操作手册.md`](B5.4-真实能力评测操作手册.md)。
+B5.6 发布收口完成，`v0.1.0-beta.5` 已发布（Tag + GitHub pre-release）。下一步进入 `beta.6` Plugin API v0。B5.4 真实 `multi-model` 评测仍单独暂停；只有所有者重新给出新的累计次数边界后，才允许继续 private smoke。详见 [`B5.4-真实能力评测操作手册.md`](../../B5.4-真实能力评测操作手册.md)。

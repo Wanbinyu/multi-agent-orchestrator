@@ -546,3 +546,82 @@ def get_default_model_for_template(template_key: str) -> str | None:
     """获取某个 Provider 模板的默认模型别名"""
     models = find_models_for_template(template_key)
     return models[0].alias if models else None
+
+
+def is_verified_metadata_source(source: str) -> bool:
+    """与 ModelRouter 一致：含 unverified/unknown 的来源不得当作官方真值。"""
+    normalized = (source or "").strip().casefold()
+    return bool(normalized) and "unverified" not in normalized and normalized != "unknown"
+
+
+def export_compatibility_matrix() -> list[dict[str, Any]]:
+    """导出与模型目录绑定的 Provider 兼容矩阵行。
+
+    真值源是 ``BUILTIN_MODELS`` / ``PROVIDER_TEMPLATES``；
+    公开文档 ``docs/Provider兼容矩阵.md`` 应与本函数输出一致。
+    """
+    template_by_alias: dict[str, list[str]] = {}
+    for key, template in PROVIDER_TEMPLATES.items():
+        for alias in template.get("supported_models", []):
+            template_by_alias.setdefault(alias, []).append(key)
+
+    rows: list[dict[str, Any]] = []
+    for alias, entry in BUILTIN_MODELS.items():
+        supported_caps = [
+            cap
+            for cap, state in entry.capability_status.items()
+            if state == "supported"
+        ]
+        rows.append(
+            {
+                "alias": alias,
+                "name": entry.name,
+                "provider_type": entry.provider_type,
+                "default_model_id": entry.default_model_id,
+                "template_keys": list(template_by_alias.get(alias, [])),
+                "capabilities": list(entry.capabilities),
+                "capability_status": dict(entry.capability_status),
+                "routing_eligible_capabilities": supported_caps,
+                "metadata_source": entry.metadata_source,
+                "metadata_verified_at": entry.metadata_verified_at,
+                "metadata_verified": is_verified_metadata_source(entry.metadata_source),
+                "context_window_tokens": entry.context_window_tokens,
+                "max_output_tokens": entry.max_output_tokens,
+                "context_window_source": entry.context_window_source,
+                "context_window_verified_at": entry.context_window_verified_at,
+                "dynamic_model_alias": entry.dynamic_model_alias,
+                "input_price_per_1m": entry.input_price_per_1m,
+                "output_price_per_1m": entry.output_price_per_1m,
+                "price_is_placeholder": not is_verified_metadata_source(
+                    entry.metadata_source
+                ),
+                "known_limits": _known_limits_for_entry(entry),
+            }
+        )
+    return rows
+
+
+def _known_limits_for_entry(entry: ModelCatalogEntry) -> list[str]:
+    limits: list[str] = []
+    if entry.dynamic_model_alias:
+        limits.append("dynamic_model_alias: 上游模型版本与窗口可能变化")
+    if not is_verified_metadata_source(entry.metadata_source):
+        limits.append("metadata_unverified: 能力/价格不可用于自动升级或节省声明")
+    if entry.context_window_tokens <= 0 or "unverified" in (
+        entry.context_window_source or ""
+    ):
+        limits.append("context_unverified: 默认使用 200K 本地安全预算（非上游保证）")
+    unverified_caps = [
+        cap
+        for cap, state in entry.capability_status.items()
+        if state == "unverified"
+    ]
+    if unverified_caps:
+        limits.append(
+            "capabilities_unverified: " + ", ".join(sorted(unverified_caps))
+        )
+    if entry.capability_status.get("tool_use") == "unverified":
+        limits.append("tool_use_unverified: 原生 tool_use 回合待真实 smoke")
+    if entry.capability_status.get("vision") == "unverified":
+        limits.append("vision_unverified: 结构化图片消息未验收")
+    return limits

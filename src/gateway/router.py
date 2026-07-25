@@ -177,7 +177,13 @@ class ModelRouter:
             capability: self._routing_capability_state(config, capability)
             for capability in required
         }
-        window = config.context_window_tokens or config.max_context_tokens or 32_000
+        from src.core.context_budget import DEFAULT_SAFE_CONTEXT_TOKENS
+
+        window = (
+            config.context_window_tokens
+            or config.max_context_tokens
+            or DEFAULT_SAFE_CONTEXT_TOKENS
+        )
         context_known = bool(
             config.max_context_tokens > 0
             or (

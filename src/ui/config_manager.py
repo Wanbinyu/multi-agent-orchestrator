@@ -16,6 +16,11 @@ DEFAULT_CONFIG_PATH = "config/providers.yaml"
 DEFAULT_ENV_PATH = ".env"
 DEFAULT_UI_STATE_PATH = "config/ui_state.yaml"
 
+# 普通用户不暴露窗口设计；保存时强制安全默认，避免误填把输入预算算成 0
+# 窗口 0 = 运行时使用 ContextBudgetManager 的默认安全预算（当前 200K）
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
+MIN_SANE_CONTEXT_WINDOW = 16_000
+
 
 _PLACEHOLDER_KEYS = {"", "••••••", "******", "${...}"}
 
@@ -52,6 +57,41 @@ def save_yaml(config_path: str | None, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
+def sanitize_model_budget_fields(model: dict[str, Any]) -> dict[str, Any]:
+    """规范化上下文/输出预算字段。
+
+    对普通用户：窗口默认 0（运行时使用默认安全预算，当前 200K），最大输出至少 8192。
+    过小的硬窗口视为误填并清零，避免「安全输入预算 = 0」。
+    """
+    window = int(model.get("context_window_tokens") or 0)
+    max_out = int(model.get("max_output_tokens") or DEFAULT_MAX_OUTPUT_TOKENS)
+    safety = float(model.get("context_safety_ratio", 0.08))
+    compact = float(model.get("compaction_threshold", 0.75))
+    source = str(model.get("context_window_source") or "unverified")
+    verified_at = str(model.get("context_window_verified_at") or "")
+
+    if 0 < window < MIN_SANE_CONTEXT_WINDOW:
+        window = 0
+        source = "unverified"
+        verified_at = ""
+    if max_out < DEFAULT_MAX_OUTPUT_TOKENS:
+        max_out = DEFAULT_MAX_OUTPUT_TOKENS
+    safety = min(0.5, max(0.0, safety if safety else 0.08))
+    compact = min(0.95, max(0.25, compact if compact else 0.75))
+    if window <= 0:
+        source = source if "unverified" in source or source == "unknown" else "unverified"
+        verified_at = ""
+
+    return {
+        "context_window_tokens": window,
+        "max_output_tokens": max_out,
+        "context_safety_ratio": safety,
+        "compaction_threshold": compact,
+        "context_window_source": source,
+        "context_window_verified_at": verified_at,
+    }
 
 
 def _env_var_name(provider_name: str) -> str:
@@ -173,6 +213,7 @@ def save_provider(
     }
     for m in models:
         alias = m["alias"]
+        budget = sanitize_model_budget_fields(m)
         cfg["models"][alias] = {
             "provider": provider_name,
             "model_id": m["model_id"],
@@ -182,12 +223,7 @@ def save_provider(
             "capability_status": m.get("capability_status", {}),
             "metadata_source": m.get("metadata_source", "unverified"),
             "metadata_verified_at": m.get("metadata_verified_at", ""),
-            "context_window_tokens": int(m.get("context_window_tokens", 0)),
-            "max_output_tokens": int(m.get("max_output_tokens", 4096)),
-            "context_safety_ratio": float(m.get("context_safety_ratio", 0.08)),
-            "compaction_threshold": float(m.get("compaction_threshold", 0.75)),
-            "context_window_source": m.get("context_window_source", "unverified"),
-            "context_window_verified_at": m.get("context_window_verified_at", ""),
+            **budget,
             "dynamic_model_alias": bool(m.get("dynamic_model_alias", False)),
         }
 
@@ -214,6 +250,31 @@ def delete_provider(config_path: str | None, env_path: str | None, provider_name
     delete_api_key(env_path, provider_name)
     # 同时清理测试状态
     delete_test_state(ui_state_path=None, provider_name=provider_name)
+
+
+def delete_model(config_path: str | None, model_alias: str) -> dict[str, Any]:
+    """删除单个模型别名；若为主模型则改派到剩余模型。"""
+    cfg = load_config(config_path)
+    models = cfg.get("models") or {}
+    if model_alias not in models:
+        raise ValueError(f"未知模型别名: {model_alias}")
+    provider_name = models[model_alias].get("provider", "")
+    del models[model_alias]
+    cfg["models"] = models
+    if cfg.get("main_model") == model_alias:
+        # 优先同 Provider 下的其它模型，否则任意剩余模型
+        same = [
+            alias
+            for alias, data in models.items()
+            if data.get("provider") == provider_name
+        ]
+        cfg["main_model"] = same[0] if same else next(iter(models), None)
+    save_yaml(config_path, cfg)
+    return {
+        "deleted": model_alias,
+        "provider": provider_name,
+        "main_model": cfg.get("main_model"),
+    }
 
 
 def set_main_model(config_path: str | None, model_alias: str) -> None:

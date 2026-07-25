@@ -17,4 +17,4 @@
 
 - [`../../MAO-架构概览.md`](../../MAO-架构概览.md)
 - [`../../MAO-产品方向与Beta路线图.md`](../../MAO-产品方向与Beta路线图.md)
-- [`../../参考项目-OpenCode.md`](../../参考项目-OpenCode.md)
+- [`../completed-beta/参考项目-OpenCode.md`](../completed-beta/参考项目-OpenCode.md)

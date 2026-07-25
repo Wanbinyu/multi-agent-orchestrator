@@ -6,7 +6,7 @@
 
 - [`../MAO-架构概览.md`](../MAO-架构概览.md)
 - [`../MAO-产品方向与Beta路线图.md`](../MAO-产品方向与Beta路线图.md)
-- [`../参考项目-OpenCode.md`](../参考项目-OpenCode.md)
+- [`completed-beta/参考项目-OpenCode.md`](completed-beta/参考项目-OpenCode.md)
 
 `archive/` 通过 `.gitattributes` 排除在 GitHub 发布源码归档之外，但保留在 Git 仓库中供维护者追溯。
 

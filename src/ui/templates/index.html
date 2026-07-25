@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MAO - 模型连接配置</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=20260715-ui6">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260725-cfg2">
 </head>
 <body>
   <header class="app-header">
     <h1><span class="app-brand">MAO</span><span class="page-title">模型连接配置</span></h1>
-    <p class="subtitle">添加 Provider → 测试连接 → 选择主模型</p>
+    <p class="subtitle">选预设 → 填 Key → 测试连接 → 选主模型（窗口/余量可自动填）</p>
   </header>
 
   <nav class="top-nav">
@@ -95,12 +95,23 @@
           <div class="models-header">
             <div class="form-section-heading">
               <h3 id="models-section-title">模型映射</h3>
-              <span>逻辑别名用于 MAO 内部调用</span>
+              <span>选预设或从目录添加即可；上下文预算由系统自动管理</span>
             </div>
-            <button id="btn-add-model" class="btn" type="button">➕ 添加模型</button>
+            <div class="models-header-actions">
+              <select id="catalog-pick" class="catalog-pick" title="从内置目录添加">
+                <option value="">从目录添加…</option>
+              </select>
+              <button id="btn-apply-preset-models" class="btn" type="button" title="用当前预设的推荐模型列表覆盖表格">一键预设模型</button>
+              <button id="btn-add-model" class="btn" type="button">➕ 空行</button>
+            </div>
           </div>
+          <p class="models-help" id="models-help">
+            <strong>只需配置：</strong>逻辑别名、上游 model_id、API Key。
+            <strong>窗口 / 输出预留 / 安全余量</strong>已隐藏，保存时自动使用安全默认
+            （未知窗口 → <strong>200K</strong> 本地默认安全预算，最大输出 ≥ 8192），避免误填导致无法对话。
+          </p>
           <div class="model-table-wrap" tabindex="0" aria-label="模型映射表，可横向滚动">
-            <table class="model-table">
+            <table class="model-table" id="model-table">
               <thead>
                 <tr>
                   <th>逻辑别名</th>
@@ -108,10 +119,6 @@
                   <th>输入价格 / 1M</th>
                   <th>输出价格 / 1M</th>
                   <th>能力标签</th>
-                  <th>上游窗口</th>
-                  <th>输出预留</th>
-                  <th>安全余量</th>
-                  <th>压缩阈值</th>
                   <th></th>
                 </tr>
               </thead>
@@ -136,7 +143,7 @@
     </section>
   </main>
 
-  <script src="/static/js/app.js?v=20260715-ui6"></script>
+  <script src="/static/js/app.js?v=20260725-cfg2"></script>
 
   <footer class="app-footer">
     Multi-Agent Orchestrator · 本地运行 · API Key 仅保存在本地 .env

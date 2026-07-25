@@ -92,6 +92,7 @@ def test_context_status_uses_agent_default_when_model_has_no_limit(tmp_path):
         provider="volcengineark",
         model_id="ark-code-latest",
     )
+    # 显式 32K 仍可用；未传时默认 200K
     agent = Agent(gateway, session, max_context_tokens=32000)
 
     status = agent.get_context_status()
@@ -99,8 +100,12 @@ def test_context_status_uses_agent_default_when_model_has_no_limit(tmp_path):
     assert status["max_context_tokens"] == 32000
     assert status["input_budget_tokens"] == 27392
     assert status["compaction_limit_tokens"] == 20544
-    assert "32K" in status["warnings"][0]
     assert status["max_context_source"] == "agent_default"
+
+    agent_default = Agent(gateway, session)
+    status_default = agent_default.get_context_status()
+    assert status_default["max_context_tokens"] == 200_000
+    assert status_default["input_budget_tokens"] == 200_000 - 4096 - 512
 
 
 def test_run_turn_no_tools(tmp_path):

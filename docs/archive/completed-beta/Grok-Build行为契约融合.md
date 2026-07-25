@@ -36,7 +36,7 @@ rules:
 
 主 Agent 和 Worker 在真实工具执行边界调用同一引擎。协作批量批准只能满足会话默认询问，显式 ask/deny 仍生效，子模型不得自行批准。
 
-权限规则现支持 `justification` 和加载期 `match/not_match` 自检。该增量参考 Codex execpolicy 的可验证规则思想并独立实现；自检失败的规则会被排除并留下诊断。更完整的上游对比见 [`开源Coding-Agent参考与吸收计划.md`](开源Coding-Agent参考与吸收计划.md)。
+权限规则现支持 `justification` 和加载期 `match/not_match` 自检。该增量参考 Codex execpolicy 的可验证规则思想并独立实现；自检失败的规则会被排除并留下诊断。更完整的上游对比见 [`开源Coding-Agent参考与吸收计划.md`](../../开源Coding-Agent参考与吸收计划.md)。
 
 ### 1.3 持久化 Plan 模式
 

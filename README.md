@@ -1,5 +1,13 @@
 # MAO - Evidence-Driven Multi-Model Engineering Agent
 
+```text
+           /\_/\
+          ( ° ° )
+     ══o══(  ω  )══o══
+```
+
+<p align="center"><sub>CLI 欢迎小猫：趴在台沿、眼巴巴望着你 · 运行 <code>mao</code> 即可见面</sub></p>
+
 [![CI](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB)
 ![Status](https://img.shields.io/badge/status-v0.1.0--beta.7-2ea44f)
@@ -78,13 +86,13 @@ python -m pytest -q
 
 ## 已知限制与安全边界
 
-- MAO 尚无容器级沙箱；命令以当前进程权限在本机执行。默认推荐 `approve`，不信任的项目使用 `readonly`。
+- MAO 尚无容器级沙箱；命令以当前进程权限在本机执行。默认推荐 `approve`，不信任的项目使用 `readonly`。权限规则与插件启用门是**应用层授权**，不是 OS/容器隔离。
 - Provider 的鉴权、流式和原生工具兼容性不同；动态模型别名可能不暴露准确模型版本或硬上下文窗口。
-- 未验证模型使用 32K 保守安全预算。该数字是 MAO 的本地保护值，不代表上游物理上限。
+- 未验证模型默认使用 **200K** 本地安全预算（可在配置中声明更大/更小的真实窗口）。该数字是 MAO 的本地保护值，不代表上游物理上限；上游更小时仍可能被 Provider 拒绝。`unverified` 能力不参与自动升级或节省声明。
 - 自动 CI 不调用真实付费模型；真实 Provider、多模型协作和摘要质量仍需人工烟雾验收。
-- MCP Server 与 Hooks 是以 MAO 进程权限运行的第三方扩展，启用前必须审查配置和来源。
+- MCP Server、Hooks 与 Python 插件均以 MAO 进程权限运行，启用前必须审查配置和来源。
 
-完整安全边界见 [`SECURITY.md`](SECURITY.md)，当前方向和发布状态见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)。
+完整安全边界见 [`SECURITY.md`](SECURITY.md)；Provider 能力矩阵与错误码见 [`docs/Provider兼容矩阵.md`](docs/Provider兼容矩阵.md)；当前方向见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)。
 
 ## 目录结构
 
@@ -173,8 +181,18 @@ python run.py "开发一个登录页面" \
 | `--config` | `-c` | 配置目录，默认 `config` |
 | `--max-workers` | `-w` | 最大并发 Worker 数，默认 `4` |
 | `--orchestrator-model` | `-m` | 运行时覆盖总指挥模型 |
+| `--output-format` |  | `plain`、`json` 或 `streaming-json`；后两者输出无头事件流 |
 
 > 如果没有指定子命令，`run.py` 会自动把第一个非命令参数当作 `run` 命令的请求参数。
+
+需要接入脚本或其他自动化工具时，可以使用机器可读输出：
+
+```bash
+mao run "检查当前项目并给出风险" --output-format json
+mao run "检查当前项目并给出风险" --output-format streaming-json
+```
+
+`json` 输出一个包含 `run` 和 `events` 的 JSON 对象；`streaming-json` 按 JSONL 逐行输出。事件包含计划、模型、工具、文件变更、命令、验证、审批、usage、错误和结束状态；Worker 正文不会写入事件流。
 
 ### 5. 进入持续对话模式（CLI）
 
@@ -226,11 +244,11 @@ Agent 系统提示会注入当前模型别名、上游请求模型 ID、本地�
 
 MAO 会从目标项目按层级加载 `AGENTS.md`、`CLAUDE.md`、`.mao/rules/*.md`，并兼容 Grok/Claude/Cursor 的规则目录；来源和截断诊断写入 RunJournal。用户级 `config/permissions.yaml` 与项目级 `.mao/permissions.yaml` 支持 `deny / ask / allow`，固定按 `deny > ask > allow > 会话默认` 决策，主 Agent 和 Worker 使用同一引擎。规则可用 `justification` 说明理由，并用 `match` / `not_match` 示例在加载时自检；失败规则会被忽略并报告诊断。示例见 `config/permissions.yaml.example`。
 
-持久化 Plan 模式在批准前强制全链路只读。主 Agent 取得真实侦察证据后，由证据检查、架构规划、风险审查和最终综合四个模型角色形成唯一方案；辅助模型不获得工具。设计与后续路线见 [`docs/Grok-Build行为契约融合.md`](docs/Grok-Build行为契约融合.md)。
+持久化 Plan 模式在批准前强制全链路只读。主 Agent 取得真实侦察证据后，由证据检查、架构规划、风险审查和最终综合四个模型角色形成唯一方案；辅助模型不获得工具。历史设计记录见 [`docs/archive/completed-beta/Grok-Build行为契约融合.md`](docs/archive/completed-beta/Grok-Build行为契约融合.md)，当前优化顺序见 [`docs/MAO-优化与后续开发规划.md`](docs/MAO-优化与后续开发规划.md)。
 
-后续上下文能力将按“模型窗口真值 → 动态安全预算 → 分层压缩 → 持久项目上下文 → 长任务基准”推进，详见 [`docs/上下文扩展与长任务稳定性计划.md`](docs/上下文扩展与长任务稳定性计划.md)。在上游限制未经确认前，默认预算保持 32K。
+后续上下文能力将按“模型窗口真值 → 动态安全预算 → 分层压缩 → 持久项目上下文 → 长任务基准”推进，详见 [`docs/上下文扩展与长任务稳定性计划.md`](docs/上下文扩展与长任务稳定性计划.md)。未验证模型的本地默认安全预算为 **200K**（非上游物理上限声明）。
 
-公开版 `v0.1.0-beta.7`（安全补丁）修复 `run_command` 允许 `python -c`/`node -e` 内联代码执行的 P0；beta.6 已完成受控 Plugin API v0：通过 `mao.plugins` entry point 发现插件、默认关闭需显式启用、API 版本约束、加载失败隔离、`mao plugin list/doctor/enable/disable`、示例插件与 Web 可见性；Windows/Ubuntu、Python 3.11/3.12 和安全 CI 全部通过。beta.3-beta.5 的 Provider 可信接入、工程透明度、会话恢复、分层压缩、项目索引、模型路由、可复现基准与对抗测试均已落地。真实多模型对比因累计授权已耗尽而暂停，需所有者重新给出次数与费用边界后才恢复。插件开发见 `examples/plugins/mao_wordcount_plugin`，版本范围见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)。
+公开版 `v0.1.0-beta.7`（安全补丁）修复 `run_command` 允许 `python -c`/`node -e` 内联代码执行的 P0；beta.6 已完成受控 Plugin API v0：通过 `mao.plugins` entry point 发现插件、默认关闭需显式启用、API 版本约束、加载失败隔离、`mao plugin list/doctor/enable/disable`、示例插件与 Web 可见性；Windows/Ubuntu、Python 3.11/3.12 和安全 CI 全部通过。beta.3-beta.5 的 Provider 可信接入、工程透明度、会话恢复、分层压缩、项目索引、模型路由、可复现基准与对抗测试均已落地。真实多模型对比因累计授权已耗尽而暂停，需所有者重新给出次数与费用边界后才恢复。插件开发见 `examples/plugins/mao_wordcount_plugin`，已完成版本计划归档于 [`docs/archive/completed-beta/版本计划-v0.1.0-beta.3至beta.6.md`](docs/archive/completed-beta/版本计划-v0.1.0-beta.3至beta.6.md)。
 
 B5 的公开离线合同可直接运行 `python scripts/benchmark_engineering.py`。它在隔离工作区对六类程序化任务分别执行固定单模型、自动路由和多模型 fixture 策略三次，共 54 条结果，全程不读取 Key、不调用 Provider；输出属于合成合同数据，不代表真实模型效果。
 
@@ -353,4 +371,4 @@ Worker 在执行任务时可以使用以下工具：
 
 ## 后续计划
 
-当前按 `beta.5`、`beta.6` 顺序推进，见 [`docs/版本计划-v0.1.0-beta.3至beta.6.md`](docs/版本计划-v0.1.0-beta.3至beta.6.md)。产品原则见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)，当前执行清单见 [`docs/Beta5-执行清单.md`](docs/Beta5-执行清单.md)。
+当前先按 [`docs/MAO-优化与后续开发规划.md`](docs/MAO-优化与后续开发规划.md) 收口文档、U4 边界、Provider 兼容性和真实用户验证，再进入后续功能开发。产品原则见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)，当前状态见 [`docs/项目进度与关键操作.md`](docs/项目进度与关键操作.md)。

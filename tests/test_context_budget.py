@@ -18,8 +18,8 @@ def test_unknown_model_uses_conservative_explainable_budget():
     )
 
     assert report.context_window_tokens == 0
-    assert report.safe_context_tokens == 32000
-    assert report.input_budget_tokens == 32000 - 4096 - 512
+    assert report.safe_context_tokens == 200_000
+    assert report.input_budget_tokens == 200_000 - 4096 - 512
     assert report.context_window_source == "unverified_default"
     assert any("动态模型别名" in warning for warning in report.warnings)
 
@@ -51,14 +51,36 @@ def test_verified_window_applies_safety_output_protocol_and_tools():
     assert report.within_budget is True
 
 
-def test_output_above_configured_max_is_rejected():
+def test_output_above_configured_max_is_clamped_not_blocking():
+    """误填过小的 max_output 不应阻断对话；抬升预留并告警。"""
     manager = ContextBudgetManager()
     config = ModelConfig(provider="p", model_id="m", max_output_tokens=1024)
     report = manager.calculate("m", config, [], requested_output_tokens=2048)
 
-    assert report.within_budget is False
-    with pytest.raises(ContextBudgetExceeded, match="超过配置最大输出"):
-        manager.ensure_fits(report)
+    assert report.within_budget is True
+    assert report.output_reserve_tokens == 2048
+    assert any("低于本次请求" in w for w in report.warnings)
+    manager.ensure_fits(report)  # 不应再因 max_output 误填而抛错
+
+
+def test_tiny_declared_window_falls_back_to_default_200k():
+    manager = ContextBudgetManager()
+    config = ModelConfig(
+        provider="p",
+        model_id="m",
+        context_window_tokens=3072,
+        max_output_tokens=3841,
+    )
+    report = manager.calculate(
+        "m",
+        config,
+        [ChatMessage(role="user", content="hello")],
+        requested_output_tokens=4096,
+    )
+    assert report.within_budget is True
+    assert report.safe_context_tokens == 200_000
+    assert report.input_budget_tokens > 0
+    assert any("过小" in w for w in report.warnings)
 
 
 def test_legacy_max_context_is_safe_budget_not_claimed_hard_window():

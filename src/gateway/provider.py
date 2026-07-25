@@ -8,6 +8,7 @@ from typing import Any
 import anthropic
 import openai
 
+from src.gateway.errors import ProviderError
 from src.models.schemas import (
     ChatMessage,
     ChatResponse,
@@ -347,9 +348,11 @@ class OpenAICompatibleProvider(BaseProvider):
         if tools:
             request_kwargs["tools"] = tools
         response = client.chat.completions.create(**request_kwargs)
+        self._ensure_chat_completion_response(response, request_kwargs["model"])
 
-        input_tokens = response.usage.prompt_tokens if response.usage else 0
-        output_tokens = response.usage.completion_tokens if response.usage else 0
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", 0) or 0 if usage else 0
+        output_tokens = getattr(usage, "completion_tokens", 0) or 0 if usage else 0
         cost = self._calc_cost(input_tokens, output_tokens, model_config)
 
         content = response.choices[0].message.content or ""
@@ -501,6 +504,41 @@ class OpenAICompatibleProvider(BaseProvider):
                 params = {}
             parts.append(f"```tool:{name}\n{json.dumps(params, ensure_ascii=False)}\n```")
         return "\n".join(parts)
+
+    def _ensure_chat_completion_response(self, response: Any, model_id: str) -> None:
+        """部分转发站在 base_url 缺 /v1 时会返回 HTML 字符串，SDK 不抛错但无法解析。"""
+        if isinstance(response, str):
+            snippet = response.lstrip()[:80].lower()
+            looks_html = snippet.startswith("<!doctype") or snippet.startswith("<html")
+            base = (self.config.base_url or "").rstrip("/")
+            hint = ""
+            if looks_html:
+                hint = (
+                    f"端点返回了网页而不是 Chat Completions JSON。"
+                    f"请检查 base_url（当前 {base!r}）是否应带 /v1，"
+                    f"例如 https://api.example.com/v1。"
+                )
+            else:
+                hint = (
+                    f"端点返回了非结构化字符串，无法读取 usage/choices。"
+                    f"请检查 base_url={base!r} 与 model_id={model_id!r}。"
+                )
+            raise ProviderError(
+                "invalid_request_error",
+                provider=self.name,
+                model=model_id,
+                detail=hint,
+            )
+        if not getattr(response, "choices", None):
+            raise ProviderError(
+                "invalid_request_error",
+                provider=self.name,
+                model=model_id,
+                detail=(
+                    f"响应缺少 choices。请检查 base_url={self.config.base_url!r} "
+                    f"与 model_id={model_id!r} 是否为该转发站支持的组合。"
+                ),
+            )
 
     def _calc_cost(self, input_tokens: int, output_tokens: int, model_config: ModelConfig) -> float:
         return (

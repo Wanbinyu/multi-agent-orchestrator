@@ -4,7 +4,7 @@
 
 **基线版本**：`v0.1.0-beta.7`（安全补丁）
 
-**更新日期**：2026-07-21
+**更新日期**：2026-07-25
 
 ## 1. 长期目标
 
@@ -38,7 +38,7 @@ MAO 不与成熟 Coding Agent 比拼全部功能。优先建立四个可验证�
 
 ## 4. 当前基线
 
-`v0.1.0-beta.2` 已具备：
+截至 `v0.1.0-beta.7`，当前基线已具备：
 
 - `pipx` 安装以及 `mao` / `mao web` 全局入口。
 - Provider 配置 UI、主模型选择和连接测试。
@@ -51,7 +51,7 @@ MAO 不与成熟 Coding Agent 比拼全部功能。优先建立四个可验证�
 
 ## 5. 近期版本路线
 
-执行范围和发布门统一在 [`版本计划-v0.1.0-beta.3至beta.6.md`](版本计划-v0.1.0-beta.3至beta.6.md) 维护，本文不再重复任务清单。
+已完成 Beta 的执行范围和发布门保留在 [`archive/completed-beta/版本计划-v0.1.0-beta.3至beta.6.md`](archive/completed-beta/版本计划-v0.1.0-beta.3至beta.6.md)；当前优化与后续开发统一在 [`MAO-优化与后续开发规划.md`](MAO-优化与后续开发规划.md) 维护，本文不再重复任务清单。
 
 | 版本 | 主要结果 | 当前状态 |
 |---|---|---|
@@ -62,7 +62,7 @@ MAO 不与成熟 Coding Agent 比拼全部功能。优先建立四个可验证�
 | `v0.1.0-beta.7` | 安全补丁：修复 `run_command` 内联代码执行 P0 | 已发布 |
 | `v0.2.0` | 面向更广泛用户的稳定版本 | 不自动发布；进入条件 #2/#4/#5 已满足，#1（外部用户）#3（真实基准）待外部输入/授权 |
 
-`beta.3` 的逐项执行和验收见 [`Beta3-执行清单.md`](Beta3-执行清单.md)，Claude 与插件的边界见 [`Claude与插件接入决策.md`](Claude与插件接入决策.md)。桌面应用、IDE 扩展和团队服务只有在真实用户需求明确后再立项。
+`beta.3` 的逐项执行和验收见 [`archive/completed-beta/Beta3-执行清单.md`](archive/completed-beta/Beta3-执行清单.md)，Claude 与插件的历史边界见 [`archive/completed-beta/Claude与插件接入决策.md`](archive/completed-beta/Claude与插件接入决策.md)。桌面应用、IDE 扩展和团队服务只有在真实用户需求明确后再立项。
 
 ## 6. 用户验证指标
 
@@ -95,14 +95,14 @@ MAO 不与成熟 Coding Agent 比拼全部功能。优先建立四个可验证�
 
 ## 8. 外部参考原则
 
-MAO 可以学习 OpenCode、Aider、Cline、Roo Code 等项目的公开设计，但不以复制功能清单为路线。当前 OpenCode 审计见 [`参考项目-OpenCode.md`](参考项目-OpenCode.md)。
+MAO 可以学习 OpenCode、Aider、Cline、Roo Code 等项目的公开设计，但不以复制功能清单为路线。OpenCode 审计记录见 [`archive/completed-beta/参考项目-OpenCode.md`](archive/completed-beta/参考项目-OpenCode.md)，后续是否吸收由优化规划中的验证门决定。
 
 借鉴顺序是：公开接口和交互思想 → 独立设计 → 小范围实现 → 测试验证。复制 MIT 代码时仍必须保留许可证和版权声明；没有必要时优先独立实现。
 
 ## 9. 文档治理
 
 - 当前架构只在 [`MAO-架构概览.md`](MAO-架构概览.md) 维护。
-- 当前产品原则和优先级只在本文维护，具体版本任务只在 [`版本计划-v0.1.0-beta.3至beta.6.md`](版本计划-v0.1.0-beta.3至beta.6.md) 维护。
+- 当前产品原则和优先级只在本文维护；当前优化任务只在 [`MAO-优化与后续开发规划.md`](MAO-优化与后续开发规划.md) 维护。
 - 当前进度、恢复步骤和常用命令只在 [`项目进度与关键操作.md`](项目进度与关键操作.md) 维护。
 - 上下文细节在 [`上下文扩展与长任务稳定性计划.md`](上下文扩展与长任务稳定性计划.md) 维护。
 - 已完成阶段、旧对标和发布过程移入 `docs/archive/`，不得继续作为当前状态引用。

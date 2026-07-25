@@ -32,7 +32,10 @@ class TestPages:
         assert res.status_code == 200
         assert "text/html" in res.headers["content-type"]
         assert "模型连接配置" in res.text
-
+        assert "一键预设模型" in res.text
+        assert "系统自动管理" in res.text or "预算由系统" in res.text
+        assert "catalog-pick" in res.text
+        assert "上游窗口" not in res.text  # 普通用户不暴露窗口字段
     def test_health(self, client):
         res = client.get("/health")
         assert res.status_code == 200
@@ -263,6 +266,50 @@ class TestProviderCrud:
         assert "to-delete" not in cfg["providers"]
         assert "m1" not in cfg["models"]
 
+    def test_delete_single_model_keeps_provider(self, client):
+        payload = {
+            "preset_key": "openai",
+            "provider_name": "openai-keep",
+            "display_name": "OpenAI Keep",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "k",
+            "timeout": 60,
+            "models": [
+                {"alias": "gpt-4o", "model_id": "gpt-4o"},
+                {"alias": "gpt-4o-mini", "model_id": "gpt-4o-mini"},
+            ],
+            "set_as_main": True,
+        }
+        assert client.post("/api/config/providers", json=payload).status_code == 200
+
+        res = client.delete("/api/config/models/gpt-4o")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert body["deleted"] == "gpt-4o"
+        assert body["main_model"] == "gpt-4o-mini"
+
+        cfg = client.get("/api/config").json()
+        assert "openai-keep" in cfg["providers"]
+        assert "gpt-4o" not in cfg["models"]
+        assert "gpt-4o-mini" in cfg["models"]
+        assert cfg["main_model"] == "gpt-4o-mini"
+
+    def test_delete_unknown_model_404(self, client):
+        res = client.delete("/api/config/models/not-there")
+        assert res.status_code == 404
+
+    def test_catalog_models_endpoint(self, client):
+        res = client.get("/api/catalog/models")
+        assert res.status_code == 200
+        data = res.json()
+        assert "models" in data
+        aliases = {m["alias"] for m in data["models"]}
+        assert "deepseek-v4-pro" in aliases or "gpt-4o" in aliases
+        sample = data["models"][0]
+        assert "recommended_defaults" in sample
+        assert sample["recommended_defaults"]["context_safety_ratio"] == 0.08
+        assert sample["recommended_defaults"]["compaction_threshold"] == 0.75
 
 class TestConnection:
     def test_test_connection_success(self, client, monkeypatch):

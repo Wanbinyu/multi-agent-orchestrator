@@ -6,6 +6,25 @@ All notable changes are documented here. MAO follows Semantic Versioning; beta r
 
 Next target: `v0.2.0` entry conditions (external users, reproducible real benchmarks, and a Plugin API compatibility policy).
 
+### Added
+
+- One-shot `mao run` now supports `--output-format plain|json|streaming-json` for headless automation. JSON events cover plan, model usage, tools, commands, file changes, verification, approvals, usage totals, errors, and the final exit status.
+- Provider compatibility matrix (`docs/Provider兼容矩阵.md`) bound to `catalog.export_compatibility_matrix()` with contract tests.
+- CLI welcome mascot (cat on a ledge) shown at chat start; README features the same art at the top.
+- CLI bottom toolbar shows permission mode, per-turn and session token usage, cost, and a simple efficiency ratio (no reverse/white bar).
+- Web config UI: delete models from provider list and model pool; catalog one-click add and preset fill; advanced window/budget fields hidden for normal users.
+
+### Changed
+
+- Default local safe context budget for unverified models raised from 32K to **200K** (`DEFAULT_SAFE_CONTEXT_TOKENS`); still a local guard, not an upstream hard limit.
+- Mis-sized context windows (<16K) and too-small `max_output_tokens` are sanitized on save and softened at runtime so short chats are not blocked with zero input budget.
+- OpenAI-compatible providers detect HTML/string responses (often missing `/v1` on base_url) and return clear `invalid_request_error` guidance.
+- Gateway loads `.env` next to config and resolves `${VAR}` like the Web connection test path.
+
+### Fixed
+
+- CLI prompt no longer shows a stale `[approve]` prefix; mode lives only in the bottom toolbar and updates with Shift+Tab.
+
 ## [0.1.0-beta.7] - 2026-07-21
 
 ### Fixed

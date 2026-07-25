@@ -193,22 +193,29 @@ class Agent:
         max_tool_iterations: int = 8,
         approval_mode: ApprovalMode | None = None,
         memory_store: MemoryStore | None = None,
-        max_context_tokens: int = 32000,
+        max_context_tokens: int | None = None,
         compaction_threshold: float = 0.75,
         journal_store: RunJournalStore | None = None,
         intent_classifier: TaskIntentClassifier | None = None,
         project_rule_resolver: ProjectRuleResolver | None = None,
         permission_rule_engine: PermissionRuleEngine | None = None,
     ):
+        from src.core.context_budget import DEFAULT_SAFE_CONTEXT_TOKENS
+
         self.gateway = gateway
         self.session = session
         self.max_tool_iterations = max_tool_iterations
         self.approval_mode: ApprovalMode = approval_mode or session.approval_mode
         self.memory_store = memory_store
-        self.max_context_tokens = max_context_tokens
+        # None → 与 ContextBudgetManager 默认一致（当前 200K）
+        self.max_context_tokens = (
+            DEFAULT_SAFE_CONTEXT_TOKENS
+            if max_context_tokens is None
+            else max_context_tokens
+        )
         self.compaction_threshold = compaction_threshold
         self.context_budget_manager = ContextBudgetManager(
-            default_safe_context_tokens=max_context_tokens
+            default_safe_context_tokens=self.max_context_tokens
         )
         self._pending_permissions: dict[str, asyncio.Event] = {}
         self._permission_results: dict[str, bool] = {}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -237,6 +238,107 @@ def test_run_command_executes_full_flow(tmp_path, monkeypatch):
     mock_orchestrator.plan.assert_called_once_with("开发一个登录页面", memory_context=ANY)
     mock_dispatcher.dispatch.assert_called_once_with(plan, output_dir=str(output_dir), memory_context=ANY)
     mock_reviewer.review.assert_called_once()
+
+
+def test_run_command_json_output_is_machine_readable_and_ends_last(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    output_dir = tmp_path / "out"
+    (config_dir / "providers.yaml").write_text("providers:\nmodels:\n", encoding="utf-8")
+    (config_dir / "workers.yaml").write_text("orchestrator:\n  model: glm-ark\n", encoding="utf-8")
+
+    task = Task(id="t1", type="doc", title="写文档", input="写文档", assigned_model="glm-ark")
+    plan = TaskPlan(summary="写文档", tasks=[task])
+    result = TaskResult(
+        task=task,
+        success=True,
+        content="完成",
+        response=ChatResponse(
+            content="完成",
+            model="glm-ark",
+            provider="ark",
+            input_tokens=10,
+            output_tokens=5,
+        ),
+        files_written=[],
+    )
+
+    mock_gateway = MagicMock()
+    mock_gateway.billing.summary.return_value = {
+        "total_input_tokens": 10,
+        "total_output_tokens": 5,
+        "total_cost_usd": 0.0,
+        "calls": [{
+            "model": "glm-ark",
+            "task_id": "t1",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_usd": 0.0,
+        }],
+    }
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.plan.return_value = plan
+    mock_dispatcher = MagicMock()
+
+    def dispatch_with_progress(*args, **kwargs):
+        callback = kwargs["progress_callback"]
+        callback("task_start", {
+            "id": "t1",
+            "type": "doc",
+            "title": "写文档",
+            "assigned_model": "glm-ark",
+            "execution_mode": "write",
+        })
+        callback("task_complete", {
+            "id": "t1",
+            "type": "doc",
+            "title": "写文档",
+            "assigned_model": "glm-ark",
+            "execution_mode": "write",
+            "success": True,
+            "attempts": 1,
+            "tool_calls": [
+                {"tool": "run_command", "success": True},
+                {"tool": "write_file", "success": True},
+            ],
+            "files_written": ["out/t1.txt"],
+            "acceptance_evidence": ["验证命令通过：pytest"],
+        })
+        return [result]
+
+    mock_dispatcher.dispatch.side_effect = dispatch_with_progress
+    mock_reviewer = MagicMock()
+    mock_reviewer.review.return_value = ReviewResult(passed=True, issues=[], final_output="完成")
+
+    monkeypatch.setattr(run, "GatewayClient", lambda **kwargs: mock_gateway)
+    monkeypatch.setattr(run, "Orchestrator", lambda *args, **kwargs: mock_orchestrator)
+    monkeypatch.setattr(run, "Worker", MagicMock())
+    monkeypatch.setattr(run, "Dispatcher", lambda *args, **kwargs: mock_dispatcher)
+    monkeypatch.setattr(run, "Reviewer", lambda *args, **kwargs: mock_reviewer)
+
+    result_invoke = runner.invoke(run.app, [
+        "run", "写一份文档",
+        "--output", str(output_dir),
+        "--config", str(config_dir),
+        "--output-format", "json",
+    ])
+
+    assert result_invoke.exit_code == 0, result_invoke.output
+    payload = json.loads(result_invoke.output)
+    assert payload["events"][-1]["type"] == "end"
+    assert [event["type"] for event in payload["events"]].count("usage") == 1
+    event_types = [event["type"] for event in payload["events"]]
+    assert "command" in event_types
+    assert "tool" in event_types
+    assert "file_change" in event_types
+    assert "verification" in event_types
+    assert any(
+        event["type"] == "model" and event["data"].get("phase") == "usage"
+        and event["data"]["model"] == "glm-ark"
+        for event in payload["events"]
+    )
+    assert payload["events"][-1]["data"]["exit_code"] == 0
+    assert payload["events"]
 
 
 def test_run_command_without_request_argument_fails():

@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 import yaml
@@ -137,8 +138,13 @@ class GatewayClient:
 
     def _load_config(self, config_path: str):
         resolved = resolve_providers_config_path(config_path)
+        self.config_path = str(resolved)
+        # 与 WebUI 对齐：从 cwd / 配置目录加载 .env，避免 expandvars 时变量尚未进环境
+        self._ensure_dotenv_loaded(resolved)
         with resolved.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
+
+        env_path = self._resolve_env_path(resolved)
 
         # 加载 providers
         disabled_providers: set[str] = set()
@@ -147,8 +153,12 @@ class GatewayClient:
             if not config.enabled:
                 disabled_providers.add(name)
                 continue
-            # 展开环境变量
-            config.api_keys = [os.path.expandvars(k) for k in config.api_keys]
+            # 展开环境变量；未展开成功时回退读取 .env（与 Web 测试连接同一策略）
+            config.api_keys = self._resolve_api_keys(
+                provider_name=name,
+                keys=list(config.api_keys or []),
+                env_path=env_path,
+            )
             self.providers[name] = create_provider(name, config)
 
         # 加载 models，跳过已禁用 provider 所属的模型
@@ -737,6 +747,128 @@ class GatewayClient:
 
     def get_router(self) -> ModelRouter:
         return self.router
+
+    def describe_key_status(self, provider_name: str) -> str:
+        """返回不泄露密钥内容的 Key 诊断文案（供 /test-models 使用）。"""
+        provider = self.providers.get(provider_name)
+        if not provider:
+            return "provider_missing"
+        keys = list(provider.config.api_keys or [])
+        if not keys:
+            return "missing"
+        key = keys[0] or ""
+        if self._is_unresolved_env_ref(key):
+            return f"unresolved_env_ref({key})"
+        if not key.strip():
+            return "empty"
+        return f"present(len={len(key)})"
+
+    @staticmethod
+    def _is_unresolved_env_ref(value: str) -> bool:
+        text = (value or "").strip()
+        return text.startswith("${") and text.endswith("}") and len(text) > 3
+
+    @staticmethod
+    def _ensure_dotenv_loaded(config_path: Path) -> None:
+        """Load .env from common locations without overriding already-set env vars."""
+        try:
+            from dotenv import load_dotenv
+        except ImportError:
+            return
+        candidates = [
+            Path.cwd() / ".env",
+            config_path.parent / ".env",
+            config_path.parent.parent / ".env",
+        ]
+        seen: set[str] = set()
+        for path in candidates:
+            try:
+                resolved = str(path.resolve())
+            except OSError:
+                resolved = str(path)
+            if resolved in seen or not path.is_file():
+                continue
+            seen.add(resolved)
+            load_dotenv(path, override=False)
+
+    @staticmethod
+    def _resolve_env_path(config_path: Path) -> Path:
+        """Prefer .env next to the config directory (project root /config → ../.env)."""
+        for candidate in (
+            Path.cwd() / ".env",
+            config_path.parent / ".env",
+            config_path.parent.parent / ".env",
+        ):
+            if candidate.is_file():
+                return candidate
+        return Path.cwd() / ".env"
+
+    @classmethod
+    def _resolve_api_keys(
+        cls,
+        *,
+        provider_name: str,
+        keys: list[str],
+        env_path: Path,
+    ) -> list[str]:
+        """Expand ${VAR} refs; fall back to .env file read like the WebUI test path."""
+        if not keys:
+            # 与 Web 一致：即使 yaml 未写 api_keys，也尝试按 Provider 名读 .env
+            fallback = cls._read_env_key(provider_name, env_path)
+            return [fallback] if fallback else []
+
+        resolved: list[str] = []
+        for raw in keys:
+            expanded = os.path.expandvars(raw or "")
+            if expanded and not cls._is_unresolved_env_ref(expanded):
+                resolved.append(expanded)
+                continue
+            # 1) 按 Provider 名约定变量（DEEPSEEK_API_KEY）
+            fallback = cls._read_env_key(provider_name, env_path)
+            if fallback:
+                resolved.append(fallback)
+                continue
+            # 2) 从 ${VAR} 原文解析变量名再读
+            var_name = cls._env_var_from_ref(raw or expanded)
+            if var_name:
+                from_file = cls._read_env_var(var_name, env_path)
+                if from_file:
+                    # 写回进程环境，便于后续 expandvars / SDK
+                    os.environ.setdefault(var_name, from_file)
+                    resolved.append(from_file)
+                    continue
+            # 保留原文，调用时会认证失败，但 /test-models 能诊断 unresolved
+            resolved.append(expanded or raw or "")
+        return resolved
+
+    @staticmethod
+    def _env_var_from_ref(value: str) -> str:
+        text = (value or "").strip()
+        if text.startswith("${") and text.endswith("}") and len(text) > 3:
+            return text[2:-1].strip()
+        return ""
+
+    @staticmethod
+    def _read_env_var(var_name: str, env_path: Path) -> str | None:
+        if not var_name:
+            return None
+        env_value = os.environ.get(var_name)
+        if env_value:
+            return env_value
+        if not env_path.is_file():
+            return None
+        try:
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith(f"{var_name}="):
+                    return line.split("=", 1)[1].strip() or None
+        except OSError:
+            return None
+        return None
+
+    @classmethod
+    def _read_env_key(cls, provider_name: str, env_path: Path) -> str | None:
+        var_name = f"{provider_name.upper().replace('-', '_')}_API_KEY"
+        return cls._read_env_var(var_name, env_path)
 
     def print_billing(self):
         summary = self.billing.summary()

@@ -320,3 +320,40 @@ def test_load_config_expands_env_vars(monkeypatch, tmp_path):
     client = GatewayClient(config_path=str(config_path))
 
     assert client.providers["test"].config.api_keys == ["expanded-key"]
+
+
+def test_load_config_resolves_key_from_dotenv_file(monkeypatch, tmp_path):
+    """Web 写的 .env 在环境未预先 export 时，CLI 也应能读到 Key。"""
+    monkeypatch.delenv("DEMO_API_KEY", raising=False)
+    config_path = tmp_path / "config" / "providers.yaml"
+    config_path.parent.mkdir(parents=True)
+    env_path = tmp_path / ".env"
+    env_path.write_text("DEMO_API_KEY=from-dotenv-file\n", encoding="utf-8")
+    config_path.write_text(
+        yaml.dump(
+            {
+                "providers": {
+                    "demo": {
+                        "name": "Demo",
+                        "type": "openai",
+                        "base_url": "https://example.com/v1",
+                        "api_keys": ["${DEMO_API_KEY}"],
+                    }
+                },
+                "models": {"demo-model": {"provider": "demo", "model_id": "m"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_create_provider(name, config):
+        fake = MagicMock()
+        fake.config = config
+        return fake
+
+    monkeypatch.setattr("src.gateway.client.create_provider", fake_create_provider)
+    monkeypatch.chdir(tmp_path)
+    client = GatewayClient(config_path=str(config_path))
+
+    assert client.providers["demo"].config.api_keys == ["from-dotenv-file"]
+    assert client.describe_key_status("demo").startswith("present")

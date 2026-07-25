@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from src.gateway.connection_test import check_provider_connection
+from src.models.catalog import BUILTIN_MODELS, export_compatibility_matrix
 from src.models.schemas import CapabilityState
 from src.ui import config_manager
 from src.ui.presets import (
@@ -30,8 +31,18 @@ class ModelEntry(BaseModel):
     capability_status: dict[str, CapabilityState] = Field(default_factory=dict)
     metadata_source: str = Field(default="unverified", min_length=1)
     metadata_verified_at: str = ""
-    context_window_tokens: int = Field(default=0, ge=0, le=2_000_000)
-    max_output_tokens: int = Field(default=4096, ge=1, le=262_144)
+    context_window_tokens: int = Field(
+        default=0,
+        ge=0,
+        le=2_000_000,
+        description="0=未知，运行时使用默认安全预算（当前 200K）；一般无需用户填写",
+    )
+    max_output_tokens: int = Field(
+        default=8192,
+        ge=1,
+        le=262_144,
+        description="默认 8192，避免低于系统默认输出预留 4096",
+    )
     context_safety_ratio: float = Field(default=0.08, ge=0.0, le=0.5)
     compaction_threshold: float = Field(default=0.75, ge=0.25, le=0.95)
     context_window_source: str = "unverified"
@@ -111,6 +122,60 @@ def get_preset_detail(preset_key: str) -> dict[str, Any]:
         ),
         "env_var": get_env_var_name(preset_key),
     }
+
+
+@router.get("/api/catalog/models")
+def list_catalog_models() -> dict[str, Any]:
+    """内置模型目录，供配置页一键填充默认窗口/价格/能力。"""
+    rows = export_compatibility_matrix()
+    models = []
+    for row in rows:
+        entry = BUILTIN_MODELS[row["alias"]]
+        models.append(
+            {
+                "alias": row["alias"],
+                "name": row["name"],
+                "provider_type": row["provider_type"],
+                "model_id": row["default_model_id"],
+                "input_price_per_1m": entry.input_price_per_1m,
+                "output_price_per_1m": entry.output_price_per_1m,
+                "capabilities": row["capabilities"],
+                "capability_status": row["capability_status"],
+                "metadata_source": row["metadata_source"],
+                "metadata_verified_at": row["metadata_verified_at"],
+                "context_window_tokens": row["context_window_tokens"],
+                "max_output_tokens": row["max_output_tokens"],
+                "context_safety_ratio": 0.08,
+                "compaction_threshold": 0.75,
+                "context_window_source": row["context_window_source"],
+                "context_window_verified_at": row["context_window_verified_at"],
+                "dynamic_model_alias": row["dynamic_model_alias"],
+                "recommended_defaults": {
+                    "context_window_tokens": row["context_window_tokens"],
+                    "max_output_tokens": row["max_output_tokens"] or 4096,
+                    "context_safety_ratio": 0.08,
+                    "compaction_threshold": 0.75,
+                    "note": (
+                        "上游窗口为 0 时 MAO 使用 32K 保守安全预算；"
+                        "安全余量默认 8%，压缩阈值默认 75%。一般无需手改。"
+                    ),
+                },
+            }
+        )
+    return {"models": models}
+
+
+@router.delete("/api/config/models/{alias}")
+def remove_model(alias: str) -> dict[str, Any]:
+    """从配置中删除单个模型别名（不删除整个 Provider）。"""
+    try:
+        result = config_manager.delete_model(
+            config_path=config_manager.DEFAULT_CONFIG_PATH,
+            model_alias=alias,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"success": True, **result}
 
 
 @router.get("/api/config")

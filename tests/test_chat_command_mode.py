@@ -191,7 +191,11 @@ def test_help_remains_available_but_welcome_is_compact(capsys):
 
     _print_welcome("session-1", "approve")
     output = capsys.readouterr().out
-    assert "输入 / 查看命令" in output
+    assert "MAO Chat" in output
+    assert "session-1" in output
+    assert "/\\_/\\" in output
+    assert "° °" in output or "ω" in output  # 搭台沿、眼巴巴的小猫
+    assert "token" in output.lower() or "权限" in output
     assert "/memory add" not in output
 
 

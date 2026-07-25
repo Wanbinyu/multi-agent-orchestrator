@@ -1,7 +1,11 @@
 # 本地 LLM 接入与扩展点
 
-> 让 MAO 能使用本地 LLM（Ollama / llama.cpp），并为未来功能（MCP 等）预留扩展点。
-> 阶段：Phase 6.1+ 本地 LLM 接入。
+**状态**：现行  
+**更新日期**：2026-07-25  
+
+> 让 MAO 能使用本地 LLM（Ollama / llama.cpp），并为未来功能（MCP 等）预留扩展点。  
+> 阶段：Phase 6.1+ 本地 LLM 接入。  
+> 与全局兼容矩阵的关系：本地模型通常 `metadata_source=unverified` 或用户自填；零边际成本只作路由评分，**不能**绕过健康冷却、已验证能力与上下文预算。见 [`Provider兼容矩阵.md`](Provider兼容矩阵.md)。
 
 ---
 

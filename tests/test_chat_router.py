@@ -338,7 +338,7 @@ def test_context_status_is_local_and_explainable(client):
     assert data["model_alias"] == "glm"
     assert data["context_window_tokens"] == 0
     assert data["context_window_source"] == "unverified_default"
-    assert data["input_budget_tokens"] == 32000 - 4096 - 512
+    assert data["input_budget_tokens"] == 200_000 - 4096 - 512
     assert any("动态模型别名" in warning for warning in data["warnings"])
     chat_router.gateway.chat_with_main_model.assert_not_called()
 
