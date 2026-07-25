@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from threading import Event
 import time
 from pathlib import Path
 from typing import Any, Callable, MutableMapping
@@ -56,6 +57,7 @@ class Worker:
         memory_store: Any = None,
         stream_output: bool = False,
         stream_idle_timeout_seconds: float = 45.0,
+        cancel_event: Event | None = None,
     ):
         self.gateway = gateway
         self.workers_config = workers_config
@@ -66,6 +68,7 @@ class Worker:
         self.memory_store = memory_store
         self.stream_output = stream_output
         self.stream_idle_timeout_seconds = max(5.0, float(stream_idle_timeout_seconds))
+        self.cancel_event = cancel_event
 
     @staticmethod
     def _progress_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -114,6 +117,7 @@ class Worker:
             model_name=model_name,
             task_id=task.id,
             max_retries=2,
+            cancel_event=self.cancel_event,
             **kwargs,
         )
         content_parts: list[str] = []
@@ -216,6 +220,13 @@ class Worker:
         memory_context: str | None = None,
     ) -> TaskResult:
         """执行一个子任务"""
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            return TaskResult(
+                task=task,
+                success=False,
+                content="",
+                error="任务已取消",
+            )
         worker_cfg = self.workers_config.get(task.type)
         if not worker_cfg:
             return TaskResult(
@@ -330,6 +341,15 @@ class Worker:
             command_state: dict[str, Any] = {"preflight_failures": 0}
 
             while True:
+                if self.cancel_event is not None and self.cancel_event.is_set():
+                    return TaskResult(
+                        task=task,
+                        success=False,
+                        content=final_content,
+                        error="任务已取消",
+                        files_written=files_written,
+                        tool_calls=tool_trace,
+                    )
                 self._notify(
                     progress_callback,
                     task,

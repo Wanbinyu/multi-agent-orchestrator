@@ -1,6 +1,7 @@
 """Web 对话路由单元测试"""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
 import pytest
@@ -68,6 +69,25 @@ def test_permission_response_rejects_unknown_request(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "权限请求不存在或已经处理"
+
+
+def test_active_agent_registration_is_atomic():
+    session_id = "atomic-registration-test"
+    first = MagicMock()
+    second = MagicMock()
+    chat_router.active_agents.pop(session_id, None)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(
+                lambda item: chat_router._try_register_agent(session_id, item),
+                (first, second),
+            ))
+        assert sum(results) == 1
+        active = chat_router._active_agent(session_id)
+        assert active is first or active is second
+    finally:
+        chat_router._release_agent(session_id, first)
+        chat_router._release_agent(session_id, second)
 
 
 def test_plan_mode_api_persists_revision_and_approval_handoff(client):

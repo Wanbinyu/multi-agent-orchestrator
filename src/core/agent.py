@@ -222,6 +222,9 @@ class Agent:
         )
         self._pending_permissions: dict[str, asyncio.Event] = {}
         self._permission_results: dict[str, bool] = {}
+        self._permission_loops: dict[str, asyncio.AbstractEventLoop] = {}
+        self._permission_lock = threading.Lock()
+        self._cancel_event = threading.Event()
         self._native_tools_cache: list[dict[str, Any]] | None = None
         self._native_tools_computed = False
         self._native_tools_model = ""
@@ -241,6 +244,24 @@ class Agent:
         self._active_run_journal: RunJournal | None = None
         self.recovery_manager = SessionRecoveryManager(session, self.journal_store)
         self._active_recovery_checkpoint = None
+
+    def cancel(self) -> None:
+        """Request cancellation of the current turn and wake permission waits."""
+        self._cancel_event.set()
+        with self._permission_lock:
+            pending = [
+                (loop, event)
+                for request_id, event in self._pending_permissions.items()
+                for loop in [self._permission_loops.get(request_id)]
+                if loop is not None
+            ]
+            for request_id in self._pending_permissions:
+                self._permission_results[request_id] = False
+        for loop, event in pending:
+            try:
+                loop.call_soon_threadsafe(event.set)
+            except RuntimeError:
+                continue
 
     def _claim_recovery_checkpoint(self, journal: RunJournal) -> None:
         checkpoint = self.recovery_manager.claim_checkpoint(journal.run_id)
@@ -621,6 +642,7 @@ class Agent:
                 model,
                 task_id=task_id,
                 routing_fallback_model=fallback,
+                cancel_event=self._cancel_event,
                 **kwargs,
             ):
                 yield chunk
@@ -628,6 +650,7 @@ class Agent:
         async for chunk in self.gateway.chat_with_main_model_stream(
             messages=messages,
             task_id=task_id,
+            cancel_event=self._cancel_event,
             **kwargs,
         ):
             yield chunk
@@ -1332,31 +1355,41 @@ class Agent:
     def _register_permission_request(self) -> str:
         """注册一个新的权限请求，返回 request_id"""
         request_id = f"perm-{self.session.id}-{uuid.uuid4().hex[:8]}"
-        self._pending_permissions[request_id] = asyncio.Event()
-        self._permission_results[request_id] = False
+        with self._permission_lock:
+            self._pending_permissions[request_id] = asyncio.Event()
+            self._permission_results[request_id] = False
+            self._permission_loops[request_id] = asyncio.get_running_loop()
         return request_id
 
     def respond_to_permission(self, request_id: str, approved: bool) -> bool:
         """Resolve one live permission request without retaining stale IDs."""
-        event = self._pending_permissions.get(request_id)
-        if event is None:
+        with self._permission_lock:
+            event = self._pending_permissions.get(request_id)
+            loop = self._permission_loops.get(request_id)
+            if event is None or loop is None:
+                return False
+            self._permission_results[request_id] = approved
+        try:
+            loop.call_soon_threadsafe(event.set)
+        except RuntimeError:
             return False
-        self._permission_results[request_id] = approved
-        if not event.is_set():
-            event.set()
         return True
 
     async def _wait_for_permission(self, request_id: str) -> bool:
         """等待用户对指定权限请求的响应"""
-        event = self._pending_permissions.get(request_id)
+        with self._permission_lock:
+            event = self._pending_permissions.get(request_id)
         if not event:
             return False
         try:
             await event.wait()
-            return self._permission_results.get(request_id, False)
+            with self._permission_lock:
+                return self._permission_results.get(request_id, False)
         finally:
-            self._pending_permissions.pop(request_id, None)
-            self._permission_results.pop(request_id, None)
+            with self._permission_lock:
+                self._pending_permissions.pop(request_id, None)
+                self._permission_results.pop(request_id, None)
+                self._permission_loops.pop(request_id, None)
 
     def _has_tool_calls(
         self, content: str, content_blocks: list[MessageContentBlock] | None = None
@@ -1669,6 +1702,16 @@ class Agent:
                 engineering=engineering,
             )
             raise
+        except asyncio.CancelledError:
+            self.cancel()
+            engineering = await asyncio.to_thread(
+                self._finish_engineering_run,
+                run_journal,
+                "blocked",
+                residual_risks=["流式客户端断开，任务已取消"],
+            )
+            yield ChatStreamEvent(type="engineering_complete", engineering=engineering)
+            raise
 
     def _build_local_delivery_report(
         self,
@@ -1713,13 +1756,19 @@ class Agent:
                 run_journal.execution_depth,
             )
         ):
+            collaboration_error_seen = False
             async for event in self._run_collaboration_stream(
                 user_input, billing_before, run_journal
             ):
+                if event.type == "error":
+                    collaboration_error_seen = True
                 if event.type == "done":
-                    run_status = (
-                        "blocked" if "取消" in event.assistant_message else "completed"
-                    )
+                    if "取消" in event.assistant_message:
+                        run_status = "blocked"
+                    elif collaboration_error_seen:
+                        run_status = "failed"
+                    else:
+                        run_status = "completed"
                     engineering = await asyncio.to_thread(
                         self._finish_engineering_run,
                         run_journal,
@@ -2429,7 +2478,13 @@ class Agent:
         dispatch_results: list[TaskResult] = []
 
         def _progress(event_type: str, payload: dict[str, Any]):
-            asyncio.run_coroutine_threadsafe(queue.put((event_type, payload)), loop)
+            if self._cancel_event.is_set():
+                return
+            try:
+                asyncio.run_coroutine_threadsafe(queue.put((event_type, payload)), loop)
+            except RuntimeError:
+                # The Web request may have disconnected and closed its loop.
+                return
 
         def _dispatch():
             nonlocal error_info
@@ -2445,6 +2500,7 @@ class Agent:
                     permission_engine=self._active_permission_engine,
                     approval_mode="auto",
                     memory_store=self.memory_store,
+                    cancel_event=self._cancel_event,
                     # 测试替身或第三方 Gateway 可能只实现同步 chat；真实
                     # GatewayClient 才启用 Worker 的流式回合。
                     stream_output=isinstance(self.gateway, GatewayClient),
@@ -2452,6 +2508,7 @@ class Agent:
                 dispatcher = Dispatcher(
                     worker,
                     max_workers=run_journal.execution_depth.budget.max_workers,
+                    cancel_event=self._cancel_event,
                 )
                 completed_results = dispatcher.dispatch(
                     plan,

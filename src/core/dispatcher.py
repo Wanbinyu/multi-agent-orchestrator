@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Event
 from typing import Any, Callable
 
 from src.core.collaboration import find_parallel_ownership_conflicts
@@ -15,9 +16,15 @@ ProgressCallback = Callable[[str, dict[str, Any]], None]
 class Dispatcher:
     """按任务依赖图（DAG）调度多个 Worker"""
 
-    def __init__(self, worker: Worker, max_workers: int = 4):
+    def __init__(
+        self,
+        worker: Worker,
+        max_workers: int = 4,
+        cancel_event: Event | None = None,
+    ):
         self.worker = worker
         self.max_workers = max_workers
+        self.cancel_event = cancel_event
 
     def dispatch(
         self,
@@ -103,6 +110,14 @@ class Dispatcher:
             accumulated_files: list[str] = []
             accumulated_acceptance: list[str] = []
             for attempt in range(1, task.max_retries + 2):
+                if self.cancel_event is not None and self.cancel_event.is_set():
+                    return TaskResult(
+                        task=task,
+                        success=False,
+                        content="",
+                        error="任务已取消",
+                        attempts=attempt,
+                    )
                 try:
                     result = self.worker.execute(
                         task,
@@ -199,7 +214,11 @@ class Dispatcher:
                 task=tasks[task_id],
                 success=False,
                 content="",
-                error="任务因依赖关系无法被执行（可能存在循环依赖或上游失败）",
+                error=(
+                    "任务已取消"
+                    if self.cancel_event is not None and self.cancel_event.is_set()
+                    else "任务因依赖关系无法被执行（可能存在循环依赖或上游失败）"
+                ),
             )
             results.append(result)
             completed[task_id] = result

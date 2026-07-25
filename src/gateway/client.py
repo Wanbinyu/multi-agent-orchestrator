@@ -490,29 +490,59 @@ class GatewayClient:
         final_model = chain[min(max(tried_models - 1, 0), len(chain) - 1)] if chain else model_name
         raise self._finalize_provider_error(last_error, final_model=final_model)
 
-    async def _asyncify_stream(self, sync_gen):
+    async def _asyncify_stream(
+        self,
+        sync_gen,
+        *,
+        cancel_event: threading.Event | None = None,
+    ):
         """把同步生成器包装为异步生成器，避免阻塞事件循环"""
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sentinel = object()
+        completed = False
+
+        def _enqueue(item: Any) -> None:
+            try:
+                asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+            except RuntimeError:
+                # The request loop may already be closed after a disconnect.
+                return
 
         def _reader():
             try:
                 for chunk in sync_gen:
-                    asyncio.run_coroutine_threadsafe(queue.put(chunk), loop)
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
+                    _enqueue(chunk)
             except Exception as exc:  # noqa: BLE001
-                asyncio.run_coroutine_threadsafe(queue.put(exc), loop)
+                _enqueue(exc)
             finally:
-                asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop)
+                close = getattr(sync_gen, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        pass
+                _enqueue(sentinel)
 
         threading.Thread(target=_reader, daemon=True).start()
-        while True:
-            item = await queue.get()
-            if item is sentinel:
-                break
-            if isinstance(item, Exception):
-                raise item
-            yield item
+        try:
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise asyncio.CancelledError
+                    completed = True
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                if cancel_event is not None and cancel_event.is_set():
+                    raise asyncio.CancelledError
+                yield item
+        finally:
+            if not completed and cancel_event is not None:
+                cancel_event.set()
 
     async def chat_stream(
         self,
@@ -524,6 +554,7 @@ class GatewayClient:
         **kwargs: Any,
     ):
         """统一流式对话入口，支持故障切换链；已开始输出后不再重试/切换"""
+        cancel_event = kwargs.pop("cancel_event", None)
         self._begin_attempt_trace()
         model_config = self.models.get(model_name)
         if not model_config:
@@ -598,7 +629,10 @@ class GatewayClient:
                 self._reserve_provider_attempt()
                 try:
                     stream = provider.chat_stream(messages, model_config, **kwargs)
-                    async for chunk in self._asyncify_stream(stream):
+                    async for chunk in self._asyncify_stream(
+                        stream,
+                        cancel_event=cancel_event,
+                    ):
                         chunks_yielded += 1
                         if chunk.type == "usage":
                             self.billing.record_stream(

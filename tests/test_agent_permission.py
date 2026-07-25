@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -126,6 +127,65 @@ def test_approve_yields_permission_request_and_executes_when_approved(tmp_path):
     written = tmp_path / "output" / "approved.txt"
     assert written.exists()
     assert written.read_text(encoding="utf-8") == "ok"
+
+
+def test_permission_response_from_other_thread_wakes_agent(tmp_path):
+    session = _make_session(tmp_path, approval_mode="approve")
+    gateway = MagicMock()
+    gateway.chat_with_main_model_stream.return_value = _async_chunks(
+        StreamChunk(
+            type="delta",
+            content='```tool:write_file\n{"path": "thread-approved.txt", "content": "ok"}\n```',
+        ),
+        StreamChunk(type="usage", input_tokens=1, output_tokens=1),
+    )
+    agent = Agent(gateway, session)
+
+    async def _run():
+        events: list[ChatStreamEvent] = []
+        responder: threading.Thread | None = None
+        async for event in agent.run_turn_stream("写文件"):
+            events.append(event)
+            if event.type == "permission_request":
+                request_id = event.permission_request["request_id"]
+                responder = threading.Thread(
+                    target=agent.respond_to_permission,
+                    args=(request_id, True),
+                )
+                responder.start()
+        if responder is not None:
+            responder.join(timeout=1)
+            assert not responder.is_alive()
+        return events
+
+    events = asyncio.run(asyncio.wait_for(_run(), timeout=2))
+    done = next(event for event in events if event.type == "done")
+    assert done.tool_calls[0]["success"] is True
+
+
+def test_cancel_wakes_pending_permission_request(tmp_path):
+    session = _make_session(tmp_path, approval_mode="approve")
+    gateway = MagicMock()
+    gateway.chat_with_main_model_stream.return_value = _async_chunks(
+        StreamChunk(
+            type="delta",
+            content='```tool:write_file\n{"path": "cancelled.txt", "content": "no"}\n```',
+        ),
+    )
+    agent = Agent(gateway, session)
+
+    async def _run():
+        events: list[ChatStreamEvent] = []
+        async for event in agent.run_turn_stream("取消写文件"):
+            events.append(event)
+            if event.type == "permission_request":
+                agent.cancel()
+        return events
+
+    events = asyncio.run(asyncio.wait_for(_run(), timeout=2))
+    done = next(event for event in events if event.type == "done")
+    assert done.tool_calls[0]["success"] is False
+    assert not (tmp_path / "output" / "cancelled.txt").exists()
 
 
 def test_unknown_permission_response_is_ignored(tmp_path):

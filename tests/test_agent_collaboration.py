@@ -426,6 +426,26 @@ def test_collaboration_stream_handles_task_failure(tmp_path):
     assert review.review["passed"] is False
 
 
+def test_collaboration_dispatch_exception_marks_run_failed(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway(collaborate=True)
+    agent = Agent(gateway, session)
+    task = Task(id="t1", type="frontend", title="写前端", input="", assigned_model="glm-ark")
+    plan = TaskPlan(summary="开发登录功能", tasks=[task])
+
+    with patch("src.core.orchestrator.Orchestrator") as MockOrchestrator, \
+         patch("src.core.dispatcher.Dispatcher") as MockDispatcher:
+        MockOrchestrator.return_value.plan.return_value = plan
+        MockDispatcher.return_value.dispatch.side_effect = RuntimeError("dispatcher down")
+        events = _collect_events(agent, "开发一个登录功能")
+
+    assert any(event.type == "error" for event in events)
+    engineering = next(
+        event.engineering for event in events if event.type == "engineering_complete"
+    )
+    assert engineering["status"] == "failed"
+
+
 def test_collaboration_real_worker_lists_reads_and_writes_file(tmp_path):
     """贯穿 Agent/Dispatcher/Worker，证明目录工具结果会回填并显式写文件。"""
     session = _make_session(tmp_path)

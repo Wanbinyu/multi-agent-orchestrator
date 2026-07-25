@@ -1,6 +1,8 @@
 """对话页面与 API 路由"""
 from __future__ import annotations
 
+import asyncio
+import threading
 from pathlib import Path
 from typing import Any, Literal
 
@@ -39,7 +41,27 @@ store = SessionStore(base_dir="sessions")
 
 # 当前正在流式响应的 Agent 实例，用于权限回调定位
 active_agents: dict[str, Agent] = {}
+_active_agents_lock = threading.Lock()
 _PROJECT_DIRECTORY_SCAN_LIMIT = 5000
+
+
+def _active_agent(session_id: str) -> Agent | None:
+    with _active_agents_lock:
+        return active_agents.get(session_id)
+
+
+def _try_register_agent(session_id: str, agent: Agent) -> bool:
+    with _active_agents_lock:
+        if session_id in active_agents:
+            return False
+        active_agents[session_id] = agent
+        return True
+
+
+def _release_agent(session_id: str, agent: Agent) -> None:
+    with _active_agents_lock:
+        if active_agents.get(session_id) is agent:
+            active_agents.pop(session_id, None)
 
 
 def _get_gateway() -> GatewayClient:
@@ -271,7 +293,7 @@ def update_session_recovery(
         session = store.load(session_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if session_id in active_agents:
+    if _active_agent(session_id) is not None:
         raise HTTPException(status_code=409, detail="会话仍有活跃请求，不能执行恢复决定")
     manager = SessionRecoveryManager(session)
     try:
@@ -356,20 +378,20 @@ def send_message(session_id: str, form: SendMessageForm) -> dict[str, Any]:
         session = store.load(session_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    if session_id in active_agents:
-        raise HTTPException(status_code=409, detail="会话已有活跃请求，请等待其结束")
-
     try:
         SessionRecoveryManager(session).require_ready()
     except RecoveryConfirmationRequired as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     agent = Agent(_get_gateway(), session)
-    active_agents[session_id] = agent
+    if not _try_register_agent(session_id, agent):
+        raise HTTPException(status_code=409, detail="会话已有活跃请求，请等待其结束")
     try:
         result = agent.run_turn(form.message)
     finally:
-        store.save(session)
-        active_agents.pop(session_id, None)
+        try:
+            store.save(session)
+        finally:
+            _release_agent(session_id, agent)
 
     return result.model_dump()
 
@@ -381,20 +403,21 @@ async def send_message_stream(session_id: str, form: SendMessageForm):
         session = store.load(session_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    if session_id in active_agents:
-        raise HTTPException(status_code=409, detail="会话已有活跃请求，请等待其结束")
-
     try:
         SessionRecoveryManager(session).require_ready()
     except RecoveryConfirmationRequired as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     agent = Agent(_get_gateway(), session)
-    active_agents[session_id] = agent
+    if not _try_register_agent(session_id, agent):
+        raise HTTPException(status_code=409, detail="会话已有活跃请求，请等待其结束")
 
     async def event_generator():
         try:
             async for event in agent.run_turn_stream(form.message):
                 yield f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
+        except asyncio.CancelledError:
+            agent.cancel()
+            raise
         except Exception as e:
             if isinstance(e, ProviderError):
                 ev = ChatStreamEvent(
@@ -408,8 +431,11 @@ async def send_message_stream(session_id: str, form: SendMessageForm):
                 ev = ChatStreamEvent(type="error", error=str(e))
             yield f"event: error\ndata: {ev.model_dump_json()}\n\n"
         finally:
-            store.save(session)
-            active_agents.pop(session_id, None)
+            agent.cancel()
+            try:
+                store.save(session)
+            finally:
+                _release_agent(session_id, agent)
 
     return StreamingResponse(
         event_generator(),
@@ -429,7 +455,7 @@ def update_mode(session_id: str, form: UpdateModeForm) -> dict[str, Any]:
     store.save(session)
 
     # 如果当前有活跃 Agent，同步更新其模式
-    agent = active_agents.get(session_id)
+    agent = _active_agent(session_id)
     if agent is not None:
         agent.approval_mode = form.mode
         agent.session.approval_mode = form.mode
@@ -449,7 +475,7 @@ def update_execution_depth(
 
     session.execution_depth = form.depth
     store.save(session)
-    agent = active_agents.get(session_id)
+    agent = _active_agent(session_id)
     if agent is not None:
         agent.session.execution_depth = form.depth
     return {"success": True, "depth": form.depth}
@@ -467,7 +493,7 @@ def update_model_routing(
 
     session.model_routing_mode = form.mode
     store.save(session)
-    agent = active_agents.get(session_id)
+    agent = _active_agent(session_id)
     if agent is not None:
         agent.session.model_routing_mode = form.mode
     return {"success": True, "mode": form.mode}
@@ -482,7 +508,7 @@ def update_adversarial_testing(
         session = store.load(session_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if session_id in active_agents:
+    if _active_agent(session_id) is not None:
         raise HTTPException(
             status_code=409,
             detail="会话仍有活跃请求，对抗测试设置将在本轮结束后才能修改",
@@ -528,7 +554,7 @@ def update_plan_mode(session_id: str, form: UpdatePlanModeForm) -> dict[str, Any
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     store.save(session)
-    active = active_agents.get(session_id)
+    active = _active_agent(session_id)
     if active is not None:
         active.session.plan_mode = session.plan_mode
         active.session.plan_artifact = session.plan_artifact
@@ -545,7 +571,7 @@ def respond_to_permission(
     session_id: str, request_id: str, form: PermissionResponseForm
 ) -> dict[str, Any]:
     """响应当前流式 Agent 的权限请求"""
-    agent = active_agents.get(session_id)
+    agent = _active_agent(session_id)
     if agent is None:
         raise HTTPException(status_code=410, detail="会话当前没有活跃流式请求")
 
@@ -558,7 +584,7 @@ def respond_to_permission(
 def delete_session(session_id: str) -> dict[str, Any]:
     if not store.exists(session_id):
         raise HTTPException(status_code=404, detail="会话不存在")
-    if session_id in active_agents:
+    if _active_agent(session_id) is not None:
         raise HTTPException(status_code=409, detail="会话仍有活跃请求，不能删除")
     store.delete(session_id)
     return {"success": True}
