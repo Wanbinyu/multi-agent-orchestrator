@@ -411,7 +411,14 @@ async def _stream_turn(agent: Agent, user_input: str) -> dict[str, Any]:
             while True:
                 elapsed = time.monotonic() - start
                 try:
-                    live.update(Markdown(f"{spinner_message} {frames[i % len(frames)]} ({elapsed:.1f}s)"))
+                    # 明确是「已用秒数」，不是进度百分比，避免 37.2 被误读为 37.2%
+                    live.update(
+                        Markdown(
+                            f"{spinner_message} {frames[i % len(frames)]} "
+                            f"已用时 {elapsed:.1f}s"
+                            f"（任务进行中无法 Shift+Tab；权限问询时可输入 auto）"
+                        )
+                    )
                 except Exception:
                     break
                 await asyncio.sleep(0.12)
@@ -537,6 +544,11 @@ async def _stream_turn(agent: Agent, user_input: str) -> dict[str, Any]:
                             "  参数："
                             + ", ".join(f"{k}={v}" for k, v in params.items())
                         )
+                console.print(
+                    "[dim]提示：任务执行中底部 Shift+Tab 无效；"
+                    "此处输入 auto/a 可切换到自动模式并批准后续同类请求。"
+                    "auto 默认允许读写/命令（仍受 permissions.yaml 的 deny 约束）。[/dim]"
+                )
                 answer = await asyncio.to_thread(
                     console.input, "允许执行？(y/n/auto)："
                 )
@@ -545,7 +557,10 @@ async def _stream_turn(agent: Agent, user_input: str) -> dict[str, Any]:
                     _set_mode(session, agent, mode_ref, "auto")
                     store.save(session)
                     approved = True
-                    console.print("[bold red]已切换到自动执行模式，并批准当前请求[/bold red]")
+                    console.print(
+                        "[bold red]已切换到自动执行模式，并批准当前请求；"
+                        "本会话后续非只读工具默认不再询问（deny 规则仍生效）[/bold red]"
+                    )
                 elif answer_clean in ("y", "yes", "是", "允许"):
                     approved = True
                     console.print("[dim]已允许[/dim]")

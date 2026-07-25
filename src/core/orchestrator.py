@@ -270,10 +270,21 @@ class Orchestrator:
             )
             if configured_model_names and preferred_model not in configured_model_names:
                 preferred_model = ""
+            # 默认模型若不在当前已配置 Provider 中，不要假装可用，交给 resolve 回退
+            if (
+                configured_model_names
+                and default_model
+                and default_model not in configured_model_names
+            ):
+                default_model = ""
             task.assigned_model = self.gateway.resolve_model(
-                preferred_model or default_model
+                preferred_model or default_model or None
             )
             tasks.append(task)
+
+        # 若所有子任务因默认模型缺失而塌缩成同一个可用模型，
+        # 在仍有多个已配置模型时按轮询分配，实现真正的多模型协作。
+        self._diversify_collapsed_task_models(tasks)
 
         raw_contract = plan_data.get("frontend_contract")
         plan = TaskPlan(
@@ -288,6 +299,24 @@ class Orchestrator:
             bind_and_validate_frontend_contract(plan)
         validate_collaboration_plan(plan)
         return plan
+
+    def _diversify_collapsed_task_models(self, tasks: list[Task]) -> None:
+        """When every task resolved to one model, spread work across configured models."""
+        if len(tasks) < 2:
+            return
+        available = list(getattr(self.gateway, "models", {}) or {})
+        if len(available) < 2:
+            return
+        assigned = [task.assigned_model for task in tasks if task.assigned_model]
+        if not assigned or len(set(assigned)) > 1:
+            return
+        # Prefer keeping main model on first/architect-like tasks when present
+        main = self.gateway.get_main_model()
+        pool = list(available)
+        if main and main in pool:
+            pool = [main] + [m for m in pool if m != main]
+        for index, task in enumerate(tasks):
+            task.assigned_model = pool[index % len(pool)]
 
     def _parse_json(self, text: str) -> dict:
         """从文本中提取 JSON"""

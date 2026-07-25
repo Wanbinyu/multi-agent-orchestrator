@@ -266,6 +266,74 @@ available_workers:
     assert plan.tasks[1].execution_mode == "verify"
 
 
+def test_plan_diversifies_when_all_tasks_collapse_to_one_available_model(tmp_path):
+    """workers 默认模型全不可用时，应轮询分配已配置模型，而不是全堆主模型。"""
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text(
+        """
+orchestrator:
+  model: glm-ark
+available_workers:
+  architect:
+    default_model: glm-ark
+  frontend_dev:
+    default_model: glm-ark
+  tester:
+    default_model: glm-ark
+""",
+        encoding="utf-8",
+    )
+    plan_data = {
+        "summary": "weather dash",
+        "tasks": [
+            {
+                "id": "a",
+                "type": "architect",
+                "title": "Arch",
+                "input": "design",
+                "assigned_model": "glm-ark",
+            },
+            {
+                "id": "b",
+                "type": "frontend_dev",
+                "title": "UI",
+                "input": "pages",
+                "assigned_model": "glm-ark",
+            },
+            {
+                "id": "c",
+                "type": "tester",
+                "title": "Test",
+                "input": "verify",
+                "assigned_model": "glm-ark",
+                "depends_on": ["b"],
+            },
+        ],
+    }
+    gateway = _mock_gateway(json.dumps(plan_data))
+    gateway.models = {
+        "openai": object(),
+        "deepseek-v4-pro": object(),
+        "deepseek-v4-flash": object(),
+    }
+    gateway.main_model = "openai"
+    gateway.get_main_model.return_value = "openai"
+    gateway.resolve_model = MagicMock(
+        side_effect=lambda preferred: (
+            preferred
+            if preferred in gateway.models
+            else gateway.main_model
+        )
+    )
+
+    plan = Orchestrator(gateway, config_path=str(config_path)).plan(
+        "做一个实时天气大屏"
+    )
+    models = [task.assigned_model for task in plan.tasks]
+    assert len(set(models)) >= 2
+    assert set(models).issubset(set(gateway.models))
+
+
 def test_plan_preserves_valid_model_when_only_worker_alias_changes(tmp_path):
     config_path = tmp_path / "workers.yaml"
     config_path.write_text(
