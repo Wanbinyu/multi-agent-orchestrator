@@ -75,18 +75,94 @@ SOFTWARE_WORKER_TYPE_ALIASES: dict[str, str] = {
 }
 
 
+def _coerce_task_text(value: object) -> str:
+    """把模型偶发输出的 list/dict 任务文本字段收成字符串。
+
+    Orchestrator JSON 里 ``input`` / ``output_format`` / ``acceptance`` 常被写成
+    对象或数组；Task schema 要求 str，收口时统一序列化而不是直接 ValidationError。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            else:
+                parts.append(json.dumps(item, ensure_ascii=False))
+        return "\n".join(parts)
+    if isinstance(value, dict):
+        # 常见嵌套：优先拼出可读段落，再附上完整 JSON 以免丢字段
+        preferred_keys = (
+            "user_requirements",
+            "requirements",
+            "description",
+            "content",
+            "text",
+            "summary",
+            "prompt",
+            "detail",
+            "details",
+            "goal",
+            "files",
+            "format",
+            "schema",
+            "criteria",
+            "acceptance",
+        )
+        lines: list[str] = []
+        for key in preferred_keys:
+            if key not in value:
+                continue
+            chunk = value[key]
+            if isinstance(chunk, str) and chunk.strip():
+                lines.append(f"{key}: {chunk.strip()}")
+            elif isinstance(chunk, list):
+                rendered = _coerce_task_text(chunk)
+                if rendered.strip():
+                    lines.append(f"{key}:\n{rendered}")
+            elif chunk is not None and not isinstance(chunk, dict):
+                lines.append(f"{key}: {chunk}")
+        if lines:
+            leftover = {
+                k: v for k, v in value.items() if k not in preferred_keys
+            }
+            body = "\n".join(lines)
+            if leftover:
+                body = (
+                    f"{body}\n\n"
+                    f"{json.dumps(leftover, ensure_ascii=False, indent=2)}"
+                )
+            return body
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    return str(value)
+
+
 def _normalize_task_text_fields(raw_task: object) -> dict:
-    """Normalize common LLM list output for free-form task text fields only."""
+    """Normalize free-form task text fields before Task validation."""
     if not isinstance(raw_task, dict):
         raise ValueError("模型输出的 tasks 条目必须是对象")
     normalized = dict(raw_task)
-    for field in ("output_format", "acceptance"):
+    for field in ("input", "output_format", "acceptance", "title"):
+        if field not in normalized:
+            continue
+        normalized[field] = _coerce_task_text(normalized.get(field))
+    # id / type / assigned_model 也常见被包成对象，尽量抽字符串
+    for field in ("id", "type", "assigned_model", "frontend_stage"):
         value = normalized.get(field)
-        if isinstance(value, list):
-            normalized[field] = "\n".join(
-                item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
-                for item in value
-            )
+        if isinstance(value, dict):
+            for key in ("id", "name", "type", "value", "model", "alias"):
+                if isinstance(value.get(key), str) and value[key].strip():
+                    normalized[field] = value[key].strip()
+                    break
+            else:
+                normalized[field] = _coerce_task_text(value)
+        elif value is not None and not isinstance(value, str):
+            normalized[field] = str(value)
     return normalized
 
 

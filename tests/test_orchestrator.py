@@ -4,8 +4,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.core.orchestrator import Orchestrator, _detect_scenario
-from src.models.schemas import ChatResponse, TaskPlan
+from src.core.orchestrator import (
+    Orchestrator,
+    _detect_scenario,
+    _normalize_task_text_fields,
+)
+from src.models.schemas import ChatResponse, Task, TaskPlan
 
 
 def _mock_gateway(response_content: str, main_model: str | None = "main-model") -> MagicMock:
@@ -70,6 +74,91 @@ def test_plan_returns_task_plan(tmp_path):
     call_kwargs = gateway.chat.call_args.kwargs
     assert call_kwargs["model_name"] == "glm-ark"
     assert call_kwargs["task_id"] == "orchestrator"
+
+
+def test_normalize_task_text_fields_accepts_dict_input_and_output_format():
+    """LLM 常把 input/output_format 写成对象；不得 ValidationError。"""
+    raw = {
+        "id": "architecture_scaffold",
+        "type": "architect",
+        "title": "架构与脚手架",
+        "input": {
+            "user_requirements": "实时天气大屏，要好看",
+            "类型与接入方式": "公开天气 API",
+        },
+        "output_format": {
+            "files": ["architecture.md", "README.md"],
+            "建议与落地方案": "给出技术选型与分工",
+        },
+        "acceptance": ["可运行", "有实时天气"],
+        "assigned_model": "deepseek-v4-pro",
+        "depends_on": [],
+    }
+    normalized = _normalize_task_text_fields(raw)
+    task = Task(**normalized)
+    assert isinstance(task.input, str)
+    assert "天气大屏" in task.input
+    assert isinstance(task.output_format, str)
+    assert "architecture.md" in task.output_format
+    assert isinstance(task.acceptance, str)
+    assert "可运行" in task.acceptance
+
+
+def test_task_model_coerces_dict_fields_directly():
+    task = Task(
+        id="t1",
+        type="frontend_dev",
+        title="页面",
+        input={"user_requirements": "天气大屏"},
+        output_format={"files": ["index.html"]},
+        acceptance=["好看"],
+        assigned_model="m",
+    )
+    assert "天气大屏" in task.input
+    assert "index.html" in task.output_format
+
+
+def test_plan_accepts_structured_task_text_objects(tmp_path):
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text(
+        """
+orchestrator:
+  model: glm-ark
+available_workers:
+  architect:
+    default_model: glm-ark
+  frontend_dev:
+    default_model: deepseek-chat
+  tester:
+    default_model: deepseek-chat
+""",
+        encoding="utf-8",
+    )
+    plan_data = {
+        "summary": "实时天气大屏",
+        "tasks": [
+            {
+                "id": "t1",
+                "type": "architect",
+                "title": "架构",
+                "input": {
+                    "user_requirements": "老板要实时天气大屏",
+                    "类型与接入方式": "Open-Meteo",
+                },
+                "output_format": {
+                    "files": ["architecture.md"],
+                    "建议与落地方案": "技术选型与分工",
+                },
+                "assigned_model": "glm-ark",
+            }
+        ],
+    }
+    gateway = _mock_gateway(json.dumps(plan_data, ensure_ascii=False))
+    orchestrator = Orchestrator(gateway, config_path=str(config_path))
+    plan = orchestrator.plan("做一个实时天气大屏")
+    assert len(plan.tasks) == 1
+    assert "天气" in plan.tasks[0].input
+    assert "architecture.md" in plan.tasks[0].output_format
 
 
 def test_plan_injects_project_rules_into_system_prompt(tmp_path):

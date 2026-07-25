@@ -1,6 +1,10 @@
 """Pydantic 数据模型"""
+from __future__ import annotations
+
+import json
 from datetime import date
 from typing import Any, Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -170,6 +174,32 @@ class Task(BaseModel):
         default=None,
         description="仅集成 Worker 持有的前端闭包与验证合同",
     )
+
+    @field_validator(
+        "input",
+        "output_format",
+        "acceptance",
+        "title",
+        "id",
+        "type",
+        "assigned_model",
+        mode="before",
+    )
+    @classmethod
+    def coerce_textish(cls, value: object) -> object:
+        """模型偶发把文本字段输出成 dict/list 时收成字符串。"""
+        if value is None or isinstance(value, str):
+            return value if value is not None else ""
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, list):
+            return "\n".join(
+                item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
+                for item in value
+            )
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        return str(value)
 
     @field_validator("depends_on", "owned_paths")
     @classmethod
