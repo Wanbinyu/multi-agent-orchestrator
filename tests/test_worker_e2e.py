@@ -1,4 +1,5 @@
 """Worker 端到端单元测试"""
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,6 +9,7 @@ from src.models.schemas import (
     ChatResponse,
     ModelConfig,
     ProviderConfig,
+    StreamChunk,
     Task,
     ToolResultContentBlock,
     ToolUseContentBlock,
@@ -350,3 +352,51 @@ def test_execute_saves_plain_text_as_content_file_when_no_code_blocks(tmp_path):
     content_path = output_dir / "frontend_t1" / "content.txt"
     assert content_path.exists()
     assert content_path.read_text(encoding="utf-8") == "这是一段没有代码块的普通正文内容。"
+
+
+def test_streaming_worker_emits_model_output_progress(tmp_path):
+    class StreamingGateway:
+        models = {
+            "glm-ark": SimpleNamespace(provider="ark", model_id="ark-code-latest")
+        }
+        providers = {"ark": SimpleNamespace(name="ark")}
+
+        def resolve_model(self, name):
+            return name
+
+        async def chat_stream(self, **_kwargs):
+            yield StreamChunk(type="delta", content="第一段")
+            yield StreamChunk(type="delta", content="第二段")
+            yield StreamChunk(type="usage", input_tokens=3, output_tokens=2)
+
+    events = []
+    worker = Worker(
+        StreamingGateway(),
+        _sample_workers_config(),
+        stream_output=True,
+    )
+    task = Task(
+        id="stream-1", type="frontend", title="流式任务", input="输出正文",
+        assigned_model="glm-ark",
+    )
+
+    result = worker.execute(
+        task,
+        output_dir=str(tmp_path / "out"),
+        progress_callback=lambda event_type, payload: events.append(
+            (event_type, payload)
+        ),
+    )
+
+    assert result.success is True
+    output_events = [
+        payload for event_type, payload in events
+        if event_type == "worker_status" and payload.get("phase") == "model_output"
+    ]
+    assert [item["delta"] for item in output_events] == ["第一段", "第二段"]
+    assert any(
+        payload.get("phase") == "model_request"
+        and payload.get("status") == "received"
+        for event_type, payload in events
+        if event_type == "worker_status"
+    )

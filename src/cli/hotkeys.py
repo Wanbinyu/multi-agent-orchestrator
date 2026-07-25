@@ -24,7 +24,20 @@ def poll_mode_hotkey() -> str | None:
             # Arrow/function keys start with \\x00 or \\xe0
             if ch in ("\x00", "\xe0"):
                 if msvcrt.kbhit():
-                    msvcrt.getwch()
+                    extended = msvcrt.getwch()
+                    # Windows console commonly reports Shift+Tab as
+                    # 0x00/0x0f.  Windows Terminal may send the ANSI form
+                    # below, handled in the escape branch.
+                    if extended == "\x0f":
+                        return "cycle"
+                return None
+            if ch == "\x1b":
+                # Windows Terminal can expose Shift+Tab as ESC [ Z.
+                sequence = ""
+                while msvcrt.kbhit() and len(sequence) < 2:
+                    sequence += msvcrt.getwch()
+                if sequence == "[Z":
+                    return "cycle"
                 return None
             return _map_key(ch)
         # POSIX: non-blocking stdin
@@ -36,6 +49,11 @@ def poll_mode_hotkey() -> str | None:
         if not ready:
             return None
         ch = sys.stdin.read(1)
+        if ch == "\x1b":
+            sequence = sys.stdin.read(2)
+            if sequence == "[Z":
+                return "cycle"
+            return None
         return _map_key(ch)
     except Exception:
         return None
@@ -62,6 +80,11 @@ def apply_hotkey_if_any(
     mode = poll_mode_hotkey()
     if not mode:
         return None
+    if mode == "cycle":
+        current = mode_ref[0] if mode_ref and mode_ref[0] else "approve"
+        modes = ("auto", "approve", "readonly")
+        index = modes.index(current) if current in modes else 0
+        mode = modes[(index + 1) % len(modes)]
     if mode_ref is not None and mode_ref and mode_ref[0] == mode:
         return None
     if mode_ref is not None and mode_ref:

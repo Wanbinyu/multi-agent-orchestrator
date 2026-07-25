@@ -16,6 +16,7 @@ def test_create_session(tmp_path):
 
     assert session.title == "测试会话"
     assert session.messages == []
+    assert session.approval_mode == "auto"
     assert (tmp_path / f"{session.id}.yaml").exists()
     assert (tmp_path / session.id / "output").exists()
 

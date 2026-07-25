@@ -192,7 +192,7 @@ class SessionStore:
             created_at=now,
             updated_at=now,
             output_dir=output_dir,
-            approval_mode="approve",
+            approval_mode="auto",
         )
         self.save(session)
         return session

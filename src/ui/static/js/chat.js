@@ -1714,6 +1714,27 @@
               task.files_written
             );
           }
+        } else if (ev.event === "worker_status") {
+          const data = JSON.parse(ev.data);
+          const task = data.task || {};
+          if (collabPanel && task.id) {
+            const phase = task.phase || "worker";
+            const status = task.status || "进行中";
+            const model = task.model || task.assigned_model || "未知模型";
+            updateTaskStatus(
+              collabPanel,
+              task.id,
+              "running",
+              `${model} · ${phase} · ${status}`
+            );
+          }
+        } else if (ev.event === "task_heartbeat") {
+          const data = JSON.parse(ev.data);
+          const task = data.task || {};
+          const idle = Number(task.idle_seconds || 0).toFixed(1);
+          showStatus(
+            `${idle}s 未收到新事件 · ${Number(task.elapsed_seconds || 0).toFixed(1)}s 已运行`
+          );
         } else if (ev.event === "review_complete") {
           const data = JSON.parse(ev.data);
           if (collabPanel) {

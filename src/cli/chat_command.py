@@ -350,6 +350,81 @@ def _prompt_message() -> HTML:
     return HTML("\n<b>&gt;</b> ")
 
 
+async def _read_permission_response(mode_ref: list[str], on_mode_change: Any) -> str:
+    """Read a decision while keeping Shift+Tab available."""
+    kb = KeyBindings()
+
+    def _set_mode(mode: str, event: Any | None = None) -> None:
+        mode_ref[0] = mode
+        try:
+            on_mode_change(mode)
+        except Exception:
+            pass
+        if event is not None:
+            event.app.invalidate()
+
+    @kb.add(Keys.BackTab)
+    def _switch_mode(event):
+        index = MODES.index(mode_ref[0]) if mode_ref[0] in MODES else 0
+        mode = MODES[(index + 1) % len(MODES)]
+        _set_mode(mode, event)
+        if mode == "auto":
+            event.app.exit(result="auto")
+        elif mode == "readonly":
+            event.app.exit(result="no")
+
+    @kb.add("y")
+    def _approve(event):
+        event.app.exit(result="yes")
+
+    @kb.add("n")
+    def _deny(event):
+        event.app.exit(result="no")
+
+    @kb.add("a")
+    def _auto(event):
+        _set_mode("auto", event)
+        event.app.exit(result="auto")
+
+    @kb.add("p")
+    def _approve_mode(event):
+        _set_mode("approve", event)
+
+    @kb.add("r")
+    def _readonly(event):
+        _set_mode("readonly", event)
+        event.app.exit(result="no")
+
+    @kb.add(Keys.Enter)
+    def _submit(event):
+        value = event.app.current_buffer.text.strip().casefold()
+        if value in {"y", "yes", "允许", "是", "是的", "同意", "好"}:
+            event.app.exit(result="yes")
+        elif value in {"auto", "always"}:
+            _set_mode("auto", event)
+            event.app.exit(result="auto")
+        else:
+            event.app.exit(result="no")
+
+    def _toolbar() -> HTML:
+        mode = mode_ref[0] if mode_ref else "approve"
+        return HTML(
+            f" 权限:<{_mode_color(mode)}><b>{mode}</b></{_mode_color(mode)}> "
+            "| y=允许 n=拒绝 | Shift+Tab=切换模式"
+        )
+
+    prompt = PromptSession(
+        key_bindings=kb,
+        bottom_toolbar=_toolbar,
+        style=_CLI_PROMPT_STYLE,
+    )
+    try:
+        answer = await prompt.prompt_async("允许执行？ ")
+    except (EOFError, KeyboardInterrupt):
+        return "no"
+    return (answer or "").strip().casefold() or "no"
+
+
 def _print_welcome(session_id: str, mode: str):
     mode_line = (
         f"当前权限: [{_mode_rich_style(mode)}]{mode}[/{_mode_rich_style(mode)}] "
@@ -371,6 +446,7 @@ async def _stream_turn(
     *,
     mode_ref: list[str] | None = None,
     session: Any | None = None,
+    store: SessionStore | None = None,
 ) -> dict[str, Any]:
     """流式执行一轮，使用 Rich Live 渲染 Markdown，仿 Claude Code 风格。
 
@@ -385,6 +461,11 @@ async def _stream_turn(
         if sess is not None:
             sess.approval_mode = mode  # type: ignore[assignment]
         agent.approval_mode = mode  # type: ignore[assignment]
+        if store is not None and sess is not None:
+            try:
+                store.save(sess)
+            except Exception:
+                pass
 
     tool_calls: list[dict[str, Any]] = []
     files_written: list[str] = []
@@ -399,6 +480,12 @@ async def _stream_turn(
     activity_counts: Counter[str] = Counter()
     phase_started: set[str] = set()
     phase_detail_counts: Counter[str] = Counter()
+    worker_previews: dict[str, str] = {}
+    worker_statuses: dict[str, dict[str, Any]] = {}
+    plan_total = 0
+    completed_task_ids: set[str] = set()
+    current_task_id = ""
+    last_progress_detail = ""
     engineering_run_id = ""
     engineering_status = ""
     engineering_kind = ""
@@ -413,6 +500,26 @@ async def _stream_turn(
     engineering_routed_model = ""
     engineering_routing_source = ""
     engineering_routing_reason = ""
+    turn_started_at = time.monotonic()
+
+    def _collaboration_progress_message() -> str:
+        if not plan_total:
+            return last_progress_detail or "协作执行"
+        task = worker_statuses.get(current_task_id, {})
+        title = task.get("title") or current_task_id or "等待调度"
+        model = task.get("model") or task.get("assigned_model") or "未知模型"
+        iteration = task.get("iteration")
+        maximum = task.get("max_iterations")
+        iteration_text = (
+            f" | 工具轮 {iteration}/{maximum}"
+            if iteration is not None and maximum
+            else ""
+        )
+        detail = last_progress_detail or task.get("phase") or "等待事件"
+        return (
+            f"协作进度 {len(completed_task_ids)}/{plan_total} | 当前任务：{title} "
+            f"| 模型：{model}{iteration_text} | 最近动作：{detail}"
+        )
 
     def _start_spinner(message: str):
         nonlocal spinner_task, spinner_message
@@ -425,7 +532,6 @@ async def _stream_turn(
 
             frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             i = 0
-            start = time.monotonic()
             while True:
                 # 任务进行中可按 a/p/r 切换权限（无需回车），对齐常见 CLI Agent 体验
                 apply_hotkey_if_any(
@@ -435,7 +541,7 @@ async def _stream_turn(
                         f"[bold cyan]（热键）已切换权限模式：{m}[/bold cyan]"
                     ),
                 )
-                elapsed = time.monotonic() - start
+                elapsed = time.monotonic() - turn_started_at
                 try:
                     # 明确是「已用秒数」，不是进度百分比
                     live.update(
@@ -451,6 +557,10 @@ async def _stream_turn(
                 i += 1
 
         spinner_task = asyncio.create_task(_spin())
+
+    def _set_spinner_message(message: str) -> None:
+        if message:
+            _start_spinner(message)
 
     def _stop_spinner():
         nonlocal spinner_task
@@ -471,12 +581,11 @@ async def _stream_turn(
 
     try:
         async for event in agent.run_turn_stream(user_input):
-            _stop_spinner()
             if event.type == "delta":
                 final_content += event.delta
                 # 一旦检测到工具调用，就不再实时展开原始代码块，改为显示执行动画提示
                 if agent._has_tool_calls(final_content):
-                    _start_spinner("🛠️ 正在调用工具")
+                    _set_spinner_message("🛠️ 正在调用工具")
                 else:
                     live.update(Markdown(final_content))
             elif event.type in ("engineering_start", "engineering_update", "engineering_complete"):
@@ -537,9 +646,10 @@ async def _stream_turn(
                     engineering_routing_reason = str(
                         routing.get("reason", engineering_routing_reason)
                     )
-                _start_spinner("🧠 思考中")
+                _set_spinner_message("🧠 思考中")
             elif event.type == "permission_request":
                 live.stop()
+                _stop_spinner()
                 req = event.permission_request or {}
                 console.print(
                     f"\n[bold yellow]🔒 权限请求：{req.get('message', '')}[/bold yellow]"
@@ -571,23 +681,30 @@ async def _stream_turn(
                             + ", ".join(f"{k}={v}" for k, v in params.items())
                         )
                 console.print(
-                    "[dim]提示：任务执行中底部 Shift+Tab 无效；"
-                    "此处输入 auto/a 可切换到自动模式并批准后续同类请求。"
-                    "auto 默认允许读写/命令（仍受 permissions.yaml 的 deny 约束）。[/dim]"
+                    "[dim]y=允许，n=拒绝，Shift+Tab 在 auto/approve/readonly 间切换。"
+                    "auto 只自动批准会话默认请求；deny、显式 ask 和复杂 shell 安全规则仍生效。[/dim]"
                 )
-                answer = await asyncio.to_thread(
-                    console.input, "允许执行？(y/n/auto)："
+                current_mode = getattr(agent, "approval_mode", "approve")
+                decision = req.get("decision") or {}
+                auto_can_approve = (
+                    req.get("tool") == "collaboration"
+                    or decision.get("source", "session") == "session"
                 )
+                if current_mode == "auto" and auto_can_approve:
+                    answer = "auto"
+                else:
+                    answer = await _read_permission_response(
+                        mode_ref or [current_mode], _apply_mode_hotkey
+                    )
                 answer_clean = answer.strip().lower()
                 if answer_clean in ("auto", "always", "a"):
-                    _set_mode(session, agent, mode_ref, "auto")
-                    store.save(session)
+                    _apply_mode_hotkey("auto")
                     approved = True
                     console.print(
                         "[bold red]已切换到自动执行模式，并批准当前请求；"
                         "本会话后续非只读工具默认不再询问（deny 规则仍生效）[/bold red]"
                     )
-                elif answer_clean in ("y", "yes", "是", "允许"):
+                elif answer_clean in ("y", "yes", "是", "是的", "同意", "好", "允许"):
                     approved = True
                     console.print("[dim]已允许[/dim]")
                 else:
@@ -595,6 +712,7 @@ async def _stream_turn(
                     console.print("[dim]已拒绝[/dim]")
                 agent.respond_to_permission(req.get("request_id", ""), approved)
                 live.start()
+                _start_spinner("等待后续事件")
             elif event.type == "model_failover":
                 failover = event.failover or {}
                 from_model = failover.get("from_model", "?")
@@ -618,7 +736,7 @@ async def _stream_turn(
                 elif shown == 4:
                     console.print("  [dim]└ 后续同类操作已折叠，完成后显示统计[/dim]")
                 phase_detail_counts[phase_key] += 1
-                _start_spinner(_progress_message(activity_counts))
+                _set_spinner_message(_progress_message(activity_counts))
             elif event.type == "tool_complete":
                 call = event.tool_call or {}
                 if not call.get("success"):
@@ -626,10 +744,11 @@ async def _stream_turn(
                         str(call.get("tool", "unknown")), call.get("params", {}) or {}
                     )
                     console.print(f"  [red]× {action}：{call.get('error') or '执行失败'}[/red]")
-                _start_spinner(_progress_message(activity_counts))
+                _set_spinner_message(_progress_message(activity_counts))
             elif event.type == "plan":
                 is_collaboration = True
                 plan = event.plan or {}
+                plan_total = len(plan.get("tasks", []))
                 console.print(
                     f"\n[bold magenta]📋 协作计划：{plan.get('summary', '')}[/bold magenta]"
                 )
@@ -639,8 +758,62 @@ async def _stream_turn(
                     )
                     if task.get("assigned_model"):
                         models_used.add(task.get("assigned_model"))
+            elif event.type == "worker_status":
+                task = event.task or {}
+                task_id = str(task.get("id", ""))
+                if task_id:
+                    worker_statuses[task_id] = task
+                    current_task_id = task_id
+                    last_progress_detail = str(
+                        task.get("phase") or task.get("status") or "worker"
+                    )
+                delta = str(task.get("delta", "") or "")
+                if task_id and delta:
+                    worker_previews[task_id] = (
+                        worker_previews.get(task_id, "") + delta
+                    )[-6000:]
+                title = task.get("title") or task_id or "协作任务"
+                model = task.get("model") or task.get("assigned_model") or "未知模型"
+                phase = task.get("phase") or "worker"
+                status = task.get("status") or "进行中"
+                preview = worker_previews.get(task_id, "")
+                if preview:
+                    preview = f"\n\n{preview}"
+                live.update(Markdown(
+                    f"**协作任务：{title}**\n\n"
+                    f"模型：`{model}` · 阶段：`{phase}` · 状态：`{status}`"
+                    f"{preview}"
+                ))
+                _set_spinner_message(_collaboration_progress_message())
+            elif event.type == "task_heartbeat":
+                heartbeat = event.task or {}
+                active = heartbeat.get("active_tasks") or []
+                active_text = "、".join(
+                    str(item.get("title") or item.get("id") or "未知任务")
+                    for item in active
+                ) or "调度中"
+                idle = float(heartbeat.get("idle_seconds") or 0)
+                if active:
+                    current_task_id = str(active[-1].get("id") or current_task_id)
+                    for item in active:
+                        if item.get("id"):
+                            worker_statuses[str(item["id"])] = item
+                    last_progress_detail = "任务运行中"
+                else:
+                    last_progress_detail = f"等待事件（最近 {idle:.1f}s）"
+                warning = "⚠ " if idle >= 15 else ""
+                live.update(Markdown(
+                    f"{warning}**协作仍在运行**\n\n"
+                    f"活动任务：{active_text}\n\n"
+                    f"已运行 {float(heartbeat.get('elapsed_seconds') or 0):.1f}s，"
+                    f"最近事件距今 {idle:.1f}s"
+                ))
+                _set_spinner_message(_collaboration_progress_message())
             elif event.type == "task_start":
                 task = event.task or {}
+                if task.get("id"):
+                    current_task_id = str(task["id"])
+                    worker_statuses[current_task_id] = task
                 console.print(
                     f"[dim]▶ [{task.get('type')}] {task.get('title')} 开始执行[/dim]"
                 )
@@ -654,6 +827,9 @@ async def _stream_turn(
                     console.print(f"  [dim]{task['previous_error']}[/dim]")
             elif event.type == "task_complete":
                 task = event.task or {}
+                if task.get("id"):
+                    current_task_id = str(task["id"])
+                    completed_task_ids.add(current_task_id)
                 status = "✅" if task.get("success") else "❌"
                 color = "green" if task.get("success") else "red"
                 console.print(
@@ -666,6 +842,8 @@ async def _stream_turn(
                         console.print(f"  [dim]📁 {f}[/dim]")
                 if task.get("assigned_model"):
                     models_used.add(task.get("assigned_model"))
+                last_progress_detail = "任务完成" if task.get("success") else "任务失败"
+                _set_spinner_message(_collaboration_progress_message())
             elif event.type == "adversarial_complete":
                 adversarial = event.adversarial or {}
                 labels = {
@@ -690,6 +868,9 @@ async def _stream_turn(
                 )
                 for issue in review.get("issues", []):
                     console.print(f"  ⚠ {issue}")
+            elif event.type == "error":
+                error_text = event.error or "协作执行失败"
+                console.print(f"\n[bold red]✖ 执行错误：{error_text}[/bold red]")
             elif event.type == "done":
                 tool_calls = event.tool_calls
                 files_written = event.files_written
@@ -698,6 +879,7 @@ async def _stream_turn(
                 cost_usd = event.cost_usd
                 final_content = event.assistant_message
     finally:
+        _stop_spinner()
         live.stop()
 
     # Live 只承担临时、有界的流式预览；停止后统一打印一次最终正文，
@@ -1559,6 +1741,7 @@ def run_chat_loop(
                                     implementation_request,
                                     mode_ref=mode_ref,
                                     session=session,
+                                    store=store,
                                 )
                             )
                             _refresh_usage(last)
@@ -1659,6 +1842,7 @@ def run_chat_loop(
                         user_input,
                         mode_ref=mode_ref,
                         session=session,
+                        store=store,
                     )
                 )
                 _refresh_usage(last)

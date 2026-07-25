@@ -68,7 +68,9 @@ class ContextBudgetManager:
         requested_output = max(1, int(requested_output_tokens or DEFAULT_OUTPUT_RESERVE_TOKENS))
         # 过小的「硬窗口」几乎都是误填，按未知窗口处理，避免输入预算被算成 0
         declared_window = int(config.context_window_tokens or 0)
-        if 0 < declared_window < 16_000:
+        # Preserve explicit small but usable windows; only values below 4K
+        # cannot hold the default output reserve and protocol overhead.
+        if 0 < declared_window < 4_096:
             warnings.append(
                 f"配置的上游窗口 {declared_window} 过小，已忽略并使用 "
                 f"{self.default_safe_context_tokens // 1000}K 默认安全预算"
@@ -103,18 +105,6 @@ class ContextBudgetManager:
                 f"已按请求输出预留（避免误填阻断对话）"
             )
             effective_max_output = requested_output
-
-        # 若硬窗口扣掉输出后几乎没有输入空间，回退默认安全预算
-        min_input_room = 4_096
-        trial_budget = safe_context - requested_output - protocol_overhead_tokens
-        if declared_window > 0 and trial_budget < min_input_room:
-            warnings.append(
-                f"配置窗口在扣除输出预留后输入空间不足，已回退 "
-                f"{self.default_safe_context_tokens // 1000}K 默认安全预算"
-            )
-            safe_context = self.default_safe_context_tokens
-            source = "unverified_default_fallback"
-            declared_window = 0
 
         tool_tokens = count_tokens(
             json.dumps(tools, ensure_ascii=False, sort_keys=True, default=str)

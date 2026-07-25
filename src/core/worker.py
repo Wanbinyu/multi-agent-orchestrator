@@ -1,8 +1,10 @@
 """Worker 执行器"""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable, MutableMapping
 
@@ -22,7 +24,7 @@ from src.core.native_content import (
 )
 from src.core.permission_rules import PermissionRuleEngine
 from src.gateway.client import GatewayClient
-from src.models.schemas import ChatMessage, Task, TaskResult
+from src.models.schemas import ChatMessage, ChatResponse, Task, TaskResult
 from src.models.schemas import ApprovalMode
 from src.tools.file_tools import write_text_file
 from src.tools.read_cache import build_read_cache_key, should_invalidate_read_cache
@@ -52,6 +54,8 @@ class Worker:
         permission_engine: PermissionRuleEngine | None = None,
         approval_mode: ApprovalMode = "auto",
         memory_store: Any = None,
+        stream_output: bool = False,
+        stream_idle_timeout_seconds: float = 45.0,
     ):
         self.gateway = gateway
         self.workers_config = workers_config
@@ -60,6 +64,148 @@ class Worker:
         self.permission_engine = permission_engine or PermissionRuleEngine()
         self.approval_mode = approval_mode
         self.memory_store = memory_store
+        self.stream_output = stream_output
+        self.stream_idle_timeout_seconds = max(5.0, float(stream_idle_timeout_seconds))
+
+    @staticmethod
+    def _progress_params(params: dict[str, Any]) -> dict[str, Any]:
+        """只暴露工具动作的定位字段，不把文件内容或凭据放进进度流。"""
+        keys = ("path", "command", "cwd", "url", "query")
+        return {key: params[key] for key in keys if params.get(key)}
+
+    @staticmethod
+    def _notify(
+        callback: ProgressCallback | None,
+        task: Task,
+        *,
+        phase: str,
+        status: str,
+        **details: Any,
+    ) -> None:
+        if callback is None:
+            return
+        payload = {
+            "id": task.id,
+            "type": task.type,
+            "title": task.title,
+            "assigned_model": task.assigned_model,
+            "phase": phase,
+            "status": status,
+            **details,
+        }
+        try:
+            callback("worker_status", payload)
+        except Exception:
+            # 进度通道断开时不能影响 Worker 的实际执行结果。
+            return
+
+    async def _collect_stream_response(
+        self,
+        *,
+        task: Task,
+        model_name: str,
+        messages: list[ChatMessage],
+        progress_callback: ProgressCallback | None,
+        **kwargs: Any,
+    ) -> ChatResponse:
+        """收集一个 Worker 模型回合，同时对每个流块发出进度事件。"""
+        stream = self.gateway.chat_stream(
+            messages=messages,
+            model_name=model_name,
+            task_id=task.id,
+            max_retries=2,
+            **kwargs,
+        )
+        content_parts: list[str] = []
+        content_blocks = []
+        provider_payload: list[dict[str, Any]] = []
+        input_tokens = 0
+        output_tokens = 0
+        cost_usd = 0.0
+        output_chars = 0
+        started_at = time.monotonic()
+        try:
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        stream.__anext__(),
+                        timeout=self.stream_idle_timeout_seconds,
+                    )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError as exc:
+                    elapsed = time.monotonic() - started_at
+                    raise TimeoutError(
+                        f"Worker {task.id} 已连续 {elapsed:.0f}s 未收到模型输出，"
+                        f"超过 {self.stream_idle_timeout_seconds:.0f}s 无输出阈值"
+                    ) from exc
+
+                if chunk.type == "delta":
+                    delta = chunk.content or ""
+                    if delta:
+                        content_parts.append(delta)
+                        output_chars += len(delta)
+                        self._notify(
+                            progress_callback,
+                            task,
+                            phase="model_output",
+                            status="streaming",
+                            delta=delta,
+                            output_chars=output_chars,
+                        )
+                elif chunk.type == "usage":
+                    input_tokens += chunk.input_tokens
+                    output_tokens += chunk.output_tokens
+                    cost_usd += chunk.cost_usd
+                elif chunk.type == "message_state":
+                    content_blocks = list(chunk.content_blocks)
+                    provider_payload = list(chunk.provider_payload)
+        finally:
+            close = getattr(stream, "aclose", None)
+            if callable(close):
+                await close()
+
+        config = self.gateway.models.get(model_name)
+        if config is None:
+            raise RuntimeError(f"流式回合结束时找不到模型配置：{model_name}")
+        provider = self.gateway.providers.get(config.provider)
+        provider_name = getattr(provider, "name", config.provider)
+        return ChatResponse(
+            content="".join(content_parts),
+            model=config.model_id,
+            provider=provider_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+            content_blocks=content_blocks,
+            provider_payload=provider_payload,
+        )
+
+    def _chat_with_progress(
+        self,
+        *,
+        task: Task,
+        model_name: str,
+        messages: list[ChatMessage],
+        progress_callback: ProgressCallback | None,
+        **kwargs: Any,
+    ) -> ChatResponse:
+        if not self.stream_output:
+            return self.gateway.chat(
+                messages=messages,
+                model_name=model_name,
+                task_id=task.id,
+                **kwargs,
+            )
+        return asyncio.run(
+            self._collect_stream_response(
+                task=task,
+                model_name=model_name,
+                messages=messages,
+                progress_callback=progress_callback,
+                **kwargs,
+            )
+        )
 
     def execute(
         self,
@@ -94,6 +240,14 @@ class Worker:
             model_name = self.gateway.resolve_model(task.assigned_model)
         except Exception as exc:
             return TaskResult(task=task, success=False, content="", error=str(exc))
+        self._notify(
+            progress_callback,
+            task,
+            phase="worker",
+            status="started",
+            model=model_name,
+            stream_output=self.stream_output,
+        )
         native_kwargs = _worker_native_tool_kwargs(self.gateway, model_name, tools)
         if native_kwargs:
             tool_instructions = "可用工具已通过模型原生 tool_use 协议提供，请使用结构化工具调用。"
@@ -176,13 +330,33 @@ class Worker:
             command_state: dict[str, Any] = {"preflight_failures": 0}
 
             while True:
-                response = self.gateway.chat(
-                    messages=messages,
+                self._notify(
+                    progress_callback,
+                    task,
+                    phase="model_request",
+                    status="waiting",
+                    model=model_name,
+                    iteration=iterations + 1,
+                    max_iterations=self.max_tool_iterations,
+                )
+                response = self._chat_with_progress(
+                    task=task,
                     model_name=model_name,
-                    task_id=task.id,
+                    messages=messages,
+                    progress_callback=progress_callback,
                     max_tokens=4096,
                     temperature=0.2,
                     **native_kwargs,
+                )
+                self._notify(
+                    progress_callback,
+                    task,
+                    phase="model_request",
+                    status="received",
+                    model=model_name,
+                    iteration=iterations + 1,
+                    output_chars=len(response.content or ""),
+                    has_tool_calls=bool(response.content_blocks or _has_tool_call_markers(response.content)),
                 )
                 last_response = response
                 total_input += response.input_tokens
@@ -200,6 +374,15 @@ class Worker:
                     approval_mode=self.approval_mode,
                     command_state=command_state,
                     memory_store=self.memory_store,
+                    progress_callback=(
+                        lambda event_type, payload: self._notify(
+                            progress_callback,
+                            task,
+                            phase=event_type,
+                            status=payload.get("status", "completed"),
+                            **{key: value for key, value in payload.items() if key != "status"},
+                        )
+                    ),
                 )
                 native_specs = native_tool_specs(response.content_blocks)
                 attach_tool_use_ids(tool_results, native_specs)
@@ -234,10 +417,11 @@ class Worker:
 
                 final_content = processed if not tool_results else ""
                 if tool_results and iterations >= self.max_tool_iterations:
-                    final_response = self.gateway.chat(
-                        messages=messages,
+                    final_response = self._chat_with_progress(
+                        task=task,
                         model_name=model_name,
-                        task_id=f"{task.id}-finalize",
+                        messages=messages,
+                        progress_callback=progress_callback,
                         max_tokens=4096,
                         temperature=0.2,
                     )
@@ -445,6 +629,10 @@ def _contains_code_fence(content: str) -> bool:
     return bool(re.search(r"```(?!tool:)[\w+-]*\n", content))
 
 
+def _has_tool_call_markers(content: str) -> bool:
+    return bool(re.search(r"```tool:\w+\b", content or ""))
+
+
 def _task_requires_file_output(task: Task) -> bool:
     """仅对明确的实现型 Worker 强制使用 write_file，避免误伤分析/写作。"""
     implementation_types = {
@@ -487,6 +675,7 @@ def process_tool_calls(
     approval_mode: ApprovalMode = "auto",
     command_state: MutableMapping[str, Any] | None = None,
     memory_store: Any = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[str, list[dict]]:
     """解析并执行工具调用，返回处理后的内容和工具结果列表"""
     pattern = r"```tool:(\w+)\n(.*?)(?:```|<\|tool_calls_section_end\|>|$)"
@@ -581,6 +770,16 @@ def process_tool_calls(
         cache_key = build_read_cache_key(tool_name, params, base_dir)
         cached = bool(read_cache is not None and cache_key in read_cache)
         mutation_metadata = file_mutation_metadata(tool_name, params, base_dir)
+        if progress_callback:
+            progress_callback(
+                "tool_start",
+                {
+                    "tool": tool_name,
+                    "params": Worker._progress_params(params),
+                    "status": "running",
+                    "cached": cached,
+                },
+            )
         if cached:
             result = read_cache[cache_key]  # type: ignore[index]
         else:
@@ -596,6 +795,17 @@ def process_tool_calls(
             if read_cache is not None and should_invalidate_read_cache(tool_name):
                 read_cache.clear()
         cached = cached or bool(result.metadata.get("cached"))
+        if progress_callback:
+            progress_callback(
+                "tool_complete",
+                {
+                    "tool": tool_name,
+                    "params": Worker._progress_params(params),
+                    "status": "success" if result.success else "failed",
+                    "success": result.success,
+                    "cached": cached,
+                },
+            )
         tool_results.append({
             "tool": tool_name,
             "params": params,

@@ -496,6 +496,8 @@ class ChatStreamEvent(BaseModel):
         "model_failover",
         "tool_start",
         "tool_complete",
+        "worker_status",
+        "task_heartbeat",
         "engineering_start",
         "engineering_update",
         "engineering_complete",

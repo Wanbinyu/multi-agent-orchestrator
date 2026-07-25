@@ -69,6 +69,9 @@ from src.tools.worker_tools import (
 )
 
 
+COLLABORATION_HEARTBEAT_SECONDS = 2.0
+
+
 # 工具说明由注册表自动生成；这里保留调用规则与约束。
 TOOL_RULES = """规则：
 - 只能使用上面这种 Markdown 代码块调用工具，不要输出原生 JSON tool_use 或 function_call。
@@ -2442,6 +2445,9 @@ class Agent:
                     permission_engine=self._active_permission_engine,
                     approval_mode="auto",
                     memory_store=self.memory_store,
+                    # 测试替身或第三方 Gateway 可能只实现同步 chat；真实
+                    # GatewayClient 才启用 Worker 的流式回合。
+                    stream_output=isinstance(self.gateway, GatewayClient),
                 )
                 dispatcher = Dispatcher(
                     worker,
@@ -2463,13 +2469,66 @@ class Agent:
         thread = threading.Thread(target=_dispatch, daemon=True)
         thread.start()
 
+        active_tasks: dict[str, dict[str, Any]] = {}
+        started_at = asyncio.get_running_loop().time()
+        last_event_at = started_at
         while True:
-            event_type, payload = await queue.get()
+            try:
+                event_type, payload = await asyncio.wait_for(
+                    queue.get(), timeout=COLLABORATION_HEARTBEAT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                now = asyncio.get_running_loop().time()
+                elapsed = round(now - last_event_at, 1)
+                active_snapshot = list(active_tasks.values())
+                if not thread.is_alive() and queue.empty():
+                    message = "协作执行线程已退出，但没有发出结束事件"
+                    yield ChatStreamEvent(type="error", error=message)
+                    yield ChatStreamEvent(
+                        type="done",
+                        assistant_message=message,
+                        tool_calls=[],
+                        files_written=[],
+                        input_tokens=0,
+                        output_tokens=0,
+                        cost_usd=0.0,
+                    )
+                    return
+                yield ChatStreamEvent(
+                    type="task_heartbeat",
+                    task={
+                        "phase": "waiting",
+                        "status": "waiting",
+                        "elapsed_seconds": round(now - started_at, 1),
+                        "idle_seconds": elapsed,
+                        "active_tasks": active_snapshot,
+                    },
+                )
+                continue
+            last_event_at = asyncio.get_running_loop().time()
             if event_type == "__done__":
                 break
             if event_type == "__error__":
-                yield ChatStreamEvent(type="error", error=payload.get("error", "未知错误"))
+                message = payload.get("error", "未知错误")
+                yield ChatStreamEvent(type="error", error=message)
+                yield ChatStreamEvent(
+                    type="done",
+                    assistant_message=f"协作执行失败：{message}",
+                    tool_calls=[],
+                    files_written=[],
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost_usd=0.0,
+                )
                 return
+            if event_type == "task_start":
+                active_tasks[payload.get("id", "")] = dict(payload)
+            elif event_type == "worker_status":
+                task_id = payload.get("id", "")
+                if task_id:
+                    active_tasks.setdefault(task_id, {}).update(payload)
+            elif event_type == "task_complete":
+                active_tasks.pop(payload.get("id", ""), None)
             yield ChatStreamEvent(type=event_type, task=payload)
 
         results = list(dispatch_results)
