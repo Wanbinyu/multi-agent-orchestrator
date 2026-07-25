@@ -164,7 +164,19 @@ available_workers:
 def test_plan_injects_project_rules_into_system_prompt(tmp_path):
     config_path = tmp_path / "workers.yaml"
     config_path.write_text(_sample_workers_yaml(), encoding="utf-8")
-    gateway = _mock_gateway('{"summary": "ok", "tasks": []}')
+    plan_data = {
+        "summary": "ok",
+        "tasks": [
+            {
+                "id": "t1",
+                "type": "writer",
+                "title": "写",
+                "input": "x",
+                "assigned_model": "deepseek-chat",
+            }
+        ],
+    }
+    gateway = _mock_gateway(json.dumps(plan_data))
 
     orchestrator = Orchestrator(
         gateway,
@@ -264,6 +276,44 @@ available_workers:
         ("tester", "glm-ark"),
     ]
     assert plan.tasks[1].execution_mode == "verify"
+
+
+def test_plan_rejects_empty_tasks(tmp_path):
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text(_sample_workers_yaml(), encoding="utf-8")
+    gateway = _mock_gateway('{"summary": "empty", "tasks": []}')
+    gateway.models = {"main-model": object()}
+    orchestrator = Orchestrator(gateway, config_path=str(config_path))
+    with pytest.raises(ValueError, match="未产出任何子任务"):
+        orchestrator.plan("做一个天气大屏")
+
+
+def test_plan_injects_available_model_roster(tmp_path):
+    config_path = tmp_path / "workers.yaml"
+    config_path.write_text(_sample_workers_yaml(), encoding="utf-8")
+    plan_data = {
+        "summary": "ok",
+        "tasks": [
+            {
+                "id": "t1",
+                "type": "writer",
+                "title": "写",
+                "input": "x",
+                "assigned_model": "deepseek-chat",
+            }
+        ],
+    }
+    gateway = _mock_gateway(json.dumps(plan_data))
+    gateway.models = {"glm-ark": object(), "deepseek-chat": object()}
+    gateway.get_main_model.return_value = "glm-ark"
+    gateway.resolve_model = MagicMock(
+        side_effect=lambda preferred: preferred if preferred in gateway.models else "glm-ark"
+    )
+    Orchestrator(gateway, config_path=str(config_path)).plan("写一段")
+    system = gateway.chat.call_args.kwargs["messages"][0].content
+    assert "已配置且可调用的模型别名" in system
+    assert "glm-ark" in system
+    assert "deepseek-chat" in system
 
 
 def test_plan_diversifies_when_all_tasks_collapse_to_one_available_model(tmp_path):
@@ -631,7 +681,8 @@ def test_plan_appends_scenario_instruction(tmp_path):
 
     gateway = _mock_gateway('{"summary": "", "tasks": []}')
     orchestrator = Orchestrator(gateway, config_path=str(config_path))
-    orchestrator.plan("帮我写一篇仙侠小说")
+    with pytest.raises(ValueError, match="未产出任何子任务"):
+        orchestrator.plan("帮我写一篇仙侠小说")
 
     call_kwargs = gateway.chat.call_args.kwargs
     messages = call_kwargs["messages"]
@@ -647,7 +698,8 @@ def test_plan_appends_software_instruction(tmp_path):
 
     gateway = _mock_gateway('{"summary": "", "tasks": []}')
     orchestrator = Orchestrator(gateway, config_path=str(config_path))
-    orchestrator.plan("开发一个登录功能")
+    with pytest.raises(ValueError, match="未产出任何子任务"):
+        orchestrator.plan("开发一个登录功能")
 
     call_kwargs = gateway.chat.call_args.kwargs
     messages = call_kwargs["messages"]

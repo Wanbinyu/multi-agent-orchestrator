@@ -2292,11 +2292,34 @@ class Agent:
         # 1. Orchestrator 规划
         project_rules = self._active_project_rules.prompt()
         orchestrator = Orchestrator(self.gateway, project_rules=project_rules)
-        plan = await asyncio.to_thread(
-            orchestrator.plan,
-            user_request=user_input,
-            memory_context=memory_context,
-        )
+        try:
+            plan = await asyncio.to_thread(
+                orchestrator.plan,
+                user_request=user_input,
+                memory_context=memory_context,
+            )
+        except Exception as exc:
+            # 空计划 / 解析失败：直接失败说明，避免无任务仍走审查导致假 blocked
+            msg = (
+                f"多模型协作规划失败：{exc}\n"
+                "请重试；确认已配置多个可用模型，且总工输出了非空 tasks。"
+            )
+            self.session.add_message("assistant", msg)
+            yield ChatStreamEvent(
+                type="error",
+                error=str(exc),
+            )
+            yield ChatStreamEvent(
+                type="done",
+                assistant_message=msg,
+                tool_calls=[],
+                files_written=[],
+                input_tokens=0,
+                output_tokens=0,
+                cost_usd=0.0,
+            )
+            return
+
         collaboration_roles = [
             {
                 "role": "orchestrator",

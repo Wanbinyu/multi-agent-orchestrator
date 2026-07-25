@@ -332,7 +332,7 @@ def _make_prompt_session(
         return HTML(
             f" 权限:<{_mode_color(mode)}><b>{mode}</b></{_mode_color(mode)}> "
             f"| {usage_text} "
-            f"| Shift+Tab 切换 | / 命令 "
+            f"| Shift+Tab 或 a/p/r | / 命令 "
         )
 
     return PromptSession(
@@ -365,11 +365,27 @@ def _print_welcome(session_id: str, mode: str):
     console.print(Panel.fit(body, title="你好", border_style="cyan"))
 
 
-async def _stream_turn(agent: Agent, user_input: str) -> dict[str, Any]:
+async def _stream_turn(
+    agent: Agent,
+    user_input: str,
+    *,
+    mode_ref: list[str] | None = None,
+    session: Any | None = None,
+) -> dict[str, Any]:
     """流式执行一轮，使用 Rich Live 渲染 Markdown，仿 Claude Code 风格。
 
     返回本轮 token/成本摘要，供底部工具栏刷新。
+    执行中可通过热键 a/p/r 切换权限模式（无需等到提示符）。
     """
+    sess = session if session is not None else getattr(agent, "session", None)
+
+    def _apply_mode_hotkey(mode: str) -> None:
+        if mode_ref is not None and mode_ref:
+            mode_ref[0] = mode
+        if sess is not None:
+            sess.approval_mode = mode  # type: ignore[assignment]
+        agent.approval_mode = mode  # type: ignore[assignment]
+
     tool_calls: list[dict[str, Any]] = []
     files_written: list[str] = []
     input_tokens = 0
@@ -405,18 +421,28 @@ async def _stream_turn(agent: Agent, user_input: str) -> dict[str, Any]:
             return
 
         async def _spin():
+            from src.cli.hotkeys import apply_hotkey_if_any
+
             frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             i = 0
             start = time.monotonic()
             while True:
+                # 任务进行中可按 a/p/r 切换权限（无需回车），对齐常见 CLI Agent 体验
+                apply_hotkey_if_any(
+                    mode_ref=mode_ref,
+                    on_mode_change=_apply_mode_hotkey,
+                    announce=lambda m: console.print(
+                        f"[bold cyan]（热键）已切换权限模式：{m}[/bold cyan]"
+                    ),
+                )
                 elapsed = time.monotonic() - start
                 try:
-                    # 明确是「已用秒数」，不是进度百分比，避免 37.2 被误读为 37.2%
+                    # 明确是「已用秒数」，不是进度百分比
                     live.update(
                         Markdown(
                             f"{spinner_message} {frames[i % len(frames)]} "
-                            f"已用时 {elapsed:.1f}s"
-                            f"（任务进行中无法 Shift+Tab；权限问询时可输入 auto）"
+                            f"已用时 {elapsed:.1f}s "
+                            f"| 热键 a=auto p=approve r=readonly"
                         )
                     )
                 except Exception:
@@ -1528,7 +1554,12 @@ def run_chat_loop(
                                 "完成后运行与风险匹配的验证。\n\n" + approved_plan
                             )
                             last = asyncio.run(
-                                _stream_turn(agent, implementation_request)
+                                _stream_turn(
+                                    agent,
+                                    implementation_request,
+                                    mode_ref=mode_ref,
+                                    session=session,
+                                )
                             )
                             _refresh_usage(last)
                             store.save(session)
@@ -1622,7 +1653,14 @@ def run_chat_loop(
             try:
                 if _print_recovery_notice(session):
                     continue
-                last = asyncio.run(_stream_turn(agent, user_input))
+                last = asyncio.run(
+                    _stream_turn(
+                        agent,
+                        user_input,
+                        mode_ref=mode_ref,
+                        session=session,
+                    )
+                )
                 _refresh_usage(last)
                 store.save(session)
             except Exception as e:

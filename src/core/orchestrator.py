@@ -214,6 +214,27 @@ class Orchestrator:
         with resolve_workers_config_path(path).open("r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
+    def _available_model_roster(self) -> str:
+        """告诉总工当前真正可用的模型别名，便于按职责分配。"""
+        models = getattr(self.gateway, "models", None) or {}
+        if not isinstance(models, dict) or not models:
+            return ""
+        main = self.gateway.get_main_model() or ""
+        lines = [
+            "【当前已配置且可调用的模型别名（assigned_model 只能从下列选择）】",
+        ]
+        for alias in models:
+            mark = "（主模型，适合总控/综合）" if alias == main else ""
+            lines.append(f"- {alias}{mark}")
+        if len(models) >= 2:
+            lines.append(
+                "多模型协作要求：为不同职责选择不同 assigned_model（至少 2 种），"
+                "按能力匹配任务（推理/架构用更强模型，实现/润色可用较快模型）；"
+                "禁止所有子任务都填同一个模型，除非列表里只有一个。"
+            )
+        lines.append("tasks 数组不得为空；至少拆出 1 个可执行子任务。")
+        return "\n".join(lines)
+
     def plan(self, user_request: str, memory_context: str | None = None) -> TaskPlan:
         """将用户需求拆分为任务计划"""
         scenario = _detect_scenario(user_request)
@@ -222,6 +243,9 @@ class Orchestrator:
         high_risk_frontend = is_high_risk_frontend_request(user_request)
         if high_risk_frontend:
             system_prompt = f"{system_prompt}\n{HIGH_RISK_FRONTEND_INSTRUCTION}".strip()
+        roster = self._available_model_roster()
+        if roster:
+            system_prompt = f"{system_prompt}\n\n{roster}".strip()
         if memory_context:
             system_prompt = f"{system_prompt}\n\n{memory_context}".strip()
         if self.project_rules:
@@ -285,6 +309,13 @@ class Orchestrator:
         # 若所有子任务因默认模型缺失而塌缩成同一个可用模型，
         # 在仍有多个已配置模型时按轮询分配，实现真正的多模型协作。
         self._diversify_collapsed_task_models(tasks)
+
+        if not tasks:
+            raise ValueError(
+                "总工未产出任何子任务（tasks 为空）。"
+                "请重试，或检查主模型是否按 JSON 输出了 tasks 数组；"
+                "多模型协作需要至少一个可执行子任务。"
+            )
 
         raw_contract = plan_data.get("frontend_contract")
         plan = TaskPlan(
