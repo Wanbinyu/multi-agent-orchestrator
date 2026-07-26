@@ -331,15 +331,15 @@ Worker 在执行任务时可以使用以下工具：
 
 ## 当前支持的模型
 
-- **Anthropic**: Fable 5 / Opus 4.8 / Sonnet 5 / Haiku 4.5
-- **OpenAI**: gpt-5 / gpt-4o / gpt-4o-mini
-- **智谱 GLM**: glm-5 / glm-4-flash
+- **Anthropic**: Fable 5 / Opus 5 / Sonnet 5 / Haiku 4.5
+- **OpenAI**: gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna
+- **智谱 GLM**: glm-5.2 / glm-5
 - **DeepSeek**: deepseek-v4-pro / deepseek-v4-flash
-- **Kimi**: kimi-k3 / kimi-k2.7-code / kimi-k2.7 / kimi-k2.5
-- **阿里 Qwen**: qwen3-coder-plus / qwen3-235b-a22b
-- **MiniMax**: minimax-m2.7
+- **Kimi Coding Plan**: `k3` / `k3-256k` / `kimi-for-coding` / `kimi-for-coding-highspeed`
+- **阿里 Qwen**: qwen3.8-max-preview / qwen3.7-max / qwen3.7-plus / qwen3.7-flash
+- **MiniMax**: minimax-m3
 - **字节豆包**: doubao-seed（火山方舟 OpenAI 兼容）
-- **Google Gemini**: gemini-3.1-pro / gemini-3.5-flash / gemini-3-flash（OpenAI 兼容端点）
+- **Google Gemini**: gemini-3.6-flash / gemini-3.5-flash-lite（OpenAI 兼容端点）
 - **本地模型**: Ollama / llama.cpp（见 `config/providers.yaml.example`）
 - **自定义 OpenAI / Anthropic 兼容服务**: 通过 `agent-setup` 配置
 

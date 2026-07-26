@@ -7,6 +7,7 @@ register_preset(
         "type": "openai",
         "base_url": "https://qianfan.baidubce.com/v2",
         "env_var": "QIANFAN_API_KEY",
+        "note": "Qianfan model IDs and permissions vary by account and region; verify the model in the Qianfan console first.",
         "models": {
             "qianfan-code-latest": {
                 "model_id": "qianfan-code-latest",

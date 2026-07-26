@@ -7,6 +7,7 @@ register_preset(
         "type": "openai",
         "base_url": "https://api.stepfun.com/v1",
         "env_var": "STEPFUN_API_KEY",
+        "note": "Model IDs and availability depend on the StepFun account and platform catalog; verify them in the console.",
         "models": {
             "step-3.7-flash": {
                 "model_id": "step-3.7-flash",

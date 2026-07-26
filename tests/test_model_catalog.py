@@ -19,6 +19,14 @@ def test_catalog_contains_common_models():
     catalog = get_model_catalog()
     assert "glm-ark" in catalog
     assert "kimi-for-coding" in catalog
+    assert catalog["kimi-k3"].default_model_id == "k3"
+    assert catalog["kimi-k2.7-code"].default_model_id == "k3-256k"
+    assert catalog["k3"].default_model_id == "k3"
+    assert catalog["k3-256k"].default_model_id == "k3-256k"
+    assert (
+        catalog["kimi-for-coding-highspeed"].default_model_id
+        == "kimi-for-coding-highspeed"
+    )
     assert "deepseek-chat" in catalog
 
 
@@ -26,6 +34,9 @@ def test_catalog_covers_mainstream_providers():
     """2026-07 扩充后，目录覆盖主流 Provider 的代表模型。"""
     catalog = get_model_catalog()
     for alias in (
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
         "gpt-5",
         "deepseek-v4-pro",
         "kimi-k3",
@@ -35,6 +46,7 @@ def test_catalog_covers_mainstream_providers():
         "qwen3-coder-plus",
         "doubao-seed",
         "gemini-3.1-pro",
+        "gemini-3.6-flash",
     ):
         assert alias in catalog, alias
 
@@ -87,7 +99,8 @@ def test_official_anthropic_catalog_matches_verified_limits():
     assert sonnet.max_output_tokens == 128_000
     assert sonnet.capability_status["vision"] == "unverified"
     assert sonnet.capability_status["tool_use"] == "unverified"
-    assert sonnet.metadata_verified_at == "2026-07-16"
+    assert sonnet.metadata_verified_at == "2026-07-26"
+    assert BUILTIN_MODELS["claude-opus-5"].default_model_id == "claude-opus-5"
 
     haiku = BUILTIN_MODELS["claude-haiku-4-5"]
     assert haiku.default_model_id == "claude-haiku-4-5-20251001"
@@ -171,6 +184,20 @@ def test_find_models_for_template():
 def test_get_default_model_for_template():
     default = get_default_model_for_template("volcengine_ark")
     assert default == "glm-ark"
+
+
+def test_kimi_coding_template_uses_upstream_model_ids():
+    template = PROVIDER_TEMPLATES["kimi_coding"]
+    assert template["base_url"] == "https://api.kimi.com/coding/v1"
+    assert template["supported_models"] == [
+        "k3",
+        "k3-256k",
+        "kimi-for-coding",
+        "kimi-for-coding-highspeed",
+    ]
+    assert [
+        model.default_model_id for model in find_models_for_template("kimi_coding")
+    ] == template["supported_models"]
 
 
 def test_list_models_by_provider():

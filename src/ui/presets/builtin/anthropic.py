@@ -13,7 +13,7 @@ register_preset(
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
                 "claude-fable-5",
-                "claude-opus-4-8",
+                "claude-opus-5",
                 "claude-sonnet-5",
                 "claude-haiku-4-5",
             )

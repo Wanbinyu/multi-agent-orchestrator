@@ -11,9 +11,9 @@ register_preset(
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
-                "gpt-5",
-                "gpt-4o",
-                "gpt-4o-mini",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
             )
         },
     },

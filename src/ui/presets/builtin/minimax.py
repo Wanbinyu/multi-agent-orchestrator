@@ -10,7 +10,7 @@ register_preset(
         "env_var": "MINIMAX_API_KEY",
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
-            for alias in ("minimax-m2.7",)
+            for alias in ("minimax-m3",)
         },
     },
 )

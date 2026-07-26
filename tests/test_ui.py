@@ -97,6 +97,7 @@ class TestPresets:
         assert "custom-openai" in keys
         assert "custom-anthropic" in keys
         assert "kimi" in keys
+        assert "kimi-coding" in keys
         assert "deepseek" in keys
         assert "zhipu-glm" in keys
 
@@ -106,10 +107,28 @@ class TestPresets:
         data = res.json()
         assert data["key"] == "openai"
         assert data["preset"]["type"] == "openai"
-        assert any(m["alias"] == "gpt-4o" for m in data["default_models"])
-        gpt_4o = next(m for m in data["default_models"] if m["alias"] == "gpt-4o")
-        assert gpt_4o["capability_status"]["tool_use"] == "unverified"
-        assert gpt_4o["metadata_source"] == "unverified"
+        assert {
+            m["alias"] for m in data["default_models"]
+        } == {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+        gpt_terra = next(
+            m for m in data["default_models"] if m["alias"] == "gpt-5.6-terra"
+        )
+        assert gpt_terra["capability_status"]["tool_use"] == "unverified"
+        assert gpt_terra["metadata_source"] == "https://platform.openai.com/docs/models"
+
+    def test_kimi_coding_preset_uses_exact_upstream_model_ids(self, client):
+        res = client.get("/api/presets/kimi-coding")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["preset"]["base_url"] == "https://api.kimi.com/coding/v1"
+        assert {
+            model["model_id"] for model in data["default_models"]
+        } == {
+            "k3",
+            "k3-256k",
+            "kimi-for-coding",
+            "kimi-for-coding-highspeed",
+        }
 
     def test_official_anthropic_preset_uses_verified_model_data(self, client):
         res = client.get("/api/presets/anthropic")
@@ -117,16 +136,16 @@ class TestPresets:
         models = {m["alias"]: m for m in res.json()["default_models"]}
         assert set(models) == {
             "claude-fable-5",
-            "claude-opus-4-8",
+            "claude-opus-5",
             "claude-sonnet-5",
             "claude-haiku-4-5",
         }
-        assert models["claude-opus-4-8"]["model_id"] == "claude-opus-4-8"
+        assert models["claude-opus-5"]["model_id"] == "claude-opus-5"
         assert models["claude-sonnet-5"]["context_window_tokens"] == 1_000_000
         assert models["claude-haiku-4-5"]["max_output_tokens"] == 64_000
         assert models["claude-sonnet-5"]["capability_status"]["tool_use"] == "unverified"
         assert models["claude-sonnet-5"]["capability_status"]["vision"] == "unverified"
-        assert models["claude-sonnet-5"]["metadata_verified_at"] == "2026-07-16"
+        assert models["claude-sonnet-5"]["metadata_verified_at"] == "2026-07-26"
 
     def test_get_unknown_preset_404(self, client):
         res = client.get("/api/presets/not-exist")

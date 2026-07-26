@@ -154,6 +154,7 @@ from src.ui.presets.builtin import (  # noqa: E402
     deepseek,
     gemini,
     kimi,
+    kimi_coding,
     minimax,
     openai,
     openrouter,

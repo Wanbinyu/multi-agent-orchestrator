@@ -7,6 +7,7 @@ register_preset(
         "type": "openai",
         "base_url": "https://api.siliconflow.cn/v1",
         "env_var": "SILICONFLOW_API_KEY",
+        "note": "The platform catalog and account permissions change over time; these are examples, not offline-verified availability.",
         "models": {
             "qwen3-235b-a22b": {
                 "model_id": "Qwen/Qwen3-235B-A22B",

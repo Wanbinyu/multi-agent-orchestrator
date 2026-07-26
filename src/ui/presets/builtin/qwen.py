@@ -11,8 +11,10 @@ register_preset(
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
-                "qwen3-coder-plus",
-                "qwen3-235b-a22b",
+                "qwen3.8-max-preview",
+                "qwen3.7-max",
+                "qwen3.7-plus",
+                "qwen3.7-flash",
             )
         },
     },

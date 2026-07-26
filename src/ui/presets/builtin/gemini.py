@@ -11,9 +11,8 @@ register_preset(
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
-                "gemini-3.1-pro",
-                "gemini-3.5-flash",
-                "gemini-3-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash-lite",
             )
         },
     },

@@ -8,6 +8,7 @@ register_preset(
         "type": "openai",
         "base_url": "https://ark.cn-beijing.volces.com/api/v3",
         "env_var": "ARK_API_KEY",
+        "note": "Ark OpenAI-compatible access is endpoint/account specific; verify the configured model or endpoint in the Ark console.",
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in ("doubao-seed",)

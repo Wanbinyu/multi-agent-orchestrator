@@ -11,8 +11,8 @@ register_preset(
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
+                "glm-5.2",
                 "glm-5",
-                "glm-4-flash",
             )
         },
     },

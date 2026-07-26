@@ -6,6 +6,7 @@ from src.cli.provider_presets import (
     get_default_models_for_provider,
     validate_custom_provider,
 )
+from src.cli.setup_wizard import SCENARIOS
 
 
 def test_build_provider_config_anthropic():
@@ -50,8 +51,32 @@ def test_validate_custom_provider():
 
 def test_get_default_models_for_provider():
     models = get_default_models_for_provider("openai")
-    assert "gpt-4o" in models
-    assert "gpt-4o-mini" in models
+    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+
+
+def test_new_provider_presets_use_current_model_ids():
+    assert get_default_models_for_provider("kimi_coding") == [
+        "k3",
+        "k3-256k",
+        "kimi-for-coding",
+        "kimi-for-coding-highspeed",
+    ]
+    assert get_default_models_for_provider("qwen") == [
+        "qwen3.8-max-preview",
+        "qwen3.7-max",
+        "qwen3.7-plus",
+        "qwen3.7-flash",
+    ]
+
+
+def test_scenario_defaults_do_not_use_retired_glm_model():
+    defaults = [
+        worker["default_model"]
+        for scenario in SCENARIOS.values()
+        for worker in scenario["workers"]
+    ]
+    assert "glm-4-flash" not in defaults
+    assert "glm-5.2" in defaults
 
 
 def test_all_presets_have_required_fields():

@@ -481,7 +481,14 @@
   function editProvider(name) {
     state.editingProvider = name;
     const p = state.config.providers[name];
+    // Existing users may have saved a Coding Plan endpoint under the old
+    // "Kimi (Moonshot)" display name. Prefer the coding preset by endpoint.
+    const isKimiCodingEndpoint = String(p.base_url || "").includes(
+      "api.kimi.com/coding"
+    );
     const preset =
+      (isKimiCodingEndpoint &&
+        state.presets.find((x) => x.key === "kimi-coding")) ||
       state.presets.find((x) => x.name === p.name) ||
       state.presets.find((x) => x.type === p.type) ||
       state.presets[0];

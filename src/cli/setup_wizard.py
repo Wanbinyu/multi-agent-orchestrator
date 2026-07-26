@@ -61,7 +61,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             {
                 "key": "doc",
                 "name": "文档工程师",
-                "default_model": "glm-4-flash",
+                "default_model": "glm-5.2",
                 "system_prompt": "你是技术文档工程师。请根据项目内容生成清晰的中文 README 文档。",
                 "tools": ["write_file", "read_file"],
             },
@@ -93,7 +93,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             {
                 "key": "continuity_checker",
                 "name": "一致性检查",
-                "default_model": "glm-4-flash",
+                "default_model": "glm-5.2",
                 "system_prompt": "你是设定审查员。请检查故事前后设定是否一致，指出矛盾点并给出修改建议。",
             },
         ],
@@ -124,7 +124,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             {
                 "key": "tester",
                 "name": "功能验证",
-                "default_model": "glm-4-flash",
+                "default_model": "glm-5.2",
                 "system_prompt": "你是游戏测试员。请根据修改内容列出验证步骤、可能的风险点和回滚方案。",
             },
         ],
@@ -149,7 +149,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             {
                 "key": "bug_reporter",
                 "name": "缺陷报告",
-                "default_model": "glm-4-flash",
+                "default_model": "glm-5.2",
                 "system_prompt": "你是 QA 工程师。请根据测试结果整理缺陷报告，包含复现步骤、预期结果、实际结果。",
             },
         ],
@@ -165,19 +165,20 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 # 所有可用模型（从 providers.yaml 读取，这里先放默认值用于提示）
 DEFAULT_MODELS = [
     "claude-fable-5",
+    "claude-opus-5",
     "claude-sonnet-5",
     "claude-haiku-4-5",
-    "gpt-5",
-    "gpt-4o-mini",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "glm-5.2",
     "glm-5",
-    "glm-4-flash",
     "glm-ark",
     "deepseek-v4-pro",
     "deepseek-v4-flash",
-    "kimi-k3",
-    "kimi-k2.7-code",
-    "qwen3-coder-plus",
-    "gemini-3.1-pro",
+    "k3",
+    "k3-256k",
+    "qwen3.7-plus",
+    "gemini-3.6-flash",
 ]
 
 

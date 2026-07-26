@@ -19,7 +19,7 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
                 "claude-fable-5",
-                "claude-opus-4-8",
+                "claude-opus-5",
                 "claude-sonnet-5",
                 "claude-haiku-4-5",
             )
@@ -33,9 +33,9 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
-                "gpt-5",
-                "gpt-4o",
-                "gpt-4o-mini",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
             )
         },
     },
@@ -47,8 +47,8 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "models": {
             alias: BUILTIN_MODELS[alias].to_model_data()
             for alias in (
+                "glm-5.2",
                 "glm-5",
-                "glm-4-flash",
             )
         },
     },
@@ -63,6 +63,55 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
                 "deepseek-v4-pro",
                 "deepseek-v4-flash",
             )
+        },
+    },
+    "kimi_coding": {
+        "name": "Kimi Coding Plan",
+        "type": "openai",
+        "base_url": "https://api.kimi.com/coding/v1",
+        "env_var": "KIMI_CODING_API_KEY",
+        "models": {
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in (
+                "k3",
+                "k3-256k",
+                "kimi-for-coding",
+                "kimi-for-coding-highspeed",
+            )
+        },
+    },
+    "qwen": {
+        "name": "Qwen (DashScope)",
+        "type": "openai",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "env_var": "DASHSCOPE_API_KEY",
+        "models": {
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in (
+                "qwen3.8-max-preview",
+                "qwen3.7-max",
+                "qwen3.7-plus",
+                "qwen3.7-flash",
+            )
+        },
+    },
+    "minimax": {
+        "name": "MiniMax",
+        "type": "openai",
+        "base_url": "https://api.minimaxi.com/v1",
+        "env_var": "MINIMAX_API_KEY",
+        "models": {
+            "minimax-m3": BUILTIN_MODELS["minimax-m3"].to_model_data(),
+        },
+    },
+    "gemini": {
+        "name": "Google Gemini (OpenAI compatible)",
+        "type": "openai",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "env_var": "GEMINI_API_KEY",
+        "models": {
+            alias: BUILTIN_MODELS[alias].to_model_data()
+            for alias in ("gemini-3.6-flash", "gemini-3.5-flash-lite")
         },
     },
     "ark": {
