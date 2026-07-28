@@ -1,5 +1,9 @@
 # Copy to config/permissions.yaml for user-wide rules, or to
 # <project>/.mao/permissions.yaml for project-scoped rules.
+#
+# Note: MAO also hard-blocks sensitive paths (.env, *.pem, .ssh, …) and
+# interpreter inline/preload code in tools. These rules are an extra policy
+# layer (deny > ask > allow), not an OS sandbox.
 rules:
   - action: deny
     tool: run_command
@@ -9,6 +13,10 @@ rules:
       - "rm -rf build"
     not_match:
       - "python -m pytest tests"
+  - action: ask
+    tool: run_command
+    pattern: "npx *"
+    justification: "npx 可下载并执行远程包；默认要求确认，优先改用已安装本地脚本"
   - action: ask
     tool: write_file
     pattern: "**/*.py"

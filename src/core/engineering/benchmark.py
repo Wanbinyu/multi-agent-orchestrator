@@ -17,6 +17,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.core.engineering.models import utc_now
+from src.tools.safety_guards import has_dangerous_interpreter_invocation
 from src.tools.worker_tools import run_command
 
 
@@ -38,7 +39,6 @@ _VERIFICATION_EXECUTABLES = {
     "node", "npm", "npm.cmd", "npx", "npx.cmd", "pnpm", "pnpm.cmd",
     "pytest", "python", "python.exe", "python3", "yarn", "yarn.cmd",
 }
-_INLINE_EXECUTION_FLAGS = {"-c", "-e", "--eval", "--print", "-p"}
 
 
 def _relative_path(value: str, *, allow_glob: bool = False) -> str:
@@ -75,7 +75,7 @@ def _verification_command(value: str) -> str:
     executable = Path(argv[0]).name.casefold()
     if executable not in _VERIFICATION_EXECUTABLES:
         raise ValueError(f"benchmark verification executable 不允许：{executable}")
-    if _INLINE_EXECUTION_FLAGS.intersection(arg.casefold() for arg in argv[1:]):
+    if has_dangerous_interpreter_invocation(argv):
         raise ValueError("benchmark verification command 禁止解释器内联代码")
     for argument in argv[1:]:
         candidate = argument.split("=", 1)[-1].replace("\\", "/")

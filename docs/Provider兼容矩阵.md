@@ -149,6 +149,9 @@ MAO 网关会对所有普通 `chat` 和 `chat_stream` 请求注入一段短的�
 | 权限模式 `auto` / `approve` / `readonly` | 会话级工具门控 | 容器/OS 隔离 |
 | `permissions.yaml` `deny`/`ask`/`allow` | 应用层授权决策 | 内核沙箱 |
 | 命令白名单 + 无 shell 拼接 | 降低危险命令面 | 进程/网络隔离 |
+| 解释器内联/预加载拒绝（`safety_guards`） | 拒绝 `python -c`/`node -e`/`-r` 等任意代码入口 | 限制已写脚本的权限 |
+| 敏感路径硬拒绝 | 阻止 `.env`/密钥类文件进模型上下文 | 全量 DLP / 加密 |
+| `fetch_url` SSRF 防护 | 拒本地/内网/链路本地/metadata | 防 DNS 重绑定的完整方案 |
 | Worker 路径所有权 | 协作写入边界 | 多租户隔离 |
 | Plugin `permissions` 列表 | 用户可见同意面 | 技术强制沙箱 |
 | MCP / Hooks | 以 **MAO 同进程权限** 运行的第三方扩展 | 可信计算基外的隔离 |

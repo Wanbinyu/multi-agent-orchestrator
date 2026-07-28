@@ -66,3 +66,6 @@ memory/
 config/memory/
 config/ui_state.yaml
 config/*.bak
+
+# Local diagnostics / scratch (never publish)
+work/

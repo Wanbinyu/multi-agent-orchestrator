@@ -16,7 +16,10 @@ Permission modes, path rules, command allowlists, and plugin enablement are **ap
 
 - `approve` is the recommended default; `readonly` removes write and command tools.
 - `auto` may execute model-requested writes and commands within MAO's policy boundaries. Use it only with code and models you trust.
-- Command execution uses an allowlist and rejects shell chaining (`cd &&`, pipes, redirects). It does **not** provide operating-system isolation. Inline interpreter flags such as `python -c` / `node -e` are rejected.
+- Command execution uses an allowlist and rejects shell chaining (`cd &&`, pipes, redirects). It does **not** provide operating-system isolation.
+- Interpreter **inline and preload** forms are rejected in `run_command`, frontend smoke servers, and benchmark verification (`src/tools/safety_guards.py`): `python -c` / combined short options / stdin `-`, `node -e` / `--eval=` / `-p` / `--print`, and `node -r` / `--require` / `--import` / loaders. `python -m <module> -c …` remains allowed because `-c` belongs to the module.
+- File tools hard-block common **secret paths** (`.env*`, `*.pem` / `*.key` / `*.p12`, `id_rsa` / `id_ed25519`, `.ssh` / `.aws` / `.kube` directories, etc.) so credentials are less likely to enter model context. This is a filename/path policy, not full DLP.
+- `fetch_url` only allows `http`/`https` and **blocks localhost, link-local, private, and metadata targets** (including post-redirect checks). DNS rebinding and intentional public egress remain residual risks.
 - `config/permissions.yaml` and project `.mao/permissions.yaml` use `deny > ask > allow` over the session default. This is a policy engine, not a sandbox.
 - Worker relative writes are isolated; absolute writes require declared path ownership. This is an application boundary, not a replacement for OS permissions.
 - **Plugins** run in the same Python process as MAO with the same privileges. Manifest `permissions` are a user-visible consent surface, not technical confinement. Review source before `mao plugin enable`.
@@ -35,4 +38,14 @@ Chinese product docs must not describe permission rules or plugin gates as “�
 
 Keys are stored locally in `.env`; Provider YAML stores environment-variable references. `.env`, private Provider/Worker configuration, sessions, memory and output directories are ignored by Git. Users must still inspect staged changes before every push.
 
-Rotate a key immediately if it appears in terminal output, a prompt, a session export, an issue, or Git history. Treat model prompts and tool results as potentially sensitive because they can contain source code and local paths.
+`read_file` / `write_file` / `edit_file` refuse paths that match the sensitive-path guard so models cannot load or rewrite typical credential files through tools. Open secrets outside MAO when you need them. Rotate a key immediately if it appears in terminal output, a prompt, a session export, an issue, or Git history. Treat model prompts and tool results as potentially sensitive because they can still contain source code and local paths.
+
+## Residual risks (explicit)
+
+These remain **out of scope** for the current application-level controls:
+
+- No container/OS sandbox, network namespace, or seccomp.
+- Whitelisted commands (e.g. `python script.py`, `npm`, `npx`) still run with the user's full privileges.
+- Absolute project paths can still reach any path the OS allows once permission mode allows the tool; only the sensitive-name denylist is extra-hard.
+- `fetch_url` cannot fully prevent DNS rebinding or data exfiltration to public URLs.
+- Plugins, MCP, and hooks remain same-process / same-privilege.

@@ -24,6 +24,7 @@ Next target: `v0.2.0` entry conditions (external users, reproducible real benchm
 ### Fixed
 
 - CLI prompt no longer shows a stale `[approve]` prefix; mode lives only in the bottom toolbar and updates with Shift+Tab.
+- Hardened application-level tool boundaries (`src/tools/safety_guards.py`): expanded interpreter inline/preload rejection (`python -ic`/`-`, `node --eval=…`, `-r`/`--import`), hard-block sensitive paths (`.env*`, keys, `.ssh`/`.aws`, …) on file tools, and SSRF guards on `fetch_url` (localhost/private/link-local/metadata, including post-redirect). Shared checks used by `run_command`, frontend smoke, and benchmark verification. Still **not** an OS sandbox.
 
 ## [0.1.0-beta.7] - 2026-07-21
 

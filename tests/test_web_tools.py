@@ -105,7 +105,8 @@ def test_fetch_url_success():
     <p>Second paragraph with <a href="https://link.example.com">a link</a>.</p>
     </body></html>
     """
-    with patch.object(web_tools, "urlopen", return_value=_fake_response(html, "https://example.com/page")):
+    with patch.object(web_tools, "validate_fetch_url", return_value=None), \
+         patch.object(web_tools, "urlopen", return_value=_fake_response(html, "https://example.com/page")):
         result = web_tools.fetch_url("https://example.com/page")
     assert result.success is True
     assert "Example Page" in result.output
@@ -119,7 +120,8 @@ def test_fetch_url_success():
 def test_fetch_url_truncates_long_content():
     long_text = "A" * 20000
     html = f"<html><body><p>{long_text}</p></body></html>"
-    with patch.object(web_tools, "urlopen", return_value=_fake_response(html)):
+    with patch.object(web_tools, "validate_fetch_url", return_value=None), \
+         patch.object(web_tools, "urlopen", return_value=_fake_response(html)):
         result = web_tools.fetch_url("https://example.com/page", max_length=1000)
     assert result.success is True
     assert "截断" in result.output
@@ -136,7 +138,8 @@ def test_fetch_url_http_error():
         hdrs=None,
         fp=io.BytesIO(b""),
     )
-    with patch.object(web_tools, "urlopen", side_effect=error):
+    with patch.object(web_tools, "validate_fetch_url", return_value=None), \
+         patch.object(web_tools, "urlopen", side_effect=error):
         result = web_tools.fetch_url("https://example.com/page")
     assert result.success is False
     assert "HTTP" in result.error

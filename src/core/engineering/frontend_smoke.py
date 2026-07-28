@@ -18,6 +18,7 @@ from src.models.schemas import (
     FrontendSmokeAssertion,
     FrontendSmokeContract,
 )
+from src.tools.safety_guards import has_dangerous_interpreter_invocation
 from src.tools.tool_result import ToolResult
 
 
@@ -30,12 +31,6 @@ _PORT_CONFLICT_MARKERS = (
     "address already in use", "eaddrinuse", "only one usage of each socket address",
     "winerror 10048",
 )
-_INLINE_CODE_FLAGS = {
-    "python": {"-c"},
-    "python.exe": {"-c"},
-    "python3": {"-c"},
-    "node": {"-e", "--eval", "-p", "--print"},
-}
 
 
 class FrontendSmokeError(RuntimeError):
@@ -104,9 +99,7 @@ class ManagedFrontendServer:
                 "server_command_rejected",
                 f"不允许的前端 server 可执行文件：{executable}",
             )
-        arguments = [part.casefold() for part in self.contract.start_command[1:]]
-        forbidden = _INLINE_CODE_FLAGS.get(executable, set())
-        if forbidden.intersection(arguments):
+        if has_dangerous_interpreter_invocation(list(self.contract.start_command)):
             raise FrontendSmokeError(
                 "server_command_rejected",
                 "前端 server 命令禁止解释器内联代码；请使用项目内脚本或 package script",

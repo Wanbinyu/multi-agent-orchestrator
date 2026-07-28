@@ -17,10 +17,14 @@ from typing import Any, MutableMapping
 
 from pydantic import ValidationError
 
-from src.core.engineering.frontend_smoke import run_frontend_smoke as execute_frontend_smoke
 from src.models.schemas import FrontendSmokeContract
 from src.tools.paths import resolve_path as _resolve_path
 from src.tools.registry import tool_registry
+from src.tools.safety_guards import (
+    has_dangerous_interpreter_invocation,
+    is_sensitive_path,
+    sensitive_path_error,
+)
 from src.tools.tool_result import ToolResult
 
 
@@ -42,6 +46,12 @@ def read_file(path: str, base_dir: str = ".") -> ToolResult:
     """读取 base_dir 下的文件内容"""
     try:
         target = _resolve_path(path, base_dir)
+        if is_sensitive_path(target):
+            return ToolResult(
+                success=False,
+                error=sensitive_path_error(path),
+                metadata={"error_code": "sensitive_path", "path": str(target)},
+            )
         if not target.exists():
             return ToolResult(success=False, error=f"文件不存在：{path}")
         if not target.is_file():
@@ -98,6 +108,8 @@ DEFAULT_ALLOWED_PREFIXES = [
     "pytest",
     "python -m pytest",
     "python ",
+    "python3 ",
+    "py ",
     "npm ",
     "pnpm ",
     "yarn ",
@@ -108,10 +120,7 @@ DEFAULT_ALLOWED_PREFIXES = [
     "git log",
 ]
 
-# 解释器内联代码执行（python -c / node -e 等）允许任意代码执行，
-# 会绕过路径归属与 permission_rules，必须在 preflight 拒绝。
-_INLINE_CODE_INTERPRETERS = {"python", "python.exe", "python3", "py", "node", "node.exe"}
-
+# 解释器内联/预加载代码执行会绕过路径归属与 permission_rules，必须在 preflight 拒绝。
 _COMMAND_PREFLIGHT_ERRORS = {
     "empty_command",
     "inline_cwd",
@@ -122,6 +131,7 @@ _COMMAND_PREFLIGHT_ERRORS = {
     "cwd_not_directory",
     "temporary_output_unsupported",
     "permission_denied",
+    "sensitive_path",
 }
 _INLINE_CD = re.compile(
     r"^\s*cd(?:\s+/d)?\s+(?:\"([^\"]+)\"|'([^']+)'|([^&|;\r\n]+?))\s*&&\s*(.+)$",
@@ -194,26 +204,16 @@ def _contains_shell_syntax(command: str) -> bool:
 
 
 def _has_inline_interpreter_code(command: str) -> bool:
-    """检测 python -c / node -e 等解释器内联代码（任意代码执行风险）。
+    """检测解释器内联/预加载代码（任意代码执行风险）。
 
-    与 run_command 的 argv 解析一致使用 shlex.split。python 的 -c 为解释器
-    内联模式；若同时出现 -m（模块模式），-c 归属模块（如
-    `python -m pytest -c config`），不拒绝。node 的 -e/--eval/-p/--print
-    为内联代码。命中则 preflight 拒绝，避免绕过路径归属与 permission_rules。
+    覆盖 python -c/-ic/stdin、node -e/--eval=…/-p/--print、node -r/--import 等。
+    `python -m pytest -c config` 中 -c 归属模块，不拒绝。
     """
     try:
         argv = shlex.split(command)
     except ValueError:
         return False
-    if len(argv) < 2:
-        return False
-    executable = Path(argv[0]).name.casefold()
-    if executable not in _INLINE_CODE_INTERPRETERS:
-        return False
-    args = [part.casefold() for part in argv[1:]]
-    if executable in {"python", "python.exe", "python3", "py"}:
-        return "-c" in args and "-m" not in args
-    return bool({"-e", "--eval", "-p", "--print"}.intersection(args))
+    return has_dangerous_interpreter_invocation(argv)
 
 
 def _command_metadata(
@@ -520,6 +520,21 @@ def run_command(
                     suggested_action="使用结构化 cwd，并分别执行项目发现工具返回的单条命令",
                 ),
             )
+        # Inline/preload interpreter checks run before the allowlist so that
+        # dangerous forms get a stable error_code even when prefixes match.
+        if _has_inline_interpreter_code(command):
+            return ToolResult(
+                success=False,
+                error=(
+                    "禁止解释器内联代码（python -c / node -e 等）；"
+                    "请把代码写入项目内脚本后再运行，不要重复原调用。"
+                ),
+                metadata=_command_metadata(
+                    cwd=cwd,
+                    error_code="inline_interpreter_code",
+                    suggested_action="先用 write_file 写入脚本文件，再 run_command 执行该脚本",
+                ),
+            )
         if not _is_command_allowed(command, allowed_prefixes):
             return ToolResult(
                 success=False,
@@ -532,19 +547,6 @@ def run_command(
                     error_code="command_not_allowed",
                     suggested_tool="discover_project_commands",
                     suggested_params={"path": cwd},
-                ),
-            )
-        if _has_inline_interpreter_code(command):
-            return ToolResult(
-                success=False,
-                error=(
-                    "禁止解释器内联代码（python -c / node -e 等）；"
-                    "请把代码写入项目内脚本后再运行，不要重复原调用。"
-                ),
-                metadata=_command_metadata(
-                    cwd=cwd,
-                    error_code="inline_interpreter_code",
-                    suggested_action="先用 write_file 写入脚本文件，再 run_command 执行该脚本",
                 ),
             )
 
@@ -695,6 +697,11 @@ def frontend_smoke(
     artifact_dir: str = "smoke-artifacts",
 ) -> ToolResult:
     """Validate and execute one bounded frontend runtime contract."""
+    # Lazy import avoids worker_tools <-> engineering package circular import.
+    from src.core.engineering.frontend_smoke import (
+        run_frontend_smoke as execute_frontend_smoke,
+    )
+
     try:
         parsed = FrontendSmokeContract(**contract)
     except ValidationError as exc:
@@ -725,6 +732,12 @@ def write_file(path: str, content: str, base_dir: str = ".") -> ToolResult:
     """在 base_dir 下写入文件，支持自动创建父目录"""
     try:
         target = _resolve_path(path, base_dir)
+        if is_sensitive_path(target):
+            return ToolResult(
+                success=False,
+                error=sensitive_path_error(path),
+                metadata={"error_code": "sensitive_path", "path": str(target)},
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         with open(target, "w", encoding="utf-8") as f:
             f.write(content)
@@ -749,6 +762,12 @@ def edit_file(path: str, old_string: str, new_string: str, base_dir: str = ".") 
         if not old_string:
             return ToolResult(success=False, error="old_string 不能为空")
         target = _resolve_path(path, base_dir)
+        if is_sensitive_path(target):
+            return ToolResult(
+                success=False,
+                error=sensitive_path_error(path),
+                metadata={"error_code": "sensitive_path", "path": str(target)},
+            )
         if not target.exists():
             return ToolResult(success=False, error=f"文件不存在：{path}")
         if not target.is_file():

@@ -14,6 +14,7 @@ from urllib.parse import quote_plus, urlparse
 from urllib.request import Request, urlopen
 
 from src.tools.registry import tool_registry
+from src.tools.safety_guards import validate_fetch_url
 from src.tools.tool_result import ToolResult
 
 # 抓取上限
@@ -102,14 +103,13 @@ def web_search(query: str, top_n: int = 5) -> ToolResult:
     category="external",
 )
 def fetch_url(url: str, max_length: int = 8000) -> ToolResult:
-    if not url.strip():
-        return ToolResult(success=False, error="URL 不能为空")
-
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return ToolResult(success=False, error=f"不支持的协议：{parsed.scheme}")
-    if not parsed.netloc:
-        return ToolResult(success=False, error="URL 缺少域名")
+    blocked = validate_fetch_url(url)
+    if blocked:
+        return ToolResult(
+            success=False,
+            error=blocked,
+            metadata={"error_code": "fetch_url_blocked"},
+        )
 
     try:
         html, final_url = _http_get(url)
@@ -119,6 +119,18 @@ def fetch_url(url: str, max_length: int = 8000) -> ToolResult:
         return ToolResult(success=False, error=f"请求失败：{e}")
     except Exception as e:
         return ToolResult(success=False, error=f"抓取失败：{e}")
+
+    # Re-check after redirects so open redirects cannot land on private IPs.
+    redirect_blocked = validate_fetch_url(final_url)
+    if redirect_blocked:
+        return ToolResult(
+            success=False,
+            error=f"最终地址被拒绝：{redirect_blocked}",
+            metadata={
+                "error_code": "fetch_url_blocked",
+                "final_url": final_url,
+            },
+        )
 
     try:
         text = _html_to_markdown(html)
