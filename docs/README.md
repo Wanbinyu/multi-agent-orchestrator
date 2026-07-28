@@ -36,6 +36,7 @@
 - [`RELEASE_NOTES_v0.1.0-beta.6.md`](RELEASE_NOTES_v0.1.0-beta.6.md)
 - [`RELEASE_NOTES_v0.1.0-beta.7.md`](RELEASE_NOTES_v0.1.0-beta.7.md)
 - [`acceptance/发布验收记录.md`](acceptance/发布验收记录.md)
+- [`acceptance/首次安装验收清单.md`](acceptance/首次安装验收清单.md)：空目录 / 新项目 10 分钟路径与自动化脚本（`scripts/first_run_acceptance.py`）。
 
 ## 历史归档
 
