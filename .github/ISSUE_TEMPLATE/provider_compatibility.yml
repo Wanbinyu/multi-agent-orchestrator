@@ -1,33 +1,70 @@
 name: Provider compatibility
-description: Report an API, model, streaming, or tool-use compatibility issue
+description: API / 模型 / 流式 / 工具协议兼容问题（禁止粘贴 Key）
 title: "[Provider]: "
 labels: [provider]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove tokens, account IDs, prompts, and personal URLs.
+        See `docs/外部用户反馈指南.md` and `docs/Provider兼容矩阵.md`.
+
+  - type: checkboxes
+    id: no_secrets
+    attributes:
+      label: Confirmation
+      options:
+        - label: No API keys, account IDs, or full request bodies with secrets
+          required: true
+
   - type: input
     id: provider
     attributes:
-      label: Provider and endpoint type
+      label: Provider family and protocol
       placeholder: Volcengine Coding Plan / Anthropic-compatible
     validations:
       required: true
+
   - type: input
     id: model
     attributes:
-      label: Model ID or alias
+      label: Model ID or local alias
       placeholder: ark-code-latest
     validations:
       required: true
+
   - type: dropdown
     id: feature
     attributes:
       label: Affected capability
-      options: [Authentication, Basic chat, Streaming, Tool use, Context limit, Failover, Other]
+      options:
+        - Authentication
+        - Basic chat
+        - Streaming
+        - Tool use
+        - Context limit
+        - Failover
+        - base_url /v1 path
+        - Other
     validations:
       required: true
+
+  - type: input
+    id: error_code
+    attributes:
+      label: MAO error_code (if shown)
+      placeholder: authentication_error / invalid_request_error
+
+  - type: input
+    id: version
+    attributes:
+      label: MAO version
+      placeholder: MAO 0.1.0b7
+
   - type: textarea
     id: details
     attributes:
       label: Sanitized details and reproduction
-      description: Remove tokens, account IDs, prompts, and personal URLs.
+      description: Include base_url host only if public (no query tokens). Redact keys.
     validations:
       required: true

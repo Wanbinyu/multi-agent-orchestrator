@@ -1,0 +1,116 @@
+name: 安装 / 首次配置反馈
+description: 安装失败、首次配置、空目录启动问题（禁止粘贴 Key）
+title: "[Install]: "
+labels: [install, feedback]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢试用 MAO。**请勿粘贴** API Key、`.env` 全文、Session、项目源码或私人 URL。
+        完整说明见：`docs/外部用户反馈指南.md`。
+        提交前可用：`python scripts/sanitize_feedback_text.py < 日志.txt`
+
+  - type: checkboxes
+    id: no_secrets
+    attributes:
+      label: 我已确认
+      options:
+        - label: 本 Issue 不含 API Key、Bearer token、账号 ID、完整 .env 或私有项目路径中的敏感段
+          required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 卡在哪一步
+      options:
+        - pipx / pip 安装
+        - mao --version / 命令找不到
+        - 首次 mao（无配置）
+        - mao web 打不开或 /health 失败
+        - Provider 配置 / 测试连接
+        - 首次对话能开但报错
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: MAO 版本
+      description: 运行 `mao --version`
+      placeholder: MAO 0.1.0b7
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: 安装方式
+      options:
+        - pipx install git+https://github.com/...
+        - pip install -e .
+        - 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options: [Windows, Ubuntu/Linux, macOS, Other]
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python 版本
+      placeholder: 3.11.9
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: 现象与期望
+      description: 发生了什么？你期望怎样？
+      placeholder: |
+        现象：...
+        期望：...
+    validations:
+      required: true
+
+  - type: textarea
+    id: commands
+    attributes:
+      label: 你执行的命令（已脱敏）
+      description: 不要包含 Key。可用 `***` 代替密钥。
+      render: shell
+      placeholder: |
+        pipx install git+https://github.com/Wanbinyu/multi-agent-orchestrator.git
+        mao --version
+        mao web --no-open
+
+  - type: input
+    id: error_code
+    attributes:
+      label: 稳定错误码（如有）
+      description: 例如 authentication_error、connection_error、configuration_error
+      placeholder: authentication_error
+
+  - type: textarea
+    id: sanitized_log
+    attributes:
+      label: 脱敏后的终端/浏览器输出
+      description: 删除 Key、完整 URL 中的 token 查询参数、私人路径。
+      render: shell
+
+  - type: dropdown
+    id: first_run_script
+    attributes:
+      label: 是否跑过空目录验收脚本
+      options:
+        - 未运行
+        - python scripts/first_run_acceptance.py 通过
+        - 运行失败（请在上方贴脱敏输出）
+        - 源码外 pipx 用户不适用

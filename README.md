@@ -96,6 +96,15 @@ python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
+### 反馈与问题报告（请脱敏）
+
+欢迎通过 GitHub Issue 反馈安装问题、真实项目任务结果或缺陷。**请勿粘贴 API Key、`.env`、Session 或客户代码。**
+
+- 使用指南：[`docs/外部用户反馈指南.md`](docs/外部用户反馈指南.md)
+- Issue 模板：安装反馈 / 真实任务反馈 / Bug / Provider 兼容
+- 日志脱敏：`python scripts/sanitize_feedback_text.py log.txt`
+- 安全漏洞请走 [Security advisory](https://github.com/Wanbinyu/multi-agent-orchestrator/security/advisories/new)，不要开公开 Issue
+
 ## 已知限制与安全边界
 
 - MAO 尚无容器级沙箱；命令以当前进程权限在本机执行。默认推荐 `approve`，不信任的项目使用 `readonly`。权限规则与插件启用门是**应用层授权**，不是 OS/容器隔离。

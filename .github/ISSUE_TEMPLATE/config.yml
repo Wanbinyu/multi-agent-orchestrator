@@ -1,5 +1,11 @@
 blank_issues_enabled: false
 contact_links:
+  - name: 外部用户反馈指南（脱敏）
+    url: https://github.com/Wanbinyu/multi-agent-orchestrator/blob/main/docs/%E5%A4%96%E9%83%A8%E7%94%A8%E6%88%B7%E5%8F%8D%E9%A6%88%E6%8C%87%E5%8D%97.md
+    about: 安装 / 真实任务反馈前请先阅读：禁止粘贴 Key 与项目机密
+  - name: 首次安装验收清单
+    url: https://github.com/Wanbinyu/multi-agent-orchestrator/blob/main/docs/acceptance/%E9%A6%96%E6%AC%A1%E5%AE%89%E8%A3%85%E9%AA%8C%E6%94%B6%E6%B8%85%E5%8D%95.md
+    about: 空目录 10 分钟路径与自动化脚本
   - name: Security report
     url: https://github.com/Wanbinyu/multi-agent-orchestrator/security/advisories/new
     about: Report vulnerabilities privately. Do not open a public issue.
