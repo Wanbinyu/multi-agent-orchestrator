@@ -107,12 +107,38 @@ class GatewayClient:
         *,
         max_tokens: int = 4096,
         tools: Any = None,
+        default_safe_context_tokens: int | None = None,
     ) -> ContextBudget:
         config = self.get_model_config(model_name)
+        prepared_messages = self.prepare_messages(model_name, messages)
+        return self._get_context_budget_for_prepared_messages(
+            model_name,
+            config,
+            prepared_messages,
+            max_tokens=max_tokens,
+            tools=tools,
+            default_safe_context_tokens=default_safe_context_tokens,
+        )
+
+    def _get_context_budget_for_prepared_messages(
+        self,
+        model_name: str,
+        config: ModelConfig,
+        messages: list[ChatMessage],
+        *,
+        max_tokens: int,
+        tools: Any,
+        default_safe_context_tokens: int | None = None,
+    ) -> ContextBudget:
         manager = getattr(self, "context_budget_manager", None)
         if manager is None:
             manager = ContextBudgetManager()
             self.context_budget_manager = manager
+        if (
+            default_safe_context_tokens is not None
+            and manager.default_safe_context_tokens != default_safe_context_tokens
+        ):
+            manager = ContextBudgetManager(default_safe_context_tokens)
         return manager.calculate(
             model_name,
             config,
@@ -127,8 +153,10 @@ class GatewayClient:
         messages: list[ChatMessage],
         kwargs: dict[str, Any],
     ) -> ContextBudget:
-        budget = self.get_context_budget(
+        config = self.get_model_config(model_name)
+        budget = self._get_context_budget_for_prepared_messages(
             model_name,
+            config,
             messages,
             max_tokens=kwargs.get("max_tokens", 4096),
             tools=kwargs.get("tools"),
@@ -344,6 +372,12 @@ class GatewayClient:
             ChatMessage(role="system", content=profile) for profile in profiles
         ] + list(messages)
 
+    def prepare_messages(
+        self, model_name: str, messages: list[ChatMessage]
+    ) -> list[ChatMessage]:
+        """Return the exact message list used for a request to ``model_name``."""
+        return self._messages_for_model(messages, self.get_model_config(model_name))
+
     def get_main_model(self) -> str | None:
         """获取主模型别名"""
         return self.main_model
@@ -437,7 +471,7 @@ class GatewayClient:
                 continue
 
             try:
-                attempt_messages = self._messages_for_model(messages, model_config)
+                attempt_messages = self.prepare_messages(current_model, messages)
                 self._validate_context_request(current_model, attempt_messages, kwargs)
             except Exception as exc:
                 error = classify_provider_error(
@@ -630,7 +664,7 @@ class GatewayClient:
                 continue
 
             try:
-                attempt_messages = self._messages_for_model(messages, model_config)
+                attempt_messages = self.prepare_messages(current_model, messages)
                 self._validate_context_request(current_model, attempt_messages, kwargs)
             except Exception as exc:
                 error = classify_provider_error(

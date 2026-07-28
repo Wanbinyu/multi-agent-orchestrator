@@ -100,16 +100,25 @@ class ContextCompactor:
     def compact_limit(self) -> int:
         return int(self.max_context_tokens * self.threshold)
 
-    def needs_compaction(self, messages: list[ChatMessage]) -> bool:
+    def needs_compaction(
+        self, messages: list[ChatMessage], *, current_tokens: int | None = None
+    ) -> bool:
         if self.max_context_tokens <= 0:
             return False
         if len(messages) < self.min_messages_to_compact:
             return False
-        return count_messages_tokens(messages) > self.compact_limit
+        token_count = (
+            count_messages_tokens(messages)
+            if current_tokens is None
+            else current_tokens
+        )
+        return token_count > self.compact_limit
 
-    def maybe_compact(self, messages: list[ChatMessage]) -> list[ChatMessage]:
+    def maybe_compact(
+        self, messages: list[ChatMessage], *, current_tokens: int | None = None
+    ) -> list[ChatMessage]:
         self.last_metadata = CompactionMetadata(before_messages=len(messages))
-        if not self.needs_compaction(messages):
+        if not self.needs_compaction(messages, current_tokens=current_tokens):
             return messages
 
         system_msgs = [message for message in messages if message.role == "system"]

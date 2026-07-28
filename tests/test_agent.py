@@ -6,10 +6,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.core.agent import Agent
+from src.core.context_budget import ContextBudgetManager
 from src.core.engineering import RunJournalStore
 from src.core.session import Session
 from src.gateway.errors import ProviderError
-from src.models.schemas import ChatResponse, ModelConfig
+from src.models.schemas import ChatMessage, ChatResponse, ModelConfig
 
 
 def _make_session(tmp_path) -> Session:
@@ -63,6 +64,32 @@ def test_context_status_and_system_prompt_use_runtime_facts(tmp_path):
     assert status["max_context_source"] == "model_config"
     assert "anthropic 仅表示 API 兼容协议" in prompt
     assert "不得猜测其他模型配置" in prompt
+
+
+def test_context_status_uses_gateway_effective_message_budget(tmp_path):
+    session = _make_session(tmp_path)
+    gateway = _mock_gateway("unused")
+    gateway.main_model = "glm-ark"
+    config = ModelConfig(provider="volcengineark", model_id="ark-code-latest")
+    gateway.get_model_config.return_value = config
+    expected = ContextBudgetManager().calculate(
+        "glm-ark",
+        config,
+        [
+            ChatMessage(role="user", content="hello"),
+            # Model a Gateway-injected profile without mutating the session.
+            ChatMessage(role="system", content="global profile"),
+        ],
+        requested_output_tokens=config.max_output_tokens,
+    )
+    gateway.get_context_budget.return_value = expected
+    agent = Agent(gateway, session)
+    session.messages = [ChatMessage(role="user", content="hello")]
+
+    status = agent.get_context_status()
+
+    assert status["current_tokens"] == expected.current_input_tokens
+    gateway.get_context_budget.assert_called_once()
 
 
 def test_explicit_session_report_uses_all_journals_without_provider(tmp_path):

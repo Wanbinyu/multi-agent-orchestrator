@@ -103,6 +103,15 @@ def test_needs_compaction_checks_token_count():
     assert compactor.needs_compaction(large) is True
 
 
+def test_needs_compaction_accepts_effective_request_token_count():
+    gw = _mock_gateway()
+    compactor = ContextCompactor(gw, max_context_tokens=1000, threshold=0.5)
+    messages = _make_messages(10, content_size=1)
+
+    assert compactor.needs_compaction(messages) is False
+    assert compactor.needs_compaction(messages, current_tokens=501) is True
+
+
 def test_transcript_truncates_long_content():
     long_msg = ChatMessage(role="user", content="y" * 2000)
     transcript = ContextCompactor._build_transcript([long_msg])

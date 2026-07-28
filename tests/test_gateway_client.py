@@ -148,6 +148,20 @@ def test_global_prompt_profile_is_injected_for_streaming_requests(tmp_path, monk
     assert messages == [ChatMessage(role="user", content="hello")]
 
 
+def test_context_budget_counts_the_injected_global_profile(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path, monkeypatch)
+    messages = [ChatMessage(role="user", content="hello")]
+    config = client.get_model_config("glm-ark")
+    raw_budget = client.context_budget_manager.calculate(
+        "glm-ark", config, messages, requested_output_tokens=4096
+    )
+
+    budget = client.get_context_budget("glm-ark", messages)
+
+    assert budget.current_input_tokens > raw_budget.current_input_tokens
+    assert messages == [ChatMessage(role="user", content="hello")]
+
+
 def test_model_config_rejects_unknown_prompt_profile():
     with pytest.raises(ValidationError, match="未知 prompt_profile"):
         ModelConfig(

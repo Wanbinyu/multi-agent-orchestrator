@@ -14,7 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from src.core.compactor import ContextCompactor
-from src.core.context_budget import ContextBudgetManager
+from src.core.context_budget import ContextBudget, ContextBudgetManager
 from src.core.engineering import (
     CompletionAuditor,
     Evidence,
@@ -722,17 +722,38 @@ class Agent:
         if main_model:
             try:
                 cfg = self.gateway.get_model_config(main_model)
-                budget = self.context_budget_manager.calculate(
-                    main_model,
-                    cfg,
-                    self.session.messages,
-                    requested_output_tokens=cfg.max_output_tokens,
-                    tools=self._get_native_tools(),
-                )
+                budget = self._context_budget(main_model, cfg)
                 return budget.input_budget_tokens
             except Exception:
                 pass
         return self.max_context_tokens
+
+    def _context_budget(
+        self, model_name: str, config: ModelConfig
+    ) -> ContextBudget:
+        """Use the Gateway's prepared request messages as the budget source of truth."""
+        tools = self._get_native_tools()
+        getter = getattr(self.gateway, "get_context_budget", None)
+        if callable(getter):
+            try:
+                budget = getter(
+                    model_name,
+                    self.session.messages,
+                    max_tokens=config.max_output_tokens,
+                    tools=tools,
+                    default_safe_context_tokens=self.max_context_tokens,
+                )
+                if isinstance(budget, ContextBudget):
+                    return budget
+            except Exception:
+                pass
+        return self.context_budget_manager.calculate(
+            model_name,
+            config,
+            self.session.messages,
+            requested_output_tokens=config.max_output_tokens,
+            tools=tools,
+        )
 
     def get_context_status(self) -> dict[str, Any]:
         """返回无需模型推测的上下文预算与压缩状态。"""
@@ -753,13 +774,7 @@ class Agent:
 
         if cfg is None:
             cfg = ModelConfig(provider=provider or "unknown", model_id=model_id or "unknown")
-        budget = self.context_budget_manager.calculate(
-            main_model or "unknown",
-            cfg,
-            self.session.messages,
-            requested_output_tokens=cfg.max_output_tokens,
-            tools=self._get_native_tools(),
-        )
+        budget = self._context_budget(main_model or "unknown", cfg)
         status = budget.to_dict()
         status.update({
             "model_alias": main_model or "unknown",
@@ -821,17 +836,25 @@ class Agent:
                 1,
                 int(max_ctx * journal.execution_depth.budget.context_budget_ratio),
             )
+        context_status = self.get_context_status()
         compactor = ContextCompactor(
             self.gateway,
             max_context_tokens=max_ctx,
-            threshold=self.get_context_status()["compaction_threshold"],
+            threshold=context_status["compaction_threshold"],
             artifact_dir=Path(self.session.output_dir) / "context",
             task_checkpoint=self._build_task_checkpoint(),
         )
-        if not compactor.needs_compaction(self.session.messages):
+        current_tokens = context_status.get(
+            "current_tokens", count_messages_tokens(self.session.messages)
+        )
+        if not compactor.needs_compaction(
+            self.session.messages, current_tokens=current_tokens
+        ):
             return False
         before = len(self.session.messages)
-        new_messages = compactor.maybe_compact(self.session.messages)
+        new_messages = compactor.maybe_compact(
+            self.session.messages, current_tokens=current_tokens
+        )
         if len(new_messages) < before:
             metadata = compactor.last_metadata
             self.session.record_compaction_event(
