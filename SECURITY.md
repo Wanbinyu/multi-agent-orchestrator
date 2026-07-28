@@ -40,6 +40,19 @@ Keys are stored locally in `.env`; Provider YAML stores environment-variable ref
 
 `read_file` / `write_file` / `edit_file` refuse paths that match the sensitive-path guard so models cannot load or rewrite typical credential files through tools. Open secrets outside MAO when you need them. Rotate a key immediately if it appears in terminal output, a prompt, a session export, an issue, or Git history. Treat model prompts and tool results as potentially sensitive because they can still contain source code and local paths.
 
+## Logging
+
+MAO writes application logs through `src/core/logging_setup.py` (logger name `mao.*`):
+
+| Variable | Meaning |
+|---|---|
+| `MAO_LOG_LEVEL` | `DEBUG` / `INFO` (default) / `WARNING` / `ERROR` |
+| `MAO_LOG_FILE` | Optional file path (UTF-8); stderr always enabled |
+| `MAO_LOG_FORMAT` | `text` (default) or `json` (one object per line) |
+| `MAO_TURN_TIMEOUT_SECONDS` | Agent turn wall-clock limit (default `900`; `0` disables) |
+
+Log handlers redact common key patterns (`sk-…`, `ark-…`, `Bearer …`). **Do not** rely on logging alone for audit: RunJournal under `sessions/<id>/runs/` remains the engineering evidence store. Never put live keys into log messages intentionally.
+
 ## Residual risks (explicit)
 
 These remain **out of scope** for the current application-level controls:

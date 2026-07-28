@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -19,7 +18,10 @@ from src.ui.routers import chat, memory, providers
 from src.gateway.errors import ProviderError, provider_error_http_status
 
 
-logger = logging.getLogger(__name__)
+from src.core.logging_setup import get_logger, setup_logging
+
+setup_logging()
+logger = get_logger("ui")
 
 
 @asynccontextmanager

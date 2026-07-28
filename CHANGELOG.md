@@ -8,8 +8,15 @@ Next target: `v0.2.0` entry conditions (external users, reproducible real benchm
 
 ### Added
 
+- Full application logging (`src/core/logging_setup.py`): `MAO_LOG_LEVEL` / `MAO_LOG_FILE` / `MAO_LOG_FORMAT=text|json`, stderr + optional file, automatic secret redaction.
+- Agent wall-clock turn timeout via `MAO_TURN_TIMEOUT_SECONDS` (default 900; `0` disables) with RunJournal decisions on timeout.
+- Shared retry policy (`src/core/retry_policy.py`): task retries prefer stable `error_code` / `ProviderError.retryable` over free-text matching; `TaskResult.error_code` persisted.
 - O4 external feedback channels: GitHub Issue templates for install and real-task reports, `docs/外部用户反馈指南.md`, offline paste templates, and `scripts/sanitize_feedback_text.py` to redact keys/tokens/home paths before posting.
 - Empty-directory first-run acceptance script (`scripts/first_run_acceptance.py`) and checklist under `docs/acceptance/`.
+
+### Changed
+
+- Gateway logs provider retries/failover; dispatcher/worker log transient failures; Agent writes RunJournal checkpoints after each model/tool round.
 - One-shot `mao run` now supports `--output-format plain|json|streaming-json` for headless automation. JSON events cover plan, model usage, tools, commands, file changes, verification, approvals, usage totals, errors, and the final exit status.
 - Provider compatibility matrix (`docs/Provider兼容矩阵.md`) bound to `catalog.export_compatibility_matrix()` with contract tests.
 - CLI welcome mascot (cat on a ledge) shown at chat start; README features the same art at the top.

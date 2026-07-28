@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 
 from src.core.compactor import ContextCompactor
 from src.core.context_budget import ContextBudget, ContextBudgetManager
+from src.core.logging_setup import get_logger
+from src.core.turn_timeout import TurnDeadline, TurnTimeoutError
 from src.core.engineering import (
     CompletionAuditor,
     Evidence,
@@ -67,6 +69,8 @@ from src.tools.worker_tools import (
     execute_tool_call,
     record_command_preflight_failure,
 )
+
+logger = get_logger("agent")
 
 
 COLLABORATION_HEARTBEAT_SECONDS = 2.0
@@ -1426,6 +1430,13 @@ class Agent:
         self.recovery_manager.require_ready()
         run_journal = self._start_engineering_run(user_input)
         self._claim_recovery_checkpoint(run_journal)
+        deadline = TurnDeadline.start()
+        logger.info(
+            "turn start session=%s run=%s timeout=%s",
+            self.session.id,
+            run_journal.run_id,
+            f"{deadline.limit_seconds:.0f}s" if deadline.enabled else "off",
+        )
 
         try:
             if self.session.plan_mode == "pending":
@@ -1452,13 +1463,34 @@ class Agent:
                     engineering=engineering,
                 )
             self._maybe_compact_context()
-            return self._run_turn_impl(user_input, run_journal)
+            return self._run_turn_impl(user_input, run_journal, deadline=deadline)
+        except TurnTimeoutError as exc:
+            logger.error(
+                "turn timeout session=%s run=%s limit=%.0fs elapsed=%.0fs",
+                self.session.id,
+                run_journal.run_id,
+                exc.limit_seconds,
+                exc.elapsed_seconds,
+            )
+            run_journal.decisions.append(str(exc))
+            self.journal_store.save(run_journal)
+            self._fail_engineering_run(run_journal, exc)
+            raise
         except Exception as exc:
+            logger.exception(
+                "turn failed session=%s run=%s",
+                self.session.id,
+                run_journal.run_id,
+            )
             self._fail_engineering_run(run_journal, exc)
             raise
 
     def _run_turn_impl(
-        self, user_input: str, run_journal: RunJournal
+        self,
+        user_input: str,
+        run_journal: RunJournal,
+        *,
+        deadline: TurnDeadline | None = None,
     ) -> AgentTurnResult:
         """已建立 RunJournal 后执行同步工具循环。"""
 
@@ -1475,9 +1507,11 @@ class Agent:
             or self._plan_mode_is_read_only()
         )
         read_file_keys: set[str] = set()
+        deadline = deadline or TurnDeadline.start()
 
         iterations = 0
         while True:
+            deadline.check()
             self._maybe_compact_context()
             response = self._chat_for_run(
                 run_journal,
@@ -1492,6 +1526,11 @@ class Agent:
             total_output += response.output_tokens
             total_cost += response.cost_usd
             self._record_usage_observation(response.input_tokens)
+            run_journal.decisions.append(
+                f"[checkpoint] model round {iterations + 1} "
+                f"in={response.input_tokens} out={response.output_tokens}"
+            )
+            self.journal_store.save(run_journal)
 
             # 空响应守卫：首轮无文本且无工具调用时按失败处理，避免假完成；
             # 工具轮之后的空响应保持原有收尾行为
@@ -1591,6 +1630,18 @@ class Agent:
                 break
 
             tool_calls.extend(calls)
+            run_journal.decisions.append(
+                f"[checkpoint] tools round {iterations + 1} calls={len(calls)} "
+                f"ok={sum(1 for c in calls if c.get('success'))}"
+            )
+            self.journal_store.save(run_journal)
+            logger.info(
+                "tools executed session=%s run=%s round=%s count=%s",
+                self.session.id,
+                run_journal.run_id,
+                iterations + 1,
+                len(calls),
+            )
             self.session.add_message(
                 "user",
                 tool_results_text + "\n\n请继续完成用户请求。",
@@ -1680,6 +1731,13 @@ class Agent:
         await asyncio.to_thread(self.recovery_manager.require_ready)
         run_journal = await asyncio.to_thread(self._start_engineering_run, user_input)
         await asyncio.to_thread(self._claim_recovery_checkpoint, run_journal)
+        deadline = TurnDeadline.start()
+        logger.info(
+            "stream turn start session=%s run=%s timeout=%s",
+            self.session.id,
+            run_journal.run_id,
+            f"{deadline.limit_seconds:.0f}s" if deadline.enabled else "off",
+        )
         yield ChatStreamEvent(
             type="engineering_start",
             engineering=run_journal.event_payload(),
@@ -1714,8 +1772,21 @@ class Agent:
                 )
                 return
             await asyncio.to_thread(self._maybe_compact_context)
-            async for event in self._run_turn_stream_impl(user_input, run_journal):
+            async for event in self._run_turn_stream_impl(
+                user_input, run_journal, deadline=deadline
+            ):
                 yield event
+        except TurnTimeoutError as exc:
+            logger.error(
+                "stream turn timeout session=%s run=%s limit=%.0fs",
+                self.session.id,
+                run_journal.run_id,
+                exc.limit_seconds,
+            )
+            run_journal.decisions.append(str(exc))
+            await asyncio.to_thread(self.journal_store.save, run_journal)
+            await asyncio.to_thread(self._fail_engineering_run, run_journal, exc)
+            raise
         except Exception as exc:
             engineering = await asyncio.to_thread(
                 self._fail_engineering_run, run_journal, exc
@@ -1764,9 +1835,13 @@ class Agent:
         self,
         user_input: str,
         run_journal: RunJournal,
+        *,
+        deadline: TurnDeadline | None = None,
     ) -> AsyncIterator[ChatStreamEvent]:
         """已建立 RunJournal 后执行流式工具循环。"""
         billing_before = self.gateway.billing.summary()
+        deadline = deadline or TurnDeadline.start()
+        deadline.check()
 
         # 自动判断是否需要多模型协作（只读模式下不走协作，避免自动写文件）
         if (
@@ -1828,6 +1903,7 @@ class Agent:
 
         iterations = 0
         while True:
+            deadline.check()
             await asyncio.to_thread(self._maybe_compact_context)
             full_content = ""
             response_blocks: list[MessageContentBlock] = []
@@ -1860,6 +1936,10 @@ class Agent:
 
             self._record_provider_trace(run_journal)
             final_content = self._strip_toolcall_artifacts(full_content)
+            run_journal.decisions.append(
+                f"[checkpoint] stream model round {iterations + 1}"
+            )
+            await asyncio.to_thread(self.journal_store.save, run_journal)
 
             # 空响应守卫：无可解析文本且无工具调用时按失败处理，避免假完成。
             # 有 token 但无文本（任意轮）：可能是原生 tool_use/reasoning 未捕获；
@@ -2181,6 +2261,10 @@ class Agent:
 
             attach_tool_use_ids(calls, tool_specs)
             tool_calls.extend(calls)
+            run_journal.decisions.append(
+                f"[checkpoint] stream tools round {iterations + 1} calls={len(calls)}"
+            )
+            await asyncio.to_thread(self.journal_store.save, run_journal)
             self.session.add_message(
                 "user",
                 "".join(tool_results_parts) + "\n\n请继续完成用户请求。",

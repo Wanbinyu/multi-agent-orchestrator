@@ -6,9 +6,13 @@ from threading import Event
 from typing import Any, Callable
 
 from src.core.collaboration import find_parallel_ownership_conflicts
+from src.core.logging_setup import get_logger
+from src.core.retry_policy import error_code_from_task_result, is_retryable_failure
 from src.core.worker import Worker, ProgressCallback as WorkerProgressCallback
+from src.gateway.errors import ProviderError
 from src.models.schemas import Task, TaskPlan, TaskResult
 
+logger = get_logger("dispatcher")
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]
 
@@ -126,12 +130,21 @@ class Dispatcher:
                         progress_callback,
                         memory_context,
                     )
+                except ProviderError as exc:
+                    result = TaskResult(
+                        task=task,
+                        success=False,
+                        content="",
+                        error=str(exc),
+                        error_code=str(exc.code or ""),
+                    )
                 except Exception as exc:  # noqa: BLE001
                     result = TaskResult(
                         task=task,
                         success=False,
                         content="",
                         error=str(exc),
+                        error_code="",
                     )
                 accumulated_tool_calls.extend(result.tool_calls)
                 accumulated_files = list(dict.fromkeys([
@@ -145,15 +158,36 @@ class Dispatcher:
                 result.tool_calls = list(accumulated_tool_calls)
                 result.files_written = list(accumulated_files)
                 result.acceptance_evidence = list(accumulated_acceptance)
-                if result.success or attempt > task.max_retries or not _is_retryable(result.error):
+                code = result.error_code or error_code_from_task_result(result)
+                if result.success or attempt > task.max_retries or not is_retryable_failure(
+                    error=result.error,
+                    error_code=code,
+                ):
+                    if not result.success:
+                        logger.info(
+                            "task %s finished failed attempt=%s code=%s retryable=%s",
+                            task.id,
+                            attempt,
+                            code or "-",
+                            is_retryable_failure(error=result.error, error_code=code),
+                        )
                     return result
                 retry_errors.append(result.error)
+                logger.warning(
+                    "task %s transient failure attempt=%s/%s code=%s error=%s",
+                    task.id,
+                    attempt,
+                    task.max_retries + 1,
+                    code or "-",
+                    result.error,
+                )
                 if progress_callback:
                     payload = self._task_payload(task)
                     payload.update({
                         "attempt": attempt + 1,
                         "max_attempts": task.max_retries + 1,
                         "previous_error": result.error,
+                        "error_code": code,
                     })
                     progress_callback("task_retry", payload)
             raise RuntimeError("不可达的重试状态")  # pragma: no cover
@@ -289,20 +323,6 @@ class Dispatcher:
                     queue.append(task_id)
 
 
-def _is_retryable(error: str) -> bool:
-    normalized = error.casefold()
-    markers = (
-        "timeout",
-        "timed out",
-        "超时",
-        "connection",
-        "连接",
-        "temporarily",
-        "临时",
-        "rate limit",
-        "429",
-        "502",
-        "503",
-        "504",
-    )
-    return any(marker in normalized for marker in markers)
+def _is_retryable(error: str, error_code: str = "") -> bool:
+    """Backward-compatible wrapper; prefer is_retryable_failure for new code."""
+    return is_retryable_failure(error=error, error_code=error_code)

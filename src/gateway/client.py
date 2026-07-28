@@ -13,11 +13,14 @@ import yaml
 
 from src.core.config_paths import resolve_providers_config_path
 from src.core.context_budget import ContextBudget, ContextBudgetManager
+from src.core.logging_setup import get_logger
 from src.gateway.errors import (
     ProviderError,
     classify_provider_error,
     status_code_from_exception,
 )
+
+logger = get_logger("gateway")
 from src.gateway.provider import BaseProvider, create_provider
 from src.gateway.router import ModelRouter
 from src.models.prompt_profiles import get_global_prompt_profile, get_prompt_profile
@@ -512,7 +515,16 @@ class GatewayClient:
                         error=last_error,
                     )
                     if last_error.retryable and attempt < max_retries:
-                        time.sleep(2 ** attempt)
+                        delay = 2 ** attempt
+                        logger.warning(
+                            "provider retry model=%s code=%s attempt=%s/%s sleep=%.1fs",
+                            current_model,
+                            last_error.code,
+                            attempt + 1,
+                            max_retries + 1,
+                            delay,
+                        )
+                        time.sleep(delay)
                         continue
                     break
 
@@ -528,6 +540,12 @@ class GatewayClient:
             self._mark_unhealthy(current_model, last_cause or last_error)
             if idx + 1 < len(chain):
                 next_model = chain[idx + 1]
+                logger.warning(
+                    "provider failover from=%s to=%s code=%s",
+                    current_model,
+                    next_model,
+                    last_error.code,
+                )
                 self.last_failover = {
                     "from_model": current_model,
                     "to_model": next_model,
@@ -725,7 +743,16 @@ class GatewayClient:
                             last_error, final_model=current_model
                         ) from exc
                     if last_error.retryable and attempt < max_retries:
-                        await asyncio.sleep(2 ** attempt)
+                        delay = 2 ** attempt
+                        logger.warning(
+                            "provider stream retry model=%s code=%s attempt=%s/%s sleep=%.1fs",
+                            current_model,
+                            last_error.code,
+                            attempt + 1,
+                            max_retries + 1,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
                         continue
                     break
 
@@ -737,6 +764,11 @@ class GatewayClient:
                 raise self._finalize_provider_error(
                     last_error, final_model=current_model
                 )
+            logger.warning(
+                "provider stream failover from=%s code=%s",
+                current_model,
+                last_error.code,
+            )
 
             self._mark_unhealthy(current_model, last_cause or last_error)
             if idx + 1 < len(chain):

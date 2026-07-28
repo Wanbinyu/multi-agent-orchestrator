@@ -551,6 +551,10 @@ class TaskResult(BaseModel):
     content: str
     response: ChatResponse | None = None
     error: str = ""
+    error_code: str = Field(
+        default="",
+        description="稳定错误码（如 timeout_error）；用于定向重试，避免仅靠错误文案",
+    )
     files_written: list[str] = Field(default_factory=list)
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     attempts: int = Field(default=1, ge=1)

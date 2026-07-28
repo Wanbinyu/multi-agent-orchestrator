@@ -6,9 +6,12 @@ import webbrowser
 
 import uvicorn
 
+from src.core.logging_setup import setup_logging
+
 
 def serve(host: str = "127.0.0.1", port: int = 8123, *, open_browser: bool = True) -> None:
     """Run the WebUI for both `mao web` and the legacy `mao-ui` command."""
+    setup_logging()
     url = f"http://{host}:{port}"
     print(f"MAO Web UI: {url}")
     if open_browser:

@@ -34,6 +34,10 @@ from src.version import __version__
 # 加载 .env 文件
 load_dotenv()
 
+from src.core.logging_setup import setup_logging  # noqa: E402
+
+setup_logging()
+
 app = typer.Typer(
     help="多模型 Agent 编排工具 CLI",
     invoke_without_command=True,

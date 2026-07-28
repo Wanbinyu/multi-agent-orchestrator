@@ -69,3 +69,6 @@ config/*.bak
 
 # Local diagnostics / scratch (never publish)
 work/
+
+# Promo build intermediates / renders (sources stay under promo/)
+promo/out/

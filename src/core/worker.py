@@ -23,10 +23,14 @@ from src.core.native_content import (
     native_tool_specs,
     tool_result_blocks,
 )
+from src.core.logging_setup import get_logger
 from src.core.permission_rules import PermissionRuleEngine
 from src.gateway.client import GatewayClient
+from src.gateway.errors import ProviderError
 from src.models.schemas import ChatMessage, ChatResponse, Task, TaskResult
 from src.models.schemas import ApprovalMode
+
+logger = get_logger("worker")
 from src.tools.file_tools import write_text_file
 from src.tools.read_cache import build_read_cache_key, should_invalidate_read_cache
 from src.tools.registry import tool_registry
@@ -565,12 +569,37 @@ class Worker:
                 tool_calls=tool_trace,
                 acceptance_evidence=acceptance_evidence,
             )
+        except ProviderError as exc:
+            logger.warning(
+                "worker task %s provider error code=%s model=%s",
+                task.id,
+                exc.code,
+                getattr(exc, "model", "") or task.assigned_model,
+            )
+            return TaskResult(
+                task=task,
+                success=False,
+                content="",
+                error=str(exc),
+                error_code=str(exc.code or ""),
+            )
+        except TimeoutError as exc:
+            logger.warning("worker task %s timeout: %s", task.id, exc)
+            return TaskResult(
+                task=task,
+                success=False,
+                content="",
+                error=str(exc),
+                error_code="timeout_error",
+            )
         except Exception as e:
+            logger.exception("worker task %s failed", task.id)
             return TaskResult(
                 task=task,
                 success=False,
                 content="",
                 error=str(e),
+                error_code="",
             )
 
     def _task_to_payload(self, task: Task, result: TaskResult | None) -> dict[str, Any]:

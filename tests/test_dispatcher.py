@@ -226,6 +226,60 @@ def test_dispatch_does_not_retry_deterministic_failure():
     worker.execute.assert_called_once()
 
 
+def test_dispatch_retries_on_error_code_even_without_text_markers():
+    task = Task(
+        id="t1",
+        type="a",
+        title="A",
+        input="",
+        assigned_model="glm-ark",
+        max_retries=1,
+    )
+    worker = MagicMock(spec=Worker)
+    attempts = {"n": 0}
+
+    def execute(task_obj, *_args, **_kwargs):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return TaskResult(
+                task=task_obj,
+                success=False,
+                content="",
+                error="upstream hiccup",
+                error_code="server_error",
+            )
+        return _success_result(task_obj)
+
+    worker.execute.side_effect = execute
+    result = Dispatcher(worker).dispatch(TaskPlan(tasks=[task]))[0]
+    assert attempts["n"] == 2
+    assert result.success is True
+    assert result.retry_errors == ["upstream hiccup"]
+
+
+def test_dispatch_does_not_retry_auth_error_code():
+    task = Task(
+        id="t1",
+        type="a",
+        title="A",
+        input="",
+        assigned_model="glm-ark",
+        max_retries=3,
+    )
+    worker = MagicMock(spec=Worker)
+    worker.execute.return_value = TaskResult(
+        task=task,
+        success=False,
+        content="",
+        error="connection timeout",  # text looks transient
+        error_code="authentication_error",  # code wins: do not retry
+    )
+    result = Dispatcher(worker).dispatch(TaskPlan(tasks=[task]))[0]
+    assert result.success is False
+    assert result.attempts == 1
+    assert worker.execute.call_count == 1
+
+
 def test_non_parallel_safe_tasks_execute_exclusively():
     tasks = [
         Task(
