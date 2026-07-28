@@ -1,12 +1,14 @@
 """GatewayClient 单元测试"""
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from src.gateway.client import Billing, GatewayClient
 from src.gateway.errors import ProviderError
-from src.models.schemas import ChatMessage, ChatResponse, ModelConfig
+from src.models.schemas import ChatMessage, ChatResponse, ModelConfig, StreamChunk
 
 
 def _sample_providers_yaml(main_model: str | None = "glm-ark"):
@@ -111,6 +113,48 @@ def test_chat_returns_response_and_records_billing(tmp_path, monkeypatch):
     assert client.billing.total_cost_usd == 0.001
     assert len(client.billing.calls) == 1
     assert client.billing.calls[0]["task_id"] == "task-1"
+
+
+def test_global_prompt_profile_is_injected_without_mutating_session_messages(
+    tmp_path, monkeypatch
+):
+    client, provider = _make_client(tmp_path, monkeypatch)
+    messages = [ChatMessage(role="user", content="hello")]
+
+    client.chat(messages, "glm-ark")
+
+    sent_messages = provider.chat.call_args.args[0]
+    assert sent_messages[0].role == "system"
+    assert "Multi-Agent Orchestrator" in sent_messages[0].content
+    assert sent_messages[1] is messages[0]
+    assert messages == [ChatMessage(role="user", content="hello")]
+
+
+def test_global_prompt_profile_is_injected_for_streaming_requests(tmp_path, monkeypatch):
+    client, provider = _make_client(tmp_path, monkeypatch)
+    provider.chat_stream.return_value = [StreamChunk(type="delta", content="hello")]
+    messages = [ChatMessage(role="user", content="hello")]
+
+    async def collect():
+        return [chunk async for chunk in client.chat_stream(messages, "glm-ark")]
+
+    chunks = asyncio.run(collect())
+
+    assert chunks[0].content == "hello"
+    sent_messages = provider.chat_stream.call_args.args[0]
+    assert sent_messages[0].role == "system"
+    assert "Multi-Agent Orchestrator" in sent_messages[0].content
+    assert sent_messages[1] is messages[0]
+    assert messages == [ChatMessage(role="user", content="hello")]
+
+
+def test_model_config_rejects_unknown_prompt_profile():
+    with pytest.raises(ValidationError, match="未知 prompt_profile"):
+        ModelConfig(
+            provider="ark",
+            model_id="ark-code-latest",
+            prompt_profile="typo",
+        )
 
 
 def test_chat_rejects_oversized_context_before_provider_call(tmp_path, monkeypatch):

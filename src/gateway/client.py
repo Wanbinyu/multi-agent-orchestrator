@@ -20,6 +20,7 @@ from src.gateway.errors import (
 )
 from src.gateway.provider import BaseProvider, create_provider
 from src.gateway.router import ModelRouter
+from src.models.prompt_profiles import get_global_prompt_profile, get_prompt_profile
 from src.models.schemas import ChatMessage, ChatResponse, ModelConfig, ProviderConfig, StreamChunk
 
 
@@ -327,6 +328,22 @@ class GatewayClient:
             final_model=final_model,
         )
 
+    @staticmethod
+    def _messages_for_model(
+        messages: list[ChatMessage], model_config: ModelConfig
+    ) -> list[ChatMessage]:
+        """Add a short optional model profile without mutating the session messages."""
+        profiles = [get_global_prompt_profile()]
+        model_profile = get_prompt_profile(model_config.prompt_profile)
+        if model_profile:
+            profiles.append(model_profile)
+        profiles = [profile for profile in profiles if profile]
+        if not profiles:
+            return messages
+        return [
+            ChatMessage(role="system", content=profile) for profile in profiles
+        ] + list(messages)
+
     def get_main_model(self) -> str | None:
         """获取主模型别名"""
         return self.main_model
@@ -420,7 +437,8 @@ class GatewayClient:
                 continue
 
             try:
-                self._validate_context_request(current_model, messages, kwargs)
+                attempt_messages = self._messages_for_model(messages, model_config)
+                self._validate_context_request(current_model, attempt_messages, kwargs)
             except Exception as exc:
                 error = classify_provider_error(
                     exc,
@@ -435,7 +453,7 @@ class GatewayClient:
             for attempt in range(max_retries + 1):
                 self._reserve_provider_attempt()
                 try:
-                    response = provider.chat(messages, model_config, **kwargs)
+                    response = provider.chat(attempt_messages, model_config, **kwargs)
                     self._record_attempt(
                         model=current_model,
                         provider=provider.name,
@@ -612,7 +630,8 @@ class GatewayClient:
                 continue
 
             try:
-                self._validate_context_request(current_model, messages, kwargs)
+                attempt_messages = self._messages_for_model(messages, model_config)
+                self._validate_context_request(current_model, attempt_messages, kwargs)
             except Exception as exc:
                 error = classify_provider_error(
                     exc,
@@ -628,7 +647,7 @@ class GatewayClient:
             for attempt in range(max_retries + 1):
                 self._reserve_provider_attempt()
                 try:
-                    stream = provider.chat_stream(messages, model_config, **kwargs)
+                    stream = provider.chat_stream(attempt_messages, model_config, **kwargs)
                     async for chunk in self._asyncify_stream(
                         stream,
                         cancel_event=cancel_event,

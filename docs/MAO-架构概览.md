@@ -242,7 +242,7 @@ Plan 草案由主 Agent 先进行真实只读侦察，再交给 `PlanningCouncil
 
 - 自动路由已有离线合同和 mock 执行证据，但尚无经授权的真实模型效果数据；不能据此宣传成本或完成率优势。
 - B5.1 只有程序化离线 benchmark 合同，尚无经授权的真实 Provider 对比数据。
-- Provider 能力和模型特例尚未形成可验证的兼容性矩阵。
+- Provider 兼容矩阵已建立，但大多数非 Anthropic 预设仍是 `unverified`；真实 smoke 与多模型效果数据尚未获得授权。
 - 工具执行没有容器级沙箱。
 - 真实任务的 token 节省、完成率和误修改率尚缺公开基准。
 

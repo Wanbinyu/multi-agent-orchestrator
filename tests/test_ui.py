@@ -217,6 +217,22 @@ class TestProviderCrud:
         res = client.post("/api/config/providers", json=payload)
         assert res.status_code == 422
 
+    def test_rejects_unknown_prompt_profile(self, client):
+        payload = {
+            "preset_key": "openai",
+            "provider_name": "bad-profile",
+            "display_name": "Bad Profile",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "k",
+            "models": [{
+                "alias": "x",
+                "model_id": "x",
+                "prompt_profile": "typo",
+            }],
+        }
+        res = client.post("/api/config/providers", json=payload)
+        assert res.status_code == 422
+
     def test_rejects_invalid_metadata_date(self, client):
         payload = {
             "preset_key": "openai",

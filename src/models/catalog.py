@@ -41,6 +41,7 @@ class ModelCatalogEntry:
         dynamic_model_alias: bool = False,
         metadata_source: str = "unverified",
         metadata_verified_at: str = "",
+        prompt_profile: str = "",
     ):
         self.alias = alias
         self.name = name
@@ -65,6 +66,7 @@ class ModelCatalogEntry:
         self.dynamic_model_alias = dynamic_model_alias
         self.metadata_source = metadata_source.strip()
         self.metadata_verified_at = metadata_verified_at
+        self.prompt_profile = prompt_profile.strip()
 
     def to_model_data(self) -> dict[str, Any]:
         """生成不含 Provider 归属的模型配置。"""
@@ -81,6 +83,7 @@ class ModelCatalogEntry:
             "context_window_source": self.context_window_source,
             "context_window_verified_at": self.context_window_verified_at,
             "dynamic_model_alias": self.dynamic_model_alias,
+            "prompt_profile": self.prompt_profile,
         }
 
     def to_model_config(self, provider_name: str) -> dict[str, Any]:

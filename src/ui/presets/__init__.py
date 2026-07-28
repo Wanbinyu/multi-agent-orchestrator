@@ -98,6 +98,7 @@ def expand_preset_models(preset_key: str) -> list[dict[str, Any]]:
             "context_window_source": data.get("context_window_source", "unverified"),
             "context_window_verified_at": data.get("context_window_verified_at", ""),
             "dynamic_model_alias": data.get("dynamic_model_alias", False),
+            "prompt_profile": data.get("prompt_profile", ""),
         }
         for alias, data in preset.get("models", {}).items()
     ]

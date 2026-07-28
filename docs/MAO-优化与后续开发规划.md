@@ -44,27 +44,26 @@
 
 ### O2 U4 与运行可观察性
 
-**内容**：统一事件名称、必填字段、时间戳、运行 ID、错误/退出状态和结束事件；补充 compaction、resume、blocked、cancel 等边界事件；保证并发 Worker 下 JSONL 不交叉、不丢失、不伪造 usage。
+**内容**：统一 `mao run` 的事件名称、必填字段、时间戳、运行 ID、错误/退出状态和结束事件；保证并发 Worker 下 JSONL 不交叉、不丢失、不伪造 usage。会话级 compaction、resume、blocked 属于 Session/Web API，不与一次性 CLI 的 JSONL 混用。
 
 **U4 事件 Schema 示例**（最小可验证版本，JSON Schema 风格，可直接用于文档或代码验证）：
 
 ```json
 {
   "type": "object",
-  "required": ["event_type", "run_id", "timestamp", "status", "exit_code"],
+  "required": ["type", "ts", "run_id", "data"],
   "properties": {
-    "event_type": { "type": "string", "enum": ["run_start", "plan", "model_select", "tool_call", "file_change", "command_exec", "verification", "approval", "compaction", "resume", "blocked", "cancel", "end"] },
+    "type": { "type": "string", "enum": ["run", "plan", "model", "tool", "command", "file_change", "verification", "approval", "usage", "error", "cancel", "end"] },
     "run_id": { "type": "string" },
-    "timestamp": { "type": "string", "format": "date-time" },
-    "status": { "type": "string", "enum": ["success", "error", "blocked", "running"] },
-    "exit_code": { "type": ["integer", "null"] },
-    "usage": { "type": "object", "properties": { "tokens": { "type": "integer" }, "cost": { "type": ["number", "null"] } } },
-    "evidence": { "type": "array", "items": { "type": "string" } }
+    "ts": { "type": "string", "format": "date-time" },
+    "data": { "type": "object" }
   }
 }
 ```
 
-**验收**：离线测试覆盖成功、失败、取消、恢复、压缩、无 Provider 和多线程事件；`json` 可被标准 JSON 解析器读取，`streaming-json` 每行均为独立 JSON；`end` 最后出现且退出状态一致。
+`end.data` 必含 `status`（`completed`、`failed` 或 `cancelled`）、`exit_code` 与 `elapsed_ms`；`usage` 和 `error` 事件提供运行中的计费与失败信息。`cancel` 仅表示执行前审批被拒绝，并以退出码 `130` 结束。
+
+**验收**：离线测试覆盖成功、失败、取消、无 Provider 和多线程事件；`json` 可被标准 JSON 解析器读取，`streaming-json` 每行均为独立 JSON，所有事件共享同一 `run_id`；`end` 最后出现且退出状态一致。
 
 ### O3 Provider 兼容矩阵与安全边界 — ✅ 已完成（2026-07-25）
 
@@ -121,9 +120,8 @@
 ## 7. 下一步执行清单
 
 - [x] 完成文档链接检查并保持 `docs/README.md` 为唯一文档导航（含 Provider 兼容矩阵入口）。
-- [ ] 为 U4 增加 compaction/resume/cancel/blocked 事件合同和退出码测试（代码侧已有实现，O2 schema 文档已补；完整合同测试可继续加深）。
+- [x] 为一次性 `mao run` 增加稳定事件信封、取消事件、并发 JSONL 原子性和退出状态合同测试；会话 compaction/resume/blocked 继续由 Session/Web API 测试覆盖。
 - [x] 更新上下文计划、Provider 兼容矩阵和安全边界说明（O3）。
-- [ ] 运行完整测试、分发验收和 Markdown 链接检查。
+- [x] 运行完整测试、分发验收和 Markdown 链接检查（2026-07-28：`912 passed, 1 warning`；分发验收与 43 份现行 Markdown 本地链接检查通过）。
 - [ ] 等待外部用户反馈和新的真实 Provider 授权，不自动恢复付费评测（O4）。
 - [ ] O1-O4 完成后，再为后续产品方向建立单独决策文档。
-

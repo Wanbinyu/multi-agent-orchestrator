@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import json
+import io
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ import typer
 from typer.testing import CliRunner
 
 import run
+from src.core.run_events import RunEventWriter
 from src.models.schemas import ChatResponse, ReviewResult, Task, TaskPlan, TaskResult
 
 
@@ -351,3 +353,60 @@ def test_run_command_rejects_unknown_option():
     result = runner.invoke(run.app, ["run", "hello", "--unknown-option"])
     assert result.exit_code != 0
     assert "Error" in result.output
+
+
+def test_run_declined_approval_emits_parseable_cancel_json(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    gateway = MagicMock()
+    gateway.billing.summary.return_value = {
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+        "total_cost_usd": 0.0,
+        "calls": [],
+    }
+    orchestrator = MagicMock()
+    orchestrator.plan.return_value = TaskPlan(
+        summary="test plan",
+        tasks=[
+            Task(
+                id="t1",
+                type="doc",
+                title="write docs",
+                input="write docs",
+                assigned_model="glm-ark",
+            )
+        ],
+    )
+    memory_store = MagicMock()
+    memory_store.config.enabled = False
+
+    monkeypatch.setattr(run, "GatewayClient", lambda **_kwargs: gateway)
+    monkeypatch.setattr(run, "MemoryStore", lambda **_kwargs: memory_store)
+    monkeypatch.setattr(run, "Orchestrator", lambda *_args, **_kwargs: orchestrator)
+    stdin = MagicMock()
+    stdin.isatty.return_value = True
+    monkeypatch.setattr(run.sys, "stdin", stdin)
+    monkeypatch.setattr(run.console, "input", lambda *_args, **_kwargs: "n")
+    output = io.StringIO()
+    writer = RunEventWriter("json", out=output, run_id="cancelled-run")
+    monkeypatch.setattr("src.core.run_events.RunEventWriter", lambda _fmt: writer)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        run.run(
+            request="write docs",
+            output_dir="output",
+            config_dir=str(config_dir),
+            max_workers=4,
+            orchestrator_model=None,
+            assume_yes=False,
+            output_format="json",
+        )
+
+    assert exc_info.value.exit_code == 130
+    payload = json.loads(output.getvalue())
+    event_types = [event["type"] for event in payload["events"]]
+    assert "cancel" in event_types
+    assert payload["events"][-1]["type"] == "end"
+    assert payload["events"][-1]["data"]["status"] == "cancelled"
+    assert payload["events"][-1]["data"]["exit_code"] == 130

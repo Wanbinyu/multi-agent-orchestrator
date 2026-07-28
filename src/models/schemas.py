@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.models.prompt_profiles import normalize_prompt_profile_name
+
 
 TaskExecutionMode = Literal["read", "write", "verify"]
 CapabilityState = Literal["supported", "unsupported", "unverified"]
@@ -234,6 +236,15 @@ class ModelConfig(BaseModel):
     """模型配置"""
     provider: str
     model_id: str
+    prompt_profile: str = Field(
+        default="",
+        description="可选的已注册 MAO 模型行为配置名；为空表示不追加模型专属提示词",
+    )
+    @field_validator("prompt_profile")
+    @classmethod
+    def validate_prompt_profile(cls, value: str) -> str:
+        return normalize_prompt_profile_name(value)
+
     input_price_per_1m: float = 0.0
     output_price_per_1m: float = 0.0
     capabilities: list[str] = Field(default_factory=list, description="模型能力标签，如 tool_use/coding/reasoning/vision")

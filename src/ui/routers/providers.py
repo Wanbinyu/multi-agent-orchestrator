@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.gateway.connection_test import check_provider_connection
 from src.models.catalog import BUILTIN_MODELS, export_compatibility_matrix
+from src.models.prompt_profiles import normalize_prompt_profile_name
 from src.models.schemas import CapabilityState
 from src.ui import config_manager
 from src.ui.presets import (
@@ -25,6 +26,7 @@ router = APIRouter()
 class ModelEntry(BaseModel):
     alias: str = Field(..., min_length=1)
     model_id: str = Field(..., min_length=1)
+    prompt_profile: str = ""
     input_price_per_1m: float = 0.0
     output_price_per_1m: float = 0.0
     capabilities: list[str] = Field(default_factory=list)
@@ -48,6 +50,11 @@ class ModelEntry(BaseModel):
     context_window_source: str = "unverified"
     context_window_verified_at: str = ""
     dynamic_model_alias: bool = False
+
+    @field_validator("prompt_profile")
+    @classmethod
+    def _check_prompt_profile(cls, value: str) -> str:
+        return normalize_prompt_profile_name(value)
 
     @field_validator("metadata_verified_at")
     @classmethod
@@ -143,6 +150,7 @@ def list_catalog_models() -> dict[str, Any]:
                 "capability_status": row["capability_status"],
                 "metadata_source": row["metadata_source"],
                 "metadata_verified_at": row["metadata_verified_at"],
+                "prompt_profile": entry.prompt_profile,
                 "context_window_tokens": row["context_window_tokens"],
                 "max_output_tokens": row["max_output_tokens"],
                 "context_safety_ratio": 0.08,

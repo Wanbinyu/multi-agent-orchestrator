@@ -109,6 +109,26 @@ def test_anthropic_sync_round_preserves_private_state_and_tool_result_order():
     assert second.content == "读取完成。"
 
 
+def test_anthropic_sync_combines_all_system_messages():
+    provider = _provider()
+    client = MagicMock()
+    client.messages.create.return_value = _response([{"type": "text", "text": "ok"}])
+    provider._make_client = MagicMock(return_value=client)  # type: ignore[method-assign]
+
+    provider.chat(
+        [
+            ChatMessage(role="system", content="global profile"),
+            ChatMessage(role="system", content="worker instructions"),
+            ChatMessage(role="user", content="hello"),
+        ],
+        ModelConfig(provider="anthropic", model_id="claude-sonnet-5"),
+    )
+
+    request = client.messages.create.call_args.kwargs
+    assert request["system"] == "global profile\n\nworker instructions"
+    assert request["messages"] == [{"role": "user", "content": "hello"}]
+
+
 def test_anthropic_stream_emits_same_safe_and_private_message_state():
     provider = _provider()
     final_message = _response([
@@ -167,3 +187,34 @@ def test_anthropic_stream_emits_same_safe_and_private_message_state():
     assert state.content_blocks[0].id == "toolu_stream_1"
     assert state.provider_payload[0]["type"] == "thinking"
     assert all("hidden" not in (chunk.content or "") for chunk in chunks)
+
+
+def test_anthropic_stream_combines_all_system_messages():
+    provider = _provider()
+
+    class _Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            return iter(())
+
+    client = MagicMock()
+    client.messages.stream.return_value = _Stream()
+    provider._make_client = MagicMock(return_value=client)  # type: ignore[method-assign]
+
+    list(provider.chat_stream(
+        [
+            ChatMessage(role="system", content="global profile"),
+            ChatMessage(role="system", content="worker instructions"),
+            ChatMessage(role="user", content="hello"),
+        ],
+        ModelConfig(provider="anthropic", model_id="claude-sonnet-5"),
+    ))
+
+    request = client.messages.stream.call_args.kwargs
+    assert request["system"] == "global profile\n\nworker instructions"
+    assert request["messages"] == [{"role": "user", "content": "hello"}]

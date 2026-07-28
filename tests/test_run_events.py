@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 
 import pytest
 
@@ -16,7 +17,7 @@ def test_invalid_format_rejected():
 
 def test_streaming_json_emits_jsonl_lines():
     buf = io.StringIO()
-    w = RunEventWriter("streaming-json", out=buf)
+    w = RunEventWriter("streaming-json", out=buf, run_id="run-1")
     w.emit("run", {"request": "hi"})
     w.emit("plan", {"tasks": 2})
     w.emit("end", {"exit_code": 0})
@@ -27,8 +28,9 @@ def test_streaming_json_emits_jsonl_lines():
     objs = [json.loads(ln) for ln in lines]
     assert [o["type"] for o in objs] == ["run", "plan", "end"]
     for o in objs:
-        assert set(o) == {"type", "ts", "data"}
+        assert set(o) == {"type", "ts", "run_id", "data"}
         assert isinstance(o["ts"], str) and o["ts"]
+        assert o["run_id"] == "run-1"
     assert objs[0]["data"] == {"request": "hi"}
     assert objs[2]["data"] == {"exit_code": 0}
 
@@ -96,7 +98,7 @@ def test_envelope_shape():
     w = RunEventWriter("streaming-json", out=buf)
     w.emit("model", {"task_id": "t1", "model": "glm-ark", "input_tokens": 10})
     obj = json.loads(buf.getvalue().strip())
-    assert set(obj) == {"type", "ts", "data"}
+    assert set(obj) == {"type", "ts", "run_id", "data"}
     assert obj["type"] == "model"
     assert obj["data"]["model"] == "glm-ark"
 
@@ -104,6 +106,40 @@ def test_envelope_shape():
 def test_elapsed_ms_nonnegative():
     w = RunEventWriter("plain")
     assert w.elapsed_ms() >= 0
+
+
+def test_jsonl_writer_keeps_threaded_events_atomic_and_in_one_run():
+    buf = io.StringIO()
+    writer = RunEventWriter("streaming-json", out=buf, run_id="threaded-run")
+
+    def emit(index: int) -> None:
+        writer.emit("tool", {"index": index})
+
+    threads = [threading.Thread(target=emit, args=(index,)) for index in range(24)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    writer.emit("end", {"status": "completed", "exit_code": 0})
+    writer.finish({"status": "completed", "exit_code": 0})
+
+    events = [json.loads(line) for line in buf.getvalue().splitlines() if line]
+    assert len(events) == 25
+    assert {event["run_id"] for event in events} == {"threaded-run"}
+    assert {event["data"]["index"] for event in events[:-1]} == set(range(24))
+    assert events[-1]["type"] == "end"
+
+
+def test_cancellation_event_has_a_stable_envelope():
+    buf = io.StringIO()
+    writer = RunEventWriter("json", out=buf, run_id="cancelled-run")
+    writer.emit("cancel", {"reason": "approval_denied"})
+    writer.emit("end", {"status": "cancelled", "exit_code": 0})
+    writer.finish({"status": "cancelled", "exit_code": 0})
+
+    payload = json.loads(buf.getvalue())
+    assert [event["type"] for event in payload["events"]] == ["cancel", "end"]
+    assert payload["events"][0]["run_id"] == "cancelled-run"
 
 
 def test_build_usage_marks_unknown_cost_and_aggregates_models_and_roles():

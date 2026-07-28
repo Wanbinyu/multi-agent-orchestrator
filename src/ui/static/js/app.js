@@ -332,6 +332,7 @@
     const merged = mergeWithCatalog(model, cat);
 
     tr.dataset.dynamicAlias = merged.dynamic_model_alias ? "true" : "false";
+    tr.dataset.promptProfile = merged.prompt_profile || "";
     tr.dataset.capabilityStatus = JSON.stringify(merged.capability_status || {});
     tr.dataset.metadataSource = merged.metadata_source || "unverified";
     tr.dataset.metadataVerifiedAt = merged.metadata_verified_at || "";
@@ -409,6 +410,7 @@
         model?.metadata_verified_at || cat?.metadata_verified_at || "",
       dynamic_model_alias:
         model?.dynamic_model_alias === true || cat?.dynamic_model_alias === true,
+      prompt_profile: model?.prompt_profile || cat?.prompt_profile || "",
       ...budget,
     };
   }
@@ -440,6 +442,7 @@
       caps.value = (cat.capabilities || []).join(", ");
 
     tr.dataset.dynamicAlias = cat.dynamic_model_alias ? "true" : "false";
+    tr.dataset.promptProfile = cat.prompt_profile || "";
     tr.dataset.capabilityStatus = JSON.stringify(cat.capability_status || {});
     tr.dataset.metadataSource = cat.metadata_source || "unverified";
     tr.dataset.metadataVerifiedAt = cat.metadata_verified_at || "";
@@ -472,6 +475,7 @@
         metadata_source: row.dataset.metadataSource || "unverified",
         metadata_verified_at: row.dataset.metadataVerifiedAt || "",
         dynamic_model_alias: row.dataset.dynamicAlias === "true",
+        prompt_profile: row.dataset.promptProfile || "",
         ...budget,
       });
     }
@@ -724,6 +728,7 @@
       metadata_source: cat.metadata_source,
       metadata_verified_at: cat.metadata_verified_at,
       dynamic_model_alias: cat.dynamic_model_alias,
+      prompt_profile: cat.prompt_profile || "",
     });
     els.catalogPick.value = "";
     showResult(`已添加目录模型「${alias}」`, true);

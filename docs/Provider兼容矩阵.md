@@ -112,6 +112,12 @@
 
 完整字段以 `python -c "from src.models.catalog import export_compatibility_matrix; import json; print(json.dumps(export_compatibility_matrix(), indent=2, ensure_ascii=False))"` 为准。
 
+### 3.3 模型行为配置
+
+MAO 网关会对所有普通 `chat` 和 `chat_stream` 请求注入一段短的全局行为配置，覆盖主对话、规划、Worker 和 Reviewer，并保持会话原始消息不变。该配置强调工具证据、权限边界、验收和不伪造结果。`ModelConfig.prompt_profile` 仍是可选字段，仅用于未来的模型专属扩展。
+
+外部公开的 Claude 网页端提示词包含网页/移动端产品信息、专属工具 schema 和界面状态，不应原样放入 MAO API 请求：会增加上下文成本，并可能造成错误的运行环境假设。全局规则不依赖 `providers.yaml` 中的模型预设，因此切换模型也会保持一致。
+
 ## 4. 稳定错误码
 
 `ProviderError` 使用脱敏错误码与操作建议。认证/配置类错误**不**进入自动故障切换；短期限流可重试，长期配额走 failover。

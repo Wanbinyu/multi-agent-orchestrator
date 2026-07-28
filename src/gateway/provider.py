@@ -26,6 +26,15 @@ def _clean_text_for_api(text: str) -> str:
     return text.encode("utf-8", "surrogatepass").decode("utf-8", "ignore")
 
 
+def _anthropic_system_prompt(messages: list[ChatMessage]) -> str:
+    """Combine every system message before sending Anthropic its single system field."""
+    return "\n\n".join(
+        _clean_text_for_api(message.content)
+        for message in messages
+        if message.role == "system" and message.content
+    )
+
+
 class BaseProvider(ABC):
     """Provider 基类"""
 
@@ -101,12 +110,10 @@ class AnthropicProvider(BaseProvider):
 
         client = self._make_client(api_key)
 
-        system_msg = ""
+        system_msg = _anthropic_system_prompt(messages)
         chat_messages = []
         for m in messages:
-            if m.role == "system":
-                system_msg = _clean_text_for_api(m.content)
-            else:
+            if m.role != "system":
                 chat_messages.append({"role": m.role, "content": self._message_content(m)})
 
         upstream_model_id = self.map_model_id(model_config.model_id)
@@ -150,12 +157,10 @@ class AnthropicProvider(BaseProvider):
 
         client = self._make_client(api_key)
 
-        system_msg = ""
+        system_msg = _anthropic_system_prompt(messages)
         chat_messages = []
         for m in messages:
-            if m.role == "system":
-                system_msg = _clean_text_for_api(m.content)
-            else:
+            if m.role != "system":
                 chat_messages.append({"role": m.role, "content": self._message_content(m)})
 
         upstream_model_id = self.map_model_id(model_config.model_id)

@@ -192,6 +192,7 @@ def build_provider_config(
             "max_output_tokens": model_data.get("max_output_tokens", 4096),
             "context_window_source": model_data.get("context_window_source", "unverified"),
             "context_window_verified_at": model_data.get("context_window_verified_at", ""),
+            "prompt_profile": model_data.get("prompt_profile", ""),
         }
 
     return provider_cfg, model_configs, preset["env_var"]

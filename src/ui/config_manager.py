@@ -223,6 +223,7 @@ def save_provider(
             "capability_status": m.get("capability_status", {}),
             "metadata_source": m.get("metadata_source", "unverified"),
             "metadata_verified_at": m.get("metadata_verified_at", ""),
+            "prompt_profile": m.get("prompt_profile", ""),
             **budget,
             "dynamic_model_alias": bool(m.get("dynamic_model_alias", False)),
         }

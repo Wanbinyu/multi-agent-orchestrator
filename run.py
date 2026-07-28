@@ -311,10 +311,13 @@ def run(
             )
             answer = console.input("允许执行？(y/n)：")
             if answer.strip().lower() not in ("y", "yes", "是", "允许"):
-                console.print("[dim]已取消[/dim]")
+                if plain:
+                    console.print("[dim]已取消[/dim]")
                 status = "cancelled"
+                exit_code = 130
                 writer.emit("approval", {"approved": False, "mode": "interactive"})
-                return
+                writer.emit("cancel", {"reason": "approval_denied"})
+                raise typer.Exit(code=exit_code)
             writer.emit("approval", {"approved": True, "mode": "interactive"})
         else:
             writer.emit("approval", {

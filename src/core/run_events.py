@@ -6,7 +6,7 @@
 - ``json``：事件收集到内存，``finish`` 时输出单个 JSON 对象 ``{"run": ..., "events": [...]}``。
 - ``plain``：no-op，显示仍走现有 rich console。
 
-事件信封：``{"type": <str>, "ts": <iso8601>, "data": <dict>}``。
+事件信封：``{"type": <str>, "ts": <iso8601>, "run_id": <str>, "data": <dict>}``。
 ``end`` 必须最后：发出 ``end`` 后再 ``emit`` 会被丢弃；``finish`` 后 likewise。
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, TextIO
+from uuid import uuid4
 
 OutputFormat = str  # "plain" | "json" | "streaming-json"
 
@@ -32,12 +33,20 @@ class RunEventWriter:
     在同一把锁内完成，避免 JSONL 行交叉或 JSON 事件丢失。
     """
 
-    def __init__(self, fmt: OutputFormat = "plain", out: TextIO | None = None) -> None:
+    def __init__(
+        self,
+        fmt: OutputFormat = "plain",
+        out: TextIO | None = None,
+        run_id: str | None = None,
+    ) -> None:
         if fmt not in ("plain", "json", "streaming-json"):
             raise ValueError(f"未知 output-format：{fmt!r}")
         self.fmt = fmt
         self._out = out or sys.stdout
         self._events: list[dict[str, Any]] = []
+        self.run_id = (run_id or uuid4().hex).strip()
+        if not self.run_id:
+            raise ValueError("run_id 不能为空")
         self._ended = False
         self._finished = False
         self._start = time.perf_counter()
@@ -48,7 +57,12 @@ class RunEventWriter:
         with self._lock:
             if self._finished or self._ended:
                 return
-            envelope = {"type": event_type, "ts": _now_iso(), "data": data or {}}
+            envelope = {
+                "type": event_type,
+                "ts": _now_iso(),
+                "run_id": self.run_id,
+                "data": data or {},
+            }
             if event_type == "end":
                 self._ended = True
             if self.fmt == "streaming-json":
