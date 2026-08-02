@@ -3,7 +3,7 @@
 # 复制为 providers.yaml 并填入你自己的 key/路径。
 # 真正的 providers.yaml 已被 .gitignore 忽略，不会提交。
 #
-# 能力/价格/上下文真值与路由合同见 docs/Provider兼容矩阵.md
+# 能力/价格/上下文真值与路由合同见 docs/Provider-compatibility-matrix.md
 # 与 src/models/catalog.py（export_compatibility_matrix）。
 # capability_status 为 unverified 的能力不会触发自动升级；
 # 未验证元数据的价格不得用于“更省钱”声明。

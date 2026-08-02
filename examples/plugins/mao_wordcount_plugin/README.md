@@ -1,36 +1,36 @@
 # mao-wordcount-plugin
 
-MAO Plugin API v0 的官方示例插件。它贡献一个只读 `word_count` 工具，用于演示如何把一个工具打包为可被发现、可启用、有生命周期的插件。
+Official sample plugin for MAO Plugin API v0. It contributes a read-only `word_count` tool to show how to package a tool as a discoverable, enableable plugin with a lifecycle.
 
-## 安装
+## Install
 
-在已安装 MAO 的环境中，从源码安装本示例：
+In an environment where MAO is already installed, install this sample from source:
 
 ```bash
 pip install ./examples/plugins/mao_wordcount_plugin
 ```
 
-## 启用
+## Enable
 
-插件默认不启用。安装后显式启用，再启动 MAO 即加载：
+Plugins are disabled by default. After install, enable explicitly, then start MAO to load it:
 
 ```bash
 mao plugin enable mao-wordcount
-mao            # 启动后 word_count 工具可用
-mao plugin doctor   # 诊断加载健康
+mao            # after start, the word_count tool is available
+mao plugin doctor   # diagnose load health
 ```
 
-禁用：
+Disable:
 
 ```bash
 mao plugin disable mao-wordcount
 ```
 
-## 结构
+## Structure
 
-- `mao_wordcount_plugin/__init__.py`：`WordCountPlugin` 实现 `Plugin` 协议（manifest + `load` 注册工具 + `shutdown`）；`create_plugin()` 是 `mao.plugins` entry point 工厂。
-- `pyproject.toml`：声明 `[project.entry-points."mao.plugins"]`，MAO 据此发现插件。
+- `mao_wordcount_plugin/__init__.py`: `WordCountPlugin` implements the `Plugin` protocol (manifest + `load` registers the tool + `shutdown`); `create_plugin()` is the `mao.plugins` entry-point factory.
+- `pyproject.toml`: declares `[project.entry-points."mao.plugins"]`, which MAO uses to discover the plugin.
 
-## 安全模型
+## Security model
 
-Python 插件是可信本机代码，与 MAO 进程拥有相同权限。manifest 中的 `permissions`（本例为 `read_files`）是给用户看的同意面，不构成沙箱。外部工具优先通过 MCP 获得进程边界。
+Python plugins are trusted local code and share the same privileges as the MAO process. Manifest `permissions` (here `read_files`) are a user-facing consent surface, not a sandbox. Prefer MCP for external tools when you need a process boundary.

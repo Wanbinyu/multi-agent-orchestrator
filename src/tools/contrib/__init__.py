@@ -12,5 +12,5 @@
 - CLI `/tools` 命令
 - Web 工具调用
 
-详见 `docs/工具开发指南.md`。
+详见 `docs/tool-development-guide.md`。
 """

@@ -804,7 +804,7 @@ def export_compatibility_matrix() -> list[dict[str, Any]]:
     """导出与模型目录绑定的 Provider 兼容矩阵行。
 
     真值源是 ``BUILTIN_MODELS`` / ``PROVIDER_TEMPLATES``；
-    公开文档 ``docs/Provider兼容矩阵.md`` 应与本函数输出一致。
+    公开文档 ``docs/Provider-compatibility-matrix.md`` 应与本函数输出一致。
     """
     template_by_alias: dict[str, list[str]] = {}
     for key, template in PROVIDER_TEMPLATES.items():

@@ -8,7 +8,7 @@ This release introduces the controlled Plugin API v0: ToolSource, MCP, Hooks and
 - **Plugin manager**: plugins are discovered via the standard Python `mao.plugins` entry-point group (no workspace scanning). They are disabled by default and only loaded after the user enables them in `config/plugins.yaml`. Each plugin's `load` runs in its own try/except; a failing plugin is rolled back and reported as a diagnostic without blocking other plugins or a pluginless startup. `shutdown` unregisters each plugin's contributions.
 - **`mao plugin` CLI**: `list` shows discovered plugins with enable state, capabilities, permissions and source; `doctor` dry-runs discovery and load into throwaway registries; `enable`/`disable` write `config/plugins.yaml`. Plugin loading is wired into CLI chat and Web startup alongside the existing Hooks/MCP loader.
 - **Example plugin**: `examples/plugins/mao_wordcount_plugin` is an independent installable package declaring a `mao.plugins` entry point, contributing a read-only `word_count` tool. It validates the full discover -> enable -> load -> execute -> shutdown path.
-- **Web visibility**: `GET /api/plugins` and a read-only "插件" tab in the chat rightbar expose plugin list, enable state, capabilities and permissions.
+- **Web visibility**: `GET /api/plugins` and a read-only "Plugins" tab in the chat rightbar expose plugin list, enable state, capabilities and permissions.
 - **Isolation support**: `ToolRegistry.unregister_tool/remove_source` and `HookRegistry.remove_pre/remove_post` let a failed or disabled plugin be rolled back without affecting other contributions.
 
 ## Security model

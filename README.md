@@ -6,85 +6,85 @@
      ══o══(  ω  )══o══
 ```
 
-<p align="center"><sub>CLI 欢迎小猫：趴在台沿、眼巴巴望着你 · 运行 <code>mao</code> 即可见面</sub></p>
+<p align="center"><sub>CLI welcome cat: perched on the ledge, looking up at you · Run <code>mao</code> to meet it</sub></p>
 
 [![CI](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB)
 ![Status](https://img.shields.io/badge/status-v0.1.0--beta.7-2ea44f)
 
-MAO 面向需要接入多个模型服务的开发者：它在 CLI 和 WebUI 中执行工程任务，并用明确的读写边界、工具证据、验证门和有界 Worker 协作约束模型行为。核心目标不是单纯增加并发，而是在选择不同模型能力与成本的同时，让使用者知道系统做了什么、为什么能结束、还有哪些风险。
+MAO is for developers who need to connect multiple model services: it runs engineering tasks in the CLI and WebUI, and constrains model behavior with clear read/write boundaries, tool evidence, verification gates, and bounded Worker collaboration. The core goal is not simply more concurrency—it is to let you choose different model capabilities and costs while still knowing what the system did, why it can finish, and what risks remain.
 
-当前公开版本为 [`v0.1.0-beta.7`](https://github.com/Wanbinyu/multi-agent-orchestrator/releases/tag/v0.1.0-beta.7)（beta.6 的安全补丁：修复 `run_command` 内联代码执行 P0）；beta.3-beta.6 的核心契约均已落地，下一步按 v0.2.0 进入条件推进。它适合在可信本机和可审查项目中试用，不是 Claude Code、Codex 或容器沙箱的完整替代品。
+The current public release is [`v0.1.0-beta.7`](https://github.com/Wanbinyu/multi-agent-orchestrator/releases/tag/v0.1.0-beta.7) (security patch on beta.6: fixes the P0 `run_command` inline code execution issue). Core contracts from beta.3–beta.6 are landed; next steps follow the v0.2.0 entry conditions. It is suitable for trial on trusted local machines and reviewable projects—not a full replacement for Claude Code, Codex, or a container sandbox.
 
-## 界面预览
+## UI preview
 
-### 终端 CLI（`mao`）
+### Terminal CLI (`mao`)
 
-启动后进入对话模式：欢迎小猫、会话信息、底部栏显示权限与 token 用量（Shift+Tab 切换模式）。
+After launch you enter chat mode: welcome cat, session info, and a bottom bar showing permission mode and token usage (Shift+Tab cycles modes).
 
-![MAO 终端 CLI 对话与欢迎小猫](docs/assets/cli-chat-cat.png)
+![MAO terminal CLI chat and welcome cat](docs/assets/cli-chat-cat.png)
 
-### WebUI（`mao web`）
+### WebUI (`mao web`)
 
-浏览器中配置 Provider、对话与上下文预算。
+Configure providers, chat, and context budget in the browser.
 
-![MAO WebUI 对话与上下文预算](docs/assets/webui-chat-context.png)
+![MAO WebUI chat and context budget](docs/assets/webui-chat-context.png)
 
-### 60 秒真实工作流演示
+### 60-second real workflow demo
 
-![MAO Beta 真实只读项目检查演示](docs/assets/mao-beta-demo.gif)
+![MAO Beta real read-only project inspection demo](docs/assets/mao-beta-demo.gif)
 
-演示依次展示 Provider 配置、`approve` 权限确认、受限项目结构与文件读取、结构化结论，以及工作区中的上下文预算、证据和本轮工程记录。演示任务为只读检查，未修改目标项目。
+The demo walks through provider configuration, `approve` permission confirmation, constrained project structure and file reads, structured conclusions, and context budget, evidence, and engineering records for the turn in the workspace. The demo task is a read-only inspection and does not modify the target project.
 
-## 为什么做 MAO
+## Why MAO
 
-我做这个工具的出发点，是希望节省 token，并尽可能发挥不同模型各自擅长的能力。
+I built this tool to save tokens and make the most of what different models are good at.
 
-即使 Claude 和 GPT 的额度、套餐和上下文策略不断调整，仍然有很多人因为成本、地区、服务可用性或工作习惯而使用其他模型。我自己也曾因为 token 消耗得太快而苦恼，所以开始尝试把任务交给更合适的模型，并让整个过程有明确边界、证据和验证。这是我第一次完整地尝试开发 Agent，项目里一定还有不成熟的地方，欢迎提出问题、建议，或者把它当作一个可以继续发展的思路。
+Even as Claude and GPT quotas, plans, and context policies keep changing, many people still use other models because of cost, region, availability, or working habits. I myself struggled with tokens burning too fast, so I started routing work to more suitable models and keeping the whole process within clear boundaries, evidence, and verification. This is my first complete attempt at building an agent; the project still has rough edges. Feedback, suggestions, and treating it as an idea worth continuing are all welcome.
 
-未来 token 也许会像水和电一样普遍，但即使成本不再是主要问题，不同模型依然会有各自的长处。因此，我认为一个能够组合模型能力、控制消耗并保留工程证据的工具仍然有必要存在。
+Tokens may one day be as common as water and electricity, but even when cost is no longer the main issue, different models will still have different strengths. A tool that can combine model capabilities, control spend, and keep engineering evidence still matters.
 
-## 一键安装与启动
+## One-command install and start
 
-要求 Python 3.11 或 3.12。已安装 `pipx` 时，可以直接从 GitHub 安装到独立环境：
+Requires Python 3.11 or 3.12. If you already have `pipx`, install from GitHub into an isolated environment:
 
 ```bash
 pipx install git+https://github.com/Wanbinyu/multi-agent-orchestrator.git
 ```
 
-安装后，在要检查或修改的项目目录中运行：
+After install, run from the project directory you want to inspect or change:
 
 ```bash
 mao
 ```
 
-`mao` 默认进入终端对话；首次运行且当前目录没有 Provider 配置时，会先启动连接向导。配置、会话和输出均保存在当前项目目录，不会写进 Python 安装目录。
+`mao` opens terminal chat by default. On first run, if the current directory has no provider configuration, it starts the connection wizard. Config, sessions, and output stay in the current project directory and are never written into the Python install tree.
 
-启动 WebUI：
+Start the WebUI:
 
 ```bash
 mao web
 ```
 
-浏览器默认打开 `http://127.0.0.1:8123`。首次可以先添加 Provider、测试连接并选择主模型；密钥只写入当前目录的 `.env`。旧命令 `mao-ui` 继续兼容。
+The browser opens `http://127.0.0.1:8123` by default. On first use you can add a provider, test the connection, and pick a main model; keys are written only to `.env` in the current directory. The older `mao-ui` command remains compatible.
 
-升级或卸载：
+Upgrade or uninstall:
 
 ```bash
 pipx upgrade multi-agent-orchestrator
 pipx uninstall multi-agent-orchestrator
 ```
 
-如果最初使用 Git URL 安装，`pipx upgrade` 会继续使用已记录的 Git 来源。升级后可用 `mao --version` 检查当前版本。
+If you originally installed via Git URL, `pipx upgrade` keeps using that recorded Git source. After upgrading, check the version with `mao --version`.
 
-没有 `pipx` 时，可先安装：
+Without `pipx`, install it first:
 
 ```bash
 python -m pip install --user pipx
 python -m pipx ensurepath
 ```
 
-### 从源码开发
+### Develop from source
 
 ```bash
 git clone --depth 1 https://github.com/Wanbinyu/multi-agent-orchestrator.git
@@ -96,302 +96,303 @@ python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
-### 反馈与问题报告（请脱敏）
+### Feedback and issue reports (please redact)
 
-欢迎通过 GitHub Issue 反馈安装问题、真实项目任务结果或缺陷。**请勿粘贴 API Key、`.env`、Session 或客户代码。**
+GitHub Issues for install problems, real project task results, or bugs are welcome. **Do not paste API keys, `.env` contents, sessions, or customer code.**
 
-- 使用指南：[`docs/外部用户反馈指南.md`](docs/外部用户反馈指南.md)
-- Issue 模板：安装反馈 / 真实任务反馈 / Bug / Provider 兼容
-- 日志脱敏：`python scripts/sanitize_feedback_text.py log.txt`
-- 安全漏洞请走 [Security advisory](https://github.com/Wanbinyu/multi-agent-orchestrator/security/advisories/new)，不要开公开 Issue
+- Guide: [`docs/external-user-feedback-guide.md`](docs/external-user-feedback-guide.md)
+- Issue templates: install feedback / real-task feedback / bug / provider compatibility
+- Log sanitization: `python scripts/sanitize_feedback_text.py log.txt`
+- Security vulnerabilities: use a [Security advisory](https://github.com/Wanbinyu/multi-agent-orchestrator/security/advisories/new), not a public issue
 
-## 已知限制与安全边界
+## Known limitations and security boundaries
 
-- MAO 尚无容器级沙箱；命令以当前进程权限在本机执行。默认推荐 `approve`，不信任的项目使用 `readonly`。权限规则与插件启用门是**应用层授权**，不是 OS/容器隔离。
-- Provider 的鉴权、流式和原生工具兼容性不同；动态模型别名可能不暴露准确模型版本或硬上下文窗口。
-- 未验证模型默认使用 **200K** 本地安全预算（可在配置中声明更大/更小的真实窗口）。该数字是 MAO 的本地保护值，不代表上游物理上限；上游更小时仍可能被 Provider 拒绝。`unverified` 能力不参与自动升级或节省声明。
-- 自动 CI 不调用真实付费模型；真实 Provider、多模型协作和摘要质量仍需人工烟雾验收。
-- MCP Server、Hooks 与 Python 插件均以 MAO 进程权限运行，启用前必须审查配置和来源。
+- MAO has no container-level sandbox; commands run on the host with the current process privileges. Prefer `approve` by default; use `readonly` for untrusted projects. Permission rules and plugin enable gates are **application-level authorization**, not OS/container isolation.
+- Provider auth, streaming, and native tool compatibility differ; dynamic model aliases may not expose accurate model versions or hard context windows.
+- Unverified models default to a **200K** local safe budget (you can declare larger or smaller real windows in config). That number is MAO’s local guard, not an upstream physical limit; if the upstream window is smaller, the provider may still reject the request. `unverified` capabilities do not participate in automatic upgrades or savings claims.
+- Automated CI does not call real paid models; real providers, multi-model collaboration, and summary quality still need manual smoke acceptance.
+- MCP servers, hooks, and Python plugins all run with MAO process privileges—review configuration and source before enabling them.
 
-完整安全边界见 [`SECURITY.md`](SECURITY.md)；Provider 能力矩阵与错误码见 [`docs/Provider兼容矩阵.md`](docs/Provider兼容矩阵.md)；当前方向见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)。
+Full security boundaries: [`SECURITY.md`](SECURITY.md). Provider capability matrix and error codes: [`docs/Provider-compatibility-matrix.md`](docs/Provider-compatibility-matrix.md). Current product direction: [`docs/MAO-product-direction-and-beta-roadmap.md`](docs/MAO-product-direction-and-beta-roadmap.md).
 
-## 目录结构
+## Directory structure
 
 ```
 multi-agent-orchestrator/
-├── config/                   # 当前项目的 Provider、Worker 与扩展配置
-├── docs/                     # 用户、扩展、路线图和发布文档
+├── config/                   # Provider, Worker, and extension config for the current project
+├── docs/                     # User, extension, roadmap, and release docs
 ├── src/
-│   ├── cli/                  # 终端交互与首次配置
-│   ├── core/                 # Agent、Worker、调度、证据与上下文
-│   ├── gateway/              # Provider 路由、故障切换与计费
-│   ├── resources/            # 安装包内置的运行模板
-│   ├── tools/                # 文件、命令、搜索、Web、MCP 与 Hooks
+│   ├── cli/                  # Terminal interaction and first-run setup
+│   ├── core/                 # Agent, Worker, scheduling, evidence, and context
+│   ├── gateway/              # Provider routing, failover, and billing
+│   ├── resources/            # Runtime templates bundled in the package
+│   ├── tools/                # Files, commands, search, web, MCP, and hooks
 │   └── ui/                   # FastAPI WebUI
-├── tests/                    # 开发与 CI 测试；不进入 wheel/发布归档
-├── run.py                    # `mao` 命令入口
+├── tests/                    # Dev and CI tests; not included in wheel/release archives
+├── run.py                    # `mao` command entry point
 ├── README.md
 ├── SECURITY.md
 └── pyproject.toml
 ```
 
-## 快速开始
+## Quick start
 
-### 1. 安装依赖
+### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 配置 Provider 和主模型（推荐图形化界面）
+### 2. Configure providers and the main model (recommended: graphical UI)
 
 ```bash
 python scripts/run_ui.py
 ```
 
-浏览器会自动打开 `http://127.0.0.1:8123`，界面支持：
+The browser opens `http://127.0.0.1:8123` automatically. The UI supports:
 
-1. 从 15+ 常用 Provider 预设中选择（Anthropic / OpenAI / DeepSeek / 火山方舟 / Kimi / 智谱 GLM / 自定义等）。
-2. 粘贴 API Key，自动填充 Base URL 与默认模型映射。
-3. 点击`测试连接`，实时查看连通状态。
-4. 启用/禁用任意 Provider；模型池自动过滤只显示启用 Provider 的模型。
-5. 选择主模型并保存。
-6. 在对话页工作区中按需展开项目目录并只读预览文本文件。
+1. Choosing from 15+ common provider presets (Anthropic / OpenAI / DeepSeek / Volcengine Ark / Kimi / Zhipu GLM / custom, and more).
+2. Pasting an API key and auto-filling base URL and default model mappings.
+3. Clicking **Test connection** to see live connectivity status.
+4. Enabling/disabling any provider; the model pool filters to models from enabled providers only.
+5. Selecting the main model and saving.
+6. Expanding the project tree on the chat workspace page and previewing text files read-only as needed.
 
-配置会同步写入 `config/providers.yaml` 与 `.env`，与 CLI 完全兼容。
+Configuration is written to `config/providers.yaml` and `.env`, fully compatible with the CLI.
 
-> 如果不方便使用浏览器，也可以继续用命令行向导：
+> If a browser is inconvenient, use the command-line wizard:
 >
 > ```bash
 > python run.py agent-setup
 > ```
 
-### 3. 配置 Worker 角色（旧版向导，可选）
+### 3. Configure Worker roles (legacy wizard, optional)
 
 ```bash
 python run.py setup
 ```
 
-该向导会引导你：
-1. 选择使用场景（软件开发 / 小说创作 / 游戏二次开发 / 软件测试 / 自定义）
-2. 配置总指挥（Orchestrator）模型
-3. 配置子工程师（Worker）名字、模型、工作内容
-4. 生成 `config/workers.yaml`
+This wizard walks you through:
 
-未生成私有 `config/workers.yaml` 时，Orchestrator、Worker 和 Reviewer 会回退读取无密钥的 `config/workers.yaml.example`；本地文件仍优先且不会被 Git 跟踪。
+1. Choosing a scenario (software development / novel writing / game modding / software testing / custom)
+2. Configuring the Orchestrator model
+3. Configuring Worker names, models, and responsibilities
+4. Generating `config/workers.yaml`
 
-### 4. 运行
+When no private `config/workers.yaml` exists, Orchestrator, Worker, and Reviewer fall back to the keyless `config/workers.yaml.example`. Local files still take priority and are not tracked by Git.
+
+### 4. Run
 
 ```bash
-python run.py "开发一个前后端登录功能，前端用 React，后端用 FastAPI"
+python run.py "Build a frontend/backend login feature; React frontend, FastAPI backend"
 ```
 
-完整命令选项：
+Full command options:
 
 ```bash
-python run.py "开发一个登录页面" \
+python run.py "Build a login page" \
   --output output \
   --config config \
   --max-workers 4 \
   --orchestrator-model glm-ark
 ```
 
-| 选项 | 简写 | 说明 |
+| Option | Short | Description |
 |---|---|---|
-| `--output` | `-o` | 输出目录，默认 `output` |
-| `--config` | `-c` | 配置目录，默认 `config` |
-| `--max-workers` | `-w` | 最大并发 Worker 数，默认 `4` |
-| `--orchestrator-model` | `-m` | 运行时覆盖总指挥模型 |
-| `--output-format` |  | `plain`、`json` 或 `streaming-json`；后两者输出无头事件流 |
+| `--output` | `-o` | Output directory, default `output` |
+| `--config` | `-c` | Config directory, default `config` |
+| `--max-workers` | `-w` | Max concurrent Workers, default `4` |
+| `--orchestrator-model` | `-m` | Override Orchestrator model at runtime |
+| `--output-format` |  | `plain`, `json`, or `streaming-json`; the latter two emit headerless event streams |
 
-> 如果没有指定子命令，`run.py` 会自动把第一个非命令参数当作 `run` 命令的请求参数。
+> If no subcommand is given, `run.py` treats the first non-command argument as the `run` request.
 
-需要接入脚本或其他自动化工具时，可以使用机器可读输出：
+For scripts and other automation, use machine-readable output:
 
 ```bash
-mao run "检查当前项目并给出风险" --output-format json
-mao run "检查当前项目并给出风险" --output-format streaming-json
+mao run "Inspect the current project and report risks" --output-format json
+mao run "Inspect the current project and report risks" --output-format streaming-json
 ```
 
-`json` 输出一个包含 `run` 和 `events` 的 JSON 对象；`streaming-json` 按 JSONL 逐行输出。事件包含计划、模型、工具、文件变更、命令、验证、审批、usage、错误和结束状态；Worker 正文不会写入事件流。
+`json` emits one JSON object with `run` and `events`; `streaming-json` emits JSONL line by line. Events cover plan, model, tools, file changes, commands, verification, approvals, usage, errors, and end status. Worker response bodies are not written into the event stream.
 
-### 5. 进入持续对话模式（CLI）
+### 5. Enter continuous chat mode (CLI)
 
-完成连接配置后，可以直接在命令行与主模型持续多轮对话：
+After connection setup, chat multi-turn with the main model from the terminal:
 
 ```bash
 python run.py chat
 ```
 
-常用 REPL 命令：
+Common REPL commands:
 
-进入对话后输入 `/` 会显示命令候选和说明，继续输入字母可实时过滤；完整列表可用 `/help` 查看。
+Type `/` in chat to show command candidates and descriptions; keep typing letters to filter live. Full list: `/help`.
 
-| 命令 | 说明 |
+| Command | Description |
 |---|---|
-| `/new [标题]` | 创建新会话 |
-| `/load <session_id>` | 加载已有会话 |
-| `/save` | 手动保存当前会话 |
-| `/context` | 本地显示模型映射、上下文预算、当前估算和自动压缩阈值，不调用模型 |
-| `/tree [路径] [深度]` | 本地显示项目结构，不调用模型、不产生 token |
-| `/plan <需求>` | 调用 Orchestrator 执行一次性任务计划 |
-| `/plan enter [目标]` | 进入持久化只读 Plan 模式 |
-| `/plan show` | 查看当前方案、状态和修订版本 |
-| `/plan revise <意见>` | 记录修订意见并生成新版方案 |
-| `/plan approve` | 批准方案并交给正常多模型执行链 |
-| `/plan cancel` | 取消 Plan 模式 |
-| `/tools` | 显示当前可用工具 |
-| `/exit` | 退出 |
+| `/new [title]` | Create a new session |
+| `/load <session_id>` | Load an existing session |
+| `/save` | Manually save the current session |
+| `/context` | Local view of model mapping, context budget, current estimate, and auto-compaction thresholds (no model call) |
+| `/tree [path] [depth]` | Local project structure (no model call, no tokens) |
+| `/plan <requirement>` | One-shot task plan via the Orchestrator |
+| `/plan enter [goal]` | Enter persistent read-only Plan mode |
+| `/plan show` | Show current plan, status, and revision |
+| `/plan revise <feedback>` | Record revision feedback and generate a new plan version |
+| `/plan approve` | Approve the plan and hand off to the normal multi-model execution chain |
+| `/plan cancel` | Cancel Plan mode |
+| `/tools` | Show currently available tools |
+| `/exit` | Exit |
 
-对话产物保存在 `sessions/<session_id>/output/`。
+Chat artifacts are stored under `sessions/<session_id>/output/`.
 
-助手回答会在有界的临时区域中**逐块流式预览**，完成后只向终端滚动记录写入一次最终正文，避免长回答把累计渲染帧重复留在控制台。项目分析和工具任务按“探索项目 / 检索代码 / 生成交付物 / 执行验证”分阶段展示；每阶段只展开前 4 项，后续同类操作折叠，并在结束时汇总目录、文件、检索、重复操作和失败数量。使用工具后仍会在控制台显示完整最终答案，不需要再手动打开 `response.md` 才能查看结论。
+Assistant replies stream **chunk by chunk in a bounded temporary region**, then write the final body once into the terminal scrollback so long answers do not leave repeated cumulative render frames in the console. Project analysis and tool work are shown in stages (“explore project / search code / generate deliverables / run verification”); each stage expands only the first 4 items, folds later similar operations, and summarizes directories, files, searches, repeated operations, and failures at the end. After tools run, the full final answer still appears in the console—you do not need to open `response.md` manually to see the conclusion.
 
-Agent 系统提示会注入当前模型别名、上游请求模型 ID、本地上下文预算和自动压缩阈值。配置中的 `anthropic` 表示兼容协议，不代表实际模型是 Claude；需要查看实时估算时使用 `/context`，不要让模型自行猜测运行配置。
+The agent system prompt injects the current model alias, upstream request model ID, local context budget, and auto-compaction thresholds. Config name `anthropic` means a compatible protocol, not that the actual model is Claude. Use `/context` for live estimates; do not let the model guess runtime configuration.
 
-每轮请求会分类为问答、解释、诊断、修改、构建、审查、方案或监控，并将类型、风险和写入状态记录到工程日志。`auto` 对未明确分类或可写任务直接开放写入与命令工具；`approve` 自动读取，但每个写入或命令调用都需要用户确认；`readonly` 自动读取并拒绝写入和命令。明确的“只读、不要修改、只做方案”等边界在任何模式下都优先，分类器不会因为 `auto` 而覆盖用户的禁止修改要求。若真实工具行为与初始分类不一致，RunJournal 会保留初始权限边界，同时按实际项目写入生成更严格的有效类型和验证门；自动归档的 `response.md` 不计项目变更。
+Each request is classified as Q&A, explanation, diagnosis, change, build, review, plan, or monitoring; type, risk, and write status go into the engineering log. `auto` opens write and command tools for unclassified or writable tasks; `approve` auto-reads but requires confirmation for each write or command; `readonly` auto-reads and rejects writes and commands. Explicit boundaries such as “read-only, do not modify, plan only” always take priority in every mode—the classifier does not override a user’s no-modify requirement because of `auto`. If real tool behavior diverges from the initial classification, RunJournal keeps the original permission boundary while computing a stricter effective type and verification gate from actual project writes; auto-archived `response.md` does not count as a project change.
 
-执行深度默认使用 `auto`，也可在 CLI 输入 `/depth fast`、`/depth standard`、`/depth deep` 或 `/depth auto` 持久化选择。`fast` 适合简单问答和明确小任务并禁用 Worker，`standard` 用于常规诊断、修改和审查，`deep` 用于构建、高风险与多模型协作。用户选择优先于自动建议；小修改选择 `fast` 仍保留 `standard` 验证门，高风险任务则不能降低到浅层执行。实际深度、原因和预算会写入 RunJournal。
+Execution depth defaults to `auto`; you can persist `/depth fast`, `/depth standard`, `/depth deep`, or `/depth auto` in the CLI. `fast` fits simple Q&A and clear small tasks and disables Workers; `standard` covers routine diagnosis, changes, and review; `deep` covers builds, high risk, and multi-model collaboration. User choice outranks automatic suggestion; choosing `fast` for a small change still keeps the `standard` verification gate, and high-risk work cannot drop to shallow execution. Actual depth, reason, and budget are written to RunJournal.
 
-模型路由默认使用 `auto`，综合任务类型、执行深度、显式能力真值、可追溯价格、上下文和健康状态选择本轮模型；输入 `/routing fixed` 可固定使用配置主模型，`/routing auto` 恢复自动选择。未验证能力不会触发升级，价格未知时不会宣称节省成本；自动候选失败后优先回退用户主模型。CLI/Web 显示简洁理由，RunJournal v5 保存完整候选审计。
+Model routing defaults to `auto`, choosing the turn’s model from task type, execution depth, explicit capability truth, traceable price, context, and health. `/routing fixed` pins the configured main model; `/routing auto` restores automatic selection. Unverified capabilities never trigger upgrades; unknown prices never produce savings claims. After automatic candidates fail, prefer falling back to the user’s main model. CLI/Web show a short reason; RunJournal v5 keeps the full candidate audit.
 
-项目检查会先获取精简结构和只读 Git 状态，再按文档、依赖、入口、核心代码与测试进行有界抽样。真实工具结果会自动写入可追溯 Evidence；缓存读取不会重复计证据，CLI/Web 的本轮记录会显示证据条数和项目侦察覆盖。
+Project inspection first obtains a compact structure and read-only Git status, then samples docs, dependencies, entry points, core code, and tests within bounds. Real tool results are written into traceable Evidence automatically; cached reads do not double-count evidence. CLI/Web run records show evidence counts and project recon coverage for the turn.
 
-工程修改在结束前执行确定性完成审计：普通修改需要针对性测试和相邻模块回归，高风险构建还需要集成、全量和 smoke 验证。缺少直接证据时运行状态会保留为 `blocked`，最终答复会列出验证缺口；Reviewer 的模型输出不能覆盖该审计结果。
+Engineering changes run a deterministic completion audit before finish: ordinary changes need targeted tests and adjacent-module regression; high-risk builds also need integration, full, and smoke verification. Without direct evidence the run status stays `blocked` and the final reply lists verification gaps. Reviewer model output cannot override that audit.
 
-项目验证先通过 `discover_project_commands` 读取实际存在的 npm/pnpm/yarn/Python 命令，再用 `run_command` 的独立 `cwd` 执行。命令不经过 shell 拼接，`cd &&`、管道和重定向会被拒绝；轨迹记录参数、cwd、退出码、耗时和截断状态。Vite build 可使用自动清理的临时输出目录，参数或权限失败最多修正一次。
+Project verification uses `discover_project_commands` to read real npm/pnpm/yarn/Python commands, then runs them via `run_command` with an independent `cwd`. Commands are not shell-concatenated; `cd &&`, pipes, and redirects are rejected. Traces record arguments, cwd, exit code, duration, and truncation. Vite builds may use an auto-cleaned temporary output directory; argument or permission failures get at most one correction attempt.
 
-多模型协作任务声明只读/写入/验证模式、依赖、验收标准、并行安全和共享绝对路径所有权。Worker 相对写入隔离在独立目录，越界写入会被拒绝；瞬时失败只重试目标任务，所有尝试的工具与验证结果都会进入主工程日志。
+Multi-model collaboration tasks declare read-only/write/verify mode, dependencies, acceptance criteria, parallel safety, and shared absolute path ownership. Worker relative writes are isolated in separate directories; out-of-bounds writes are rejected. Transient failures retry only the target task; tool and verification results from every attempt enter the main engineering log.
 
-MAO 会从目标项目按层级加载 `AGENTS.md`、`CLAUDE.md`、`.mao/rules/*.md`，并兼容 Grok/Claude/Cursor 的规则目录；来源和截断诊断写入 RunJournal。用户级 `config/permissions.yaml` 与项目级 `.mao/permissions.yaml` 支持 `deny / ask / allow`，固定按 `deny > ask > allow > 会话默认` 决策，主 Agent 和 Worker 使用同一引擎。规则可用 `justification` 说明理由，并用 `match` / `not_match` 示例在加载时自检；失败规则会被忽略并报告诊断。示例见 `config/permissions.yaml.example`。
+MAO loads `AGENTS.md`, `CLAUDE.md`, and `.mao/rules/*.md` hierarchically from the target project, and is compatible with Grok/Claude/Cursor rule directories; source and truncation diagnostics go to RunJournal. User-level `config/permissions.yaml` and project-level `.mao/permissions.yaml` support `deny / ask / allow`, always deciding `deny > ask > allow > session default`. Main Agent and Workers share the same engine. Rules may use `justification` for rationale and `match` / `not_match` examples for load-time self-checks; failed rules are ignored and reported as diagnostics. See `config/permissions.yaml.example`.
 
-持久化 Plan 模式在批准前强制全链路只读。主 Agent 取得真实侦察证据后，由证据检查、架构规划、风险审查和最终综合四个模型角色形成唯一方案；辅助模型不获得工具。历史设计记录见 [`docs/archive/completed-beta/Grok-Build行为契约融合.md`](docs/archive/completed-beta/Grok-Build行为契约融合.md)，当前优化顺序见 [`docs/MAO-优化与后续开发规划.md`](docs/MAO-优化与后续开发规划.md)。
+Persistent Plan mode forces full-chain read-only until approval. After the main agent obtains real recon evidence, four model roles—evidence check, architecture planning, risk review, and final synthesis—form a single plan; helper models get no tools. Historical design notes: [`docs/archive/completed-beta/Grok-Build-behavior-contract-integration.md`](docs/archive/completed-beta/Grok-Build-behavior-contract-integration.md). Current optimization order: [`docs/MAO-optimization-and-follow-up-plan.md`](docs/MAO-optimization-and-follow-up-plan.md).
 
-后续上下文能力将按“模型窗口真值 → 动态安全预算 → 分层压缩 → 持久项目上下文 → 长任务基准”推进，详见 [`docs/上下文扩展与长任务稳定性计划.md`](docs/上下文扩展与长任务稳定性计划.md)。未验证模型的本地默认安全预算为 **200K**（非上游物理上限声明）。
+Context work continues along “model window truth → dynamic safe budget → layered compaction → persistent project context → long-task benchmarks”; details in [`docs/context-extension-and-long-task-stability-plan.md`](docs/context-extension-and-long-task-stability-plan.md). Unverified models use a local default safe budget of **200K** (not an upstream physical limit claim).
 
-公开版 `v0.1.0-beta.7`（安全补丁）修复 `run_command` 允许 `python -c`/`node -e` 内联代码执行的 P0；beta.6 已完成受控 Plugin API v0：通过 `mao.plugins` entry point 发现插件、默认关闭需显式启用、API 版本约束、加载失败隔离、`mao plugin list/doctor/enable/disable`、示例插件与 Web 可见性；Windows/Ubuntu、Python 3.11/3.12 和安全 CI 全部通过。beta.3-beta.5 的 Provider 可信接入、工程透明度、会话恢复、分层压缩、项目索引、模型路由、可复现基准与对抗测试均已落地。真实多模型对比因累计授权已耗尽而暂停，需所有者重新给出次数与费用边界后才恢复。插件开发见 `examples/plugins/mao_wordcount_plugin`，已完成版本计划归档于 [`docs/archive/completed-beta/版本计划-v0.1.0-beta.3至beta.6.md`](docs/archive/completed-beta/版本计划-v0.1.0-beta.3至beta.6.md)。
+Public `v0.1.0-beta.7` (security patch) fixes the P0 where `run_command` allowed `python -c` / `node -e` inline code execution. beta.6 completed controlled Plugin API v0: discovery via `mao.plugins` entry points, default-off with explicit enable, API version constraints, isolated load failures, `mao plugin list/doctor/enable/disable`, example plugin, and Web visibility; Windows/Ubuntu, Python 3.11/3.12, and security CI all pass. beta.3–beta.5 delivered trusted provider onboarding, engineering transparency, session recovery, layered compaction, project index, model routing, reproducible benchmarks, and adversarial testing. Real multi-model comparison is paused after cumulative authorization was exhausted and resumes only when the owner sets new count and cost bounds. Plugin development: `examples/plugins/mao_wordcount_plugin`. Completed version plan archive: [`docs/archive/completed-beta/version-plan-v0.1.0-beta.3-to-beta.6.md`](docs/archive/completed-beta/version-plan-v0.1.0-beta.3-to-beta.6.md).
 
-B5 的公开离线合同可直接运行 `python scripts/benchmark_engineering.py`。它在隔离工作区对六类程序化任务分别执行固定单模型、自动路由和多模型 fixture 策略三次，共 54 条结果，全程不读取 Key、不调用 Provider；输出属于合成合同数据，不代表真实模型效果。
+The public offline B5 contract can be run with `python scripts/benchmark_engineering.py`. In an isolated workspace it runs fixed single-model, auto-routing, and multi-model fixture strategies three times each across six programmatic task types (54 results total), never reading keys or calling providers. Output is synthetic contract data and does not represent real model quality.
 
-### 6. 打开 Web 对话页面
+### 6. Open the Web chat page
 
 ```bash
 python scripts/run_ui.py
 ```
 
-浏览器打开 `http://127.0.0.1:8123/chat`：
+Open `http://127.0.0.1:8123/chat` in the browser:
 
-- 桌面端默认突出主对话区，上下文面板按需展开；移动端会话列表为横向选择条，上下文以抽屉显示。
-- 配置页按“服务连接 / 认证与运行 / 模型映射”分组，移动端模型映射自动切换为纵向卡片。
-- 主消息区支持 **SSE 流式显示**，助手回答逐字出现，并保持输入区在当前视口内。
-- 支持 Markdown、代码块、工具调用结果和生成文件展示。
-- 主模型自动调用 `read_file` / `write_file` / `run_command` 工具。
-- 旧的同步接口 `POST /api/chat/sessions/{id}/messages` 仍然保留；新增流式接口 `POST /api/chat/sessions/{id}/messages/stream`。
-- 顶部 `Plan` 控件可进入全链路只读规划，查看方案后可修订、批准并实施或取消；状态会随会话持久化。
+- Desktop emphasizes the main chat area by default; the context panel expands on demand. On mobile, the session list is a horizontal strip and context uses a drawer.
+- The config page groups “service connection / auth & runtime / model mapping”; on mobile, model mapping switches to vertical cards.
+- The main message area supports **SSE streaming**; assistant replies appear token by token while the input stays in view.
+- Supports Markdown, code blocks, tool results, and generated file display.
+- The main model can call `read_file` / `write_file` / `run_command` tools automatically.
+- The legacy sync API `POST /api/chat/sessions/{id}/messages` remains; streaming uses `POST /api/chat/sessions/{id}/messages/stream`.
+- The top **Plan** control enters full-chain read-only planning; after viewing a plan you can revise, approve and implement, or cancel. State persists with the session.
 
-### 7. 切换总指挥模型
+### 7. Switch the Orchestrator model
 
-默认总指挥（Orchestrator）在 `config/workers.yaml` 的 `orchestrator.model` 中配置。当前示例配置默认使用 `glm-ark`（你接入的火山方舟模型）。
+The default Orchestrator is set in `config/workers.yaml` under `orchestrator.model`. The sample config defaults to `glm-ark` (your connected Volcengine Ark model).
 
-**方式一：运行时指定**
+**Option 1: Runtime override**
 
 ```bash
-python run.py "开发一个登录功能" --orchestrator-model glm-ark
+python run.py "Build a login feature" --orchestrator-model glm-ark
 ```
 
-**方式二：修改默认配置**
+**Option 2: Change the default config**
 
-编辑 `config/workers.yaml`：
+Edit `config/workers.yaml`:
 
 ```yaml
 orchestrator:
   model: glm-ark
 ```
 
-> 注意：总指挥负责拆任务和验收，模型越强拆得越准。便宜模型可以当总指挥，但任务拆分质量可能下降。
+> Note: the Orchestrator splits tasks and accepts work—stronger models split more accurately. Cheaper models can be the Orchestrator, but plan quality may drop.
 
-### 8. 手动配置（可选）
+### 8. Manual configuration (optional)
 
-如果你不想用向导，也可以手动创建 `.env`：
+If you prefer not to use the wizard, create `.env` yourself:
 
 ```env
-ANTHROPIC_API_KEY=你的 Anthropic Key
-OPENAI_API_KEY=你的 OpenAI Key
-GLM_API_KEY=你的智谱 Key
-DEEPSEEK_API_KEY=你的 DeepSeek Key
-ARK_API_KEY=你的火山方舟 Key
+ANTHROPIC_API_KEY=your Anthropic Key
+OPENAI_API_KEY=your OpenAI Key
+GLM_API_KEY=your Zhipu Key
+DEEPSEEK_API_KEY=your DeepSeek Key
+ARK_API_KEY=your Volcengine Ark Key
 ```
 
-并编辑 `config/providers.yaml` 和 `config/workers.yaml`。
+And edit `config/providers.yaml` and `config/workers.yaml`.
 
-## Worker 工具
+## Worker tools
 
-Worker 在执行任务时可以使用以下工具：
+Workers can use these tools while executing tasks:
 
-- **write_file / edit_file**：使用明确路径创建或精确修改文件
-- **project_tree / read_file / list_dir / glob_files / grep_content**：生成受限项目树、读取文件、探查目录和搜索内容，支持绝对路径
-- **run_command**：运行白名单内的命令
-- **web_search / fetch_url**：搜索网页和抓取 URL 内容
-- **search_project_files / search_memory**：检索项目索引与长期记忆
+- **write_file / edit_file**: create or precisely edit files with explicit paths
+- **project_tree / read_file / list_dir / glob_files / grep_content**: constrained project tree, file reads, directory probes, and content search; absolute paths supported
+- **run_command**: run allowlisted commands
+- **web_search / fetch_url**: web search and URL fetch
+- **search_project_files / search_memory**: project index and long-term memory retrieval
 
-工具调用支持原生 `tool_use` 和 ```` ```tool:xxx ```` Markdown 兜底。协作 Worker 会把工具结果返回模型继续执行，最多 5 轮。
+Tool calls support native `tool_use` and a ```` ```tool:xxx ```` Markdown fallback. Collaboration Workers return tool results to the model and continue for up to 5 rounds.
 
-项目文件必须通过 `write_file` 使用明确文件名创建，不再从正文代码块生成 `generated_N`。普通文本结果仍兜底保存为 `output/<type>_<id>/content.txt`。
+Project files must be created via `write_file` with an explicit filename—no more `generated_N` files from body code blocks. Plain-text results still fall back to `output/<type>_<id>/content.txt`.
 
-## 当前支持的模型
+## Currently supported models
 
 - **Anthropic**: Fable 5 / Opus 5 / Sonnet 5 / Haiku 4.5
 - **OpenAI**: gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna
-- **智谱 GLM**: glm-5.2 / glm-5
+- **Zhipu GLM**: glm-5.2 / glm-5
 - **DeepSeek**: deepseek-v4-pro / deepseek-v4-flash
 - **Kimi Coding Plan**: `k3` / `k3-256k` / `kimi-for-coding` / `kimi-for-coding-highspeed`
-- **阿里 Qwen**: qwen3.8-max-preview / qwen3.7-max / qwen3.7-plus / qwen3.7-flash
+- **Alibaba Qwen**: qwen3.8-max-preview / qwen3.7-max / qwen3.7-plus / qwen3.7-flash
 - **MiniMax**: minimax-m3
-- **字节豆包**: doubao-seed（火山方舟 OpenAI 兼容）
-- **Google Gemini**: gemini-3.6-flash / gemini-3.5-flash-lite（OpenAI 兼容端点）
-- **本地模型**: Ollama / llama.cpp（见 `config/providers.yaml.example`）
-- **自定义 OpenAI / Anthropic 兼容服务**: 通过 `agent-setup` 配置
+- **ByteDance Doubao**: doubao-seed (Volcengine Ark OpenAI-compatible)
+- **Google Gemini**: gemini-3.6-flash / gemini-3.5-flash-lite (OpenAI-compatible endpoint)
+- **Local models**: Ollama / llama.cpp (see `config/providers.yaml.example`)
+- **Custom OpenAI / Anthropic-compatible services**: configure via `agent-setup`
 
-> 实际可用模型取决于 `config/providers.yaml` 中的配置。`src/models/catalog.py` 是内置模型模板的单一真值源，CLI 与 Web 预设均由目录生成；未逐项核实的条目元数据保持 `unverified`，价格仅为占位。
+> Actually available models depend on `config/providers.yaml`. `src/models/catalog.py` is the single source of truth for built-in model templates; CLI and Web presets are generated from the catalog. Unverified entries keep `unverified` metadata; prices are placeholders only.
 
-MAO 网关会为所有普通对话请求统一注入一段短的全局行为配置，覆盖主对话、规划、Worker 和 Reviewer。它针对 MAO 的工具、权限和验收流程整理，不是任何供应商网页端系统提示词的逐字复制；网页端提示词包含界面专属工具和产品上下文，不适合直接发送给 API。`ModelConfig.prompt_profile` 仅保留给未来的模型专属扩展。
+The MAO gateway injects a short global behavior profile into all ordinary chat requests—main chat, planning, Worker, and Reviewer. It is tailored to MAO’s tools, permissions, and acceptance flow, not a verbatim copy of any vendor web UI system prompt. Web UI prompts include UI-specific tools and product context and are not suitable to send to the API as-is. `ModelConfig.prompt_profile` is reserved for future model-specific extensions only.
 
-## 当前功能
+## Current features
 
-- [x] 可配置模型自动拆分子任务
-- [x] **场景感知编排**：小说类顺序生成，软件类先架构后并行开发
-- [x] **依赖任务输出注入**：下游任务自动获取前置任务输出内容
-- [x] 总指挥模型运行时动态切换
-- [x] 多模型并发执行
-- [x] 任务依赖 DAG 调度与失败级联
-- [x] Worker 多轮工具调用与工具权限校验
-- [x] 多层模型故障切换、健康冷却和 CLI/Web 通知
-- [x] Hooks、MCP stdio/SSE 适配器与本地 LLM Provider
-- [x] 代码块自动保存到 output 目录
-- [x] Provider 连接向导与连通性测试
-- [x] 模型别名与 Provider `model_map`
-- [x] **图形化模型连接配置 UI**（FastAPI + 浏览器界面）
-- [x] 常用 Provider 预设一键填充与扩展
-- [x] Provider 启用/禁用与模型池自动过滤
-- [x] API Key 本地 `.env` 存储，编辑时留空保持不变
-- [x] 连通性测试状态持久化，页面刷新后仍可见
-- [x] 多 key 轮询
-- [x] Token 计费和成本统计
-- [x] 失败重试与指数退避
-- [x] Windows 控制台 UTF-8 自动适配
-- [x] 无 Markdown 代码块时自动保存 `content.txt`
-- [x] 多轮会话持久化（YAML）
-- [x] 对话 Agent 工具循环（最多 5 轮）
-- [x] CLI 持续对话 REPL（`python run.py chat`）
-- [x] Web 对话页面（`/chat`）
-- [x] Web 项目文件树：懒加载目录、隐藏文件开关与受限文本预览
-- [x] **流式回答**：Web 与 CLI 均支持逐块输出（SSE）
-- [x] 工具循环场景下多轮流式拼接
+- [x] Configurable model automatic task splitting
+- [x] **Scenario-aware orchestration**: novels generate sequentially; software does architecture first, then parallel development
+- [x] **Dependency task output injection**: downstream tasks automatically receive prior task outputs
+- [x] Runtime Orchestrator model switching
+- [x] Multi-model concurrent execution
+- [x] Task dependency DAG scheduling and failure cascading
+- [x] Worker multi-round tool calls and tool permission checks
+- [x] Multi-layer model failover, health cooldown, and CLI/Web notifications
+- [x] Hooks, MCP stdio/SSE adapters, and local LLM providers
+- [x] Auto-save code blocks to the output directory
+- [x] Provider connection wizard and connectivity tests
+- [x] Model aliases and Provider `model_map`
+- [x] **Graphical model connection UI** (FastAPI + browser)
+- [x] Common provider preset one-click fill and extension
+- [x] Provider enable/disable with automatic model pool filtering
+- [x] API keys stored in local `.env`; leave blank on edit to keep unchanged
+- [x] Connectivity test status persisted across page refresh
+- [x] Multi-key rotation
+- [x] Token billing and cost statistics
+- [x] Failure retry with exponential backoff
+- [x] Windows console UTF-8 auto adaptation
+- [x] Auto-save `content.txt` when there are no Markdown code blocks
+- [x] Multi-turn session persistence (YAML)
+- [x] Chat agent tool loop (up to 5 rounds)
+- [x] CLI continuous chat REPL (`python run.py chat`)
+- [x] Web chat page (`/chat`)
+- [x] Web project file tree: lazy-loaded directories, hidden-file toggle, constrained text preview
+- [x] **Streaming answers**: Web and CLI both support chunked output (SSE)
+- [x] Multi-round stream concatenation under tool-loop scenarios
 
-## 运行测试
+## Running tests
 
-见 [TESTING.md](TESTING.md)。
+See [TESTING.md](TESTING.md).
 
-## 后续计划
+## Roadmap
 
-当前先按 [`docs/MAO-优化与后续开发规划.md`](docs/MAO-优化与后续开发规划.md) 收口文档、U4 边界、Provider 兼容性和真实用户验证，再进入后续功能开发。产品原则见 [`docs/MAO-产品方向与Beta路线图.md`](docs/MAO-产品方向与Beta路线图.md)，当前状态见 [`docs/项目进度与关键操作.md`](docs/项目进度与关键操作.md)。
+First close out docs, U4 boundaries, provider compatibility, and real-user validation per [`docs/MAO-optimization-and-follow-up-plan.md`](docs/MAO-optimization-and-follow-up-plan.md), then move into further feature work. Product principles: [`docs/MAO-product-direction-and-beta-roadmap.md`](docs/MAO-product-direction-and-beta-roadmap.md). Current status: [`docs/project-progress-and-key-operations.md`](docs/project-progress-and-key-operations.md).

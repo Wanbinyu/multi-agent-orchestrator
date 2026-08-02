@@ -11,14 +11,14 @@ Next target: `v0.2.0` entry conditions (external users, reproducible real benchm
 - Full application logging (`src/core/logging_setup.py`): `MAO_LOG_LEVEL` / `MAO_LOG_FILE` / `MAO_LOG_FORMAT=text|json`, stderr + optional file, automatic secret redaction.
 - Agent wall-clock turn timeout via `MAO_TURN_TIMEOUT_SECONDS` (default 900; `0` disables) with RunJournal decisions on timeout.
 - Shared retry policy (`src/core/retry_policy.py`): task retries prefer stable `error_code` / `ProviderError.retryable` over free-text matching; `TaskResult.error_code` persisted.
-- O4 external feedback channels: GitHub Issue templates for install and real-task reports, `docs/外部用户反馈指南.md`, offline paste templates, and `scripts/sanitize_feedback_text.py` to redact keys/tokens/home paths before posting.
+- O4 external feedback channels: GitHub Issue templates for install and real-task reports, `docs/external-user-feedback-guide.md`, offline paste templates, and `scripts/sanitize_feedback_text.py` to redact keys/tokens/home paths before posting.
 - Empty-directory first-run acceptance script (`scripts/first_run_acceptance.py`) and checklist under `docs/acceptance/`.
 
 ### Changed
 
 - Gateway logs provider retries/failover; dispatcher/worker log transient failures; Agent writes RunJournal checkpoints after each model/tool round.
 - One-shot `mao run` now supports `--output-format plain|json|streaming-json` for headless automation. JSON events cover plan, model usage, tools, commands, file changes, verification, approvals, usage totals, errors, and the final exit status.
-- Provider compatibility matrix (`docs/Provider兼容矩阵.md`) bound to `catalog.export_compatibility_matrix()` with contract tests.
+- Provider compatibility matrix (`docs/Provider-compatibility-matrix.md`) bound to `catalog.export_compatibility_matrix()` with contract tests.
 - CLI welcome mascot (cat on a ledge) shown at chat start; README features the same art at the top.
 - CLI bottom toolbar shows permission mode, per-turn and session token usage, cost, and a simple efficiency ratio (no reverse/white bar).
 - Web config UI: delete models from provider list and model pool; catalog one-click add and preset fill; advanced window/budget fields hidden for normal users.
@@ -49,7 +49,7 @@ Next target: `v0.2.0` entry conditions (external users, reproducible real benchm
 - Plugin manager discovers plugins via the standard `mao.plugins` entry-point group (no workspace scanning), gates them on explicit user enable state in `config/plugins.yaml` (default off), and loads each enabled plugin in its own try/except. A failed plugin is rolled back and reported as a diagnostic without blocking other plugins or a pluginless startup; `shutdown` unregisters each plugin's contributions.
 - `mao plugin list/doctor/enable/disable` CLI. `list` shows discovered plugins with enable state, capabilities, permissions and source; `doctor` dry-runs discovery and load into throwaway registries; `enable`/`disable` write `config/plugins.yaml`. Plugin loading is wired into CLI chat and Web startup alongside Hooks/MCP.
 - Example plugin `examples/plugins/mao_wordcount_plugin`: an independent installable package declaring a `mao.plugins` entry point, contributing a read-only `word_count` tool, validating discover -> enable -> load -> execute -> shutdown.
-- Web `GET /api/plugins` and a read-only "插件" tab in the chat rightbar expose plugin list, enable state, capabilities, permissions and load summary.
+- Web `GET /api/plugins` and a read-only "Plugins" tab in the chat rightbar expose plugin list, enable state, capabilities, permissions and load summary.
 - `ToolRegistry.unregister_tool/remove_source` and `HookRegistry.remove_pre/remove_post` so a failed or disabled plugin can be rolled back without affecting other contributions.
 
 ## [0.1.0-beta.5] - 2026-07-21

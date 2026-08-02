@@ -1,15 +1,15 @@
-# 历史文档归档
+# Historical Document Archive
 
-本目录保存已经完成、被新文档取代或仅用于追溯早期决策的资料。
+This directory holds materials that are finished, replaced by newer docs, or kept only to trace early decisions.
 
-归档文档不是当前实现和计划的真值。阅读时应结合目录中的版本说明，并优先查看：
+Archived documents are not the source of truth for current implementation or plans. When reading them, use the version notes in each directory and prefer:
 
-- [`../MAO-架构概览.md`](../MAO-架构概览.md)
-- [`../MAO-产品方向与Beta路线图.md`](../MAO-产品方向与Beta路线图.md)
-- [`completed-beta/参考项目-OpenCode.md`](completed-beta/参考项目-OpenCode.md)
+- [`../MAO-architecture-overview.md`](../MAO-architecture-overview.md)
+- [`../MAO-product-direction-and-beta-roadmap.md`](../MAO-product-direction-and-beta-roadmap.md)
+- [`completed-beta/reference-project-OpenCode.md`](completed-beta/reference-project-OpenCode.md)
 
-`archive/` 通过 `.gitattributes` 排除在 GitHub 发布源码归档之外，但保留在 Git 仓库中供维护者追溯。
+`archive/` is excluded from GitHub release source archives via `.gitattributes`, but remains in the Git repository for maintainer traceability.
 
-## 归档批次
+## Archive batches
 
-- [`v0.1-beta2/`](v0.1-beta2/)：公开 `v0.1.0-beta.2` 后归档的早期架构、Phase 6/7、Claude 对标、总进度和开源准备文档。
+- [`v0.1-beta2/`](v0.1-beta2/): Early architecture, Phase 6/7, Claude gap analysis, overall progress, and open-source prep docs archived after the public `v0.1.0-beta.2` release.

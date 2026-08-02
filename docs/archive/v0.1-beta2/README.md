@@ -1,20 +1,20 @@
-# v0.1-beta2 历史文档
+# v0.1-beta2 Historical Documents
 
-**归档日期**：2026-07-16
+**Archive date**: 2026-07-16
 
-这些文档支撑了 MAO 从 Provider 配置、工具生态、证据驱动工程到公开 Beta 的开发过程。核心设计仍有历史参考价值，但状态、命令、目录和测试数字已经部分过时，因此不再放在当前文档入口中。
+These documents supported MAO development from Provider configuration, the tool ecosystem, and evidence-driven engineering through the public Beta. Core designs still have historical reference value, but status, commands, directories, and test counts are partly outdated, so they are no longer listed at the current docs entry points.
 
-## 文件说明
+## File descriptions
 
-- `MAO-架构设计书.md`：早期模块设计和 Phase 1-6 实现快照，已由当前架构概览取代。
-- `Phase6-工具生态与外部集成计划.md`：工具、MCP、Hooks、项目树等阶段计划，大部分已完成。
-- `Phase7-证据驱动工程Agent计划.md`：Evidence、验证门和协作边界的原始设计，Phase 7.0-7.4 已完成。
-- `升级路线-对标Claude差异.md`：早期差距分析，多数可行项已经实现，剩余方向并入新路线图。
-- `项目开发进度与路线图.md`：Phase 1-7 的累计进度快照，已由 Beta 路线图取代。
-- `开源发布准备计划.md`：`v0.1.0-beta.1` 到 `beta.2` 的发布门和审计记录，公开发布后归档。
+- `MAO-architecture-design.md`: Early module design and Phase 1-6 implementation snapshot; replaced by the current architecture overview.
+- `Phase6-tool-ecosystem-and-external-integration-plan.md`: Stage plan for tools, MCP, Hooks, project tree, etc.; mostly completed.
+- `Phase7-evidence-driven-engineering-agent-plan.md`: Original design for Evidence, verification gates, and collaboration boundaries; Phase 7.0-7.4 completed.
+- `upgrade-roadmap-vs-Claude-gaps.md`: Early gap analysis; most feasible items implemented; remaining directions folded into the new roadmap.
+- `project-progress-and-roadmap.md`: Cumulative Phase 1-7 progress snapshot; replaced by the Beta roadmap.
+- `open-source-release-prep-plan.md`: Release gates and audit records from `v0.1.0-beta.1` through `beta.2`; archived after public release.
 
-当前文档：
+Current docs:
 
-- [`../../MAO-架构概览.md`](../../MAO-架构概览.md)
-- [`../../MAO-产品方向与Beta路线图.md`](../../MAO-产品方向与Beta路线图.md)
-- [`../completed-beta/参考项目-OpenCode.md`](../completed-beta/参考项目-OpenCode.md)
+- [`../../MAO-architecture-overview.md`](../../MAO-architecture-overview.md)
+- [`../../MAO-product-direction-and-beta-roadmap.md`](../../MAO-product-direction-and-beta-roadmap.md)
+- [`../completed-beta/reference-project-OpenCode.md`](../completed-beta/reference-project-OpenCode.md)

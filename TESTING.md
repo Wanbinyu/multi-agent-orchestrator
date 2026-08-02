@@ -1,82 +1,83 @@
-# 测试指南
+# Testing Guide
 
-## 环境要求
+## Requirements
 
 - Python 3.11+
-- 项目依赖：`pip install -r requirements.txt`
+- Project dependencies: `pip install -r requirements.txt`
 
-## 运行测试
+## Running tests
 
 ```bash
-# 运行全部测试
+# Run all tests
 python -m pytest
 
-# 运行单个文件
+# Run a single file
 python -m pytest tests/test_orchestrator.py
 
-# 详细输出
+# Verbose output
 python -m pytest -v
 
-# 显示 print 输出
+# Show print output
 python -m pytest -s
 
-# 生成覆盖率报告（需安装 pytest-cov）
+# Coverage report (requires pytest-cov)
 pip install pytest-cov
 python -m pytest --cov=src --cov-report=term-missing
 ```
 
-## 测试设计原则
+## Test design principles
 
-- **不发起真实 HTTP 请求**：Provider 层使用 `unittest.mock.MagicMock` 模拟。
-- **重试测试不等待**：mock `src.gateway.client.time.sleep` 以加速。
-- **文件系统测试隔离**：使用 pytest 内置 `tmp_path` fixture。
-- **CLI 测试使用 CliRunner**：调用 `typer.testing.CliRunner` 验证命令行为。
-- **中文断言**：错误信息保留中文原文，与代码实现保持一致。
+- **No real HTTP requests**: the Provider layer is mocked with `unittest.mock.MagicMock`.
+- **Retry tests do not wait**: mock `src.gateway.client.time.sleep` to speed them up.
+- **Filesystem tests are isolated**: use pytest’s built-in `tmp_path` fixture.
+- **CLI tests use CliRunner**: call `typer.testing.CliRunner` to verify command behavior.
+- **Chinese assertions**: error messages keep the original Chinese text so they match the implementation.
 
-## 测试结构
+## Test layout
 
-| 文件 | 覆盖范围 |
+| File | Coverage |
 |---|---|
-| `tests/test_orchestrator.py` | Orchestrator 任务拆分、JSON 解析、模型回退 |
-| `tests/test_gateway_client.py` | GatewayClient 配置加载、重试、计费、主模型 |
-| `tests/test_worker_e2e.py` | Worker 执行、文件写入、工具调用、异常处理 |
-| `tests/test_run_cli.py` | CLI 命令、帮助、默认子命令注入 |
-| `tests/test_file_tools.py` | 代码块解析、文件名推断、文件写入/追加 |
-| `tests/test_dispatcher.py` | DAG 并行、依赖顺序、级联失败 |
-| `tests/test_dispatcher_edge_cases.py` | 空任务、循环依赖、缺失依赖 |
-| `tests/test_model_router.py` | 模型路由解析 |
-| `tests/test_provider_model_map.py` | Provider model_map 映射 |
-| `tests/test_provider_rotation.py` | API key 轮询、map_model_id 回退 |
-| `tests/test_reviewer.py` | Reviewer JSON 解析 |
-| `tests/test_setup_wizard.py` | 配置向导 helper 函数 |
-| `tests/test_worker.py` | Worker 工具指令与 tool_calls 处理 |
-| `tests/test_worker_tools.py` | read_file / run_command 直接测试 |
-| `tests/test_connection_test.py` | Provider 连通性测试 |
-| `tests/test_model_catalog.py` | 内置模型目录 |
+| `tests/test_orchestrator.py` | Orchestrator task splitting, JSON parsing, model fallback |
+| `tests/test_gateway_client.py` | GatewayClient config load, retries, billing, main model |
+| `tests/test_worker_e2e.py` | Worker execution, file writes, tool calls, exception handling |
+| `tests/test_run_cli.py` | CLI commands, help, default subcommand injection |
+| `tests/test_file_tools.py` | Code-block parsing, filename inference, file write/append |
+| `tests/test_dispatcher.py` | DAG parallelism, dependency order, cascade failure |
+| `tests/test_dispatcher_edge_cases.py` | Empty tasks, cyclic dependencies, missing dependencies |
+| `tests/test_model_router.py` | Model routing resolution |
+| `tests/test_provider_model_map.py` | Provider model_map mapping |
+| `tests/test_provider_rotation.py` | API key rotation, map_model_id fallback |
+| `tests/test_reviewer.py` | Reviewer JSON parsing |
+| `tests/test_setup_wizard.py` | Setup wizard helper functions |
+| `tests/test_worker.py` | Worker tool instructions and tool_calls handling |
+| `tests/test_worker_tools.py` | Direct tests for read_file / run_command |
+| `tests/test_connection_test.py` | Provider connectivity tests |
+| `tests/test_model_catalog.py` | Built-in model catalog |
 
-## 添加新测试
+## Adding new tests
 
-1. 优先使用模块内 helper 函数创建输入数据，不依赖全局 fixtures。
-2. 需要网关的地方使用 `MagicMock(spec=GatewayClient)`。
-3. 需要配置文件的地方写入 `tmp_path`。
-4. 断言错误信息时保留中文原文。
+1. Prefer in-module helper functions to build inputs; avoid depending on global fixtures.
+2. Where a gateway is needed, use `MagicMock(spec=GatewayClient)`.
+3. Where config files are needed, write them under `tmp_path`.
+4. When asserting error messages, keep the original Chinese text.
 
-## 本地验证
+## Local verification
 
 ```bash
 cd E:\multi-agent-orchestrator
 
-# 全量测试
+# Full suite
 python -m pytest -q
 
-# 验证 CLI 帮助
+# Verify CLI help
 python run.py --help
 python run.py run --help
 python run.py setup --help
 python run.py agent-setup --help
 ```
 
-预期结果：
-- 所有测试通过
-- 无真实 API 调用
-- CLI 帮助正常显示
+Expected results:
+
+- All tests pass
+- No real API calls
+- CLI help displays normally
