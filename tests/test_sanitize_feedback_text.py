@@ -5,15 +5,17 @@ from scripts.sanitize_feedback_text import sanitize
 
 
 def test_sanitize_redacts_common_api_keys_and_bearer():
+    # Intentionally fake samples shaped like real tokens (sanitizer + gitleaks allowlist).
+    # gitleaks:allow  # path allowlisted in .gitleaks.toml for historical fixtures too
     raw = (
-        "key=sk-48e8eb175496d847ce479a5a45719c89 "
-        "ark=ark-f1626370-b4f0-40a4-a993-eca26bf451c0 "
-        "hdr=Bearer abcdefghijklmnop"
+        "key=sk-TESTONLY_not_a_real_key_48e8eb175496 "
+        "ark=ark-TESTONLY-not-real-f1626370-b4f0 "
+        "hdr=Bearer TESTONLY_token_abcdefghijklmnop"
     )
     out = sanitize(raw)
-    assert "sk-48e8" not in out
-    assert "ark-f162" not in out
-    assert "abcdefghijklmnop" not in out
+    assert "sk-TESTONLY" not in out
+    assert "ark-TESTONLY" not in out
+    assert "TESTONLY_token_abcdefghijklmnop" not in out
     assert "sk-***" in out
     assert "ark-***" in out
     assert "Bearer ***" in out

@@ -113,4 +113,5 @@ jobs:
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version
       - name: Secret scan
-        run: gitleaks git --verbose --redact .
+        # Config extends gitleaks defaults and allowlists sanitizer test fixtures only.
+        run: gitleaks git --verbose --redact --config .gitleaks.toml .

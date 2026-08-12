@@ -1,0 +1,13 @@
+# Gitleaks config for MAO.
+# Extend defaults so real secrets still fail CI; only allow intentional test fixtures.
+
+title = "MAO gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Feedback sanitizer unit tests use intentionally fake sk-/ark- samples"
+paths = [
+  '''(^|/)tests/test_sanitize_feedback_text\.py$''',
+]
