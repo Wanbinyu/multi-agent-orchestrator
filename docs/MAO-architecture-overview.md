@@ -185,7 +185,11 @@ Key modules:
 
 - `src/tools/registry.py`
 - `src/tools/worker_tools.py`
+- `src/tools/git_tools.py`
 - `src/tools/search_tools.py`
+- `src/core/workset.py`
+- `src/core/repo_nav.py`
+- `src/core/checkpoint.py`
 - `src/tools/web_tools.py`
 - `src/tools/mcp_adapter.py`
 - `src/tools/extensions.py`
@@ -206,8 +210,10 @@ Key modules:
 - `MemoryStore` stores stable project facts, separated from task checkpoints.
 - `ProjectIndexer` v2 persists directory tree, file summaries, and SHA-256 by project root; zero content reads when mtime/size are unchanged; changed files use hash to decide whether to rebuild summaries. `project_tree` and `search_project_files` prefer incremental refresh; corrupt or cross-root indexes rebuild automatically.
 - `ContextBudgetManager` computes budget from model window, output reserve, and safety ratio.
-- `ContextCompactor` forms L0 old-summary artifact references, L1 structured summary, and L2 recent full text when thresholds are reached; plain-text dedup does not touch native tool blocks; Schema/entity quality and related token metrics enter compaction events. The current RunJournal fixed checkpoint is saved independently of the summary.
+- `ContextCompactor` forms L0 old-summary artifact references, L1 structured summary, and L2 recent full text when thresholds are reached; when over budget it prefers summarizing old chitchat while keeping failure logs and workset paths in L2. Plain-text dedup does not touch native tool blocks; Schema/entity quality and related token metrics enter compaction events. The current RunJournal fixed checkpoint is saved independently of the summary.
+- Each turn builds a bounded workset from error stacks, recent reads, grep hits, and writes; it is stored in RunJournal `metrics.workset` and injected into the system prompt. `repo_map` is Top-K navigation only and cannot replace `read_file`.
 - `DeliveryReportBuilder` aggregates session/today delivery facts and token efficiency from all local RunJournal entries, without depending on compacted messages or calling a Provider.
+- `WorkspaceCheckpointStore` copies workspace files beside the session and never writes user `.git`. By default it snapshots once before the first `write_file`/`edit_file` of a run (`/checkpoint auto off` disables). Sessions keep a bounded count/size and drop the oldest. Restore requires preview plus explicit confirm; uncommitted edits are refused unless `overwrite-dirty`.
 
 Unknown models continue to use a conservative budget and mark the source as unverified; MAO does not guess the real context window behind Coding Plan packages.
 

@@ -12,6 +12,7 @@ This directory holds the current architecture, product direction, optimization p
 - [`Plugin-API-compatibility-policy.md`](Plugin-API-compatibility-policy.md): Plugin API version semantics, compatibility checks, and evolution commitments.
 - [`context-extension-and-long-task-stability-plan.md`](context-extension-and-long-task-stability-plan.md): Layered compaction, project indexing, and long-task benchmark work.
 - [`open-source-coding-agent-reference-plan.md`](open-source-coding-agent-reference-plan.md): License audits, absorbed contracts, and phased integration order for Grok Build, Codex, OpenCode, Aider, Cline, and related projects.
+- [`P0-缩小对Claude-Code日常体感差距清单.md`](P0-缩小对Claude-Code日常体感差距清单.md): Ten daily-path P0 items vs Claude Code (single-Agent loop, bounded fix, Git/commands, context and navigation, checkpoints, default no extra collaboration, daily fixtures, CLI). No IDE/desktop/enterprise items.
 
 Completed Beta version plans, execution checklists, old comparisons, and real-task retrospectives live under [`archive/completed-beta/`](archive/completed-beta/). They are for historical traceability only and are not current status or new-task entry points.
 

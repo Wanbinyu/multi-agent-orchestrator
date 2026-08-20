@@ -2,7 +2,7 @@
 
 **Purpose**: Single status entry point when continuing development across devices and tools
 
-**Last updated**: 2026-07-25
+**Last updated**: 2026-08-19
 
 ## 1. Current status
 
@@ -12,10 +12,10 @@
 | Repository | Public: <https://github.com/Wanbinyu/multi-agent-orchestrator> |
 | Current branch | `main` |
 | B3.1 starting commit | `67ac9a9` |
-| Automated test baseline | `868 passed, 1 warning` (local related suites continue to grow) |
+| Automated test baseline | `1029 passed` (2026-08-19 local full suite, including W5 write-ahead checkpoints/prune) |
 | CI | beta.7 commit `49267ba` passed Windows/Ubuntu × Python 3.11/3.12, pip-audit, and gitleaks ([run 29881111078](https://github.com/Wanbinyu/multi-agent-orchestrator/actions/runs/29881111078)) |
-| Current development stage | `v0.1.0-beta.7` released; O1–O3 and UX consolidation (docs, U4 schema, Provider matrix, hide budget fields on config page, default 200K context, CLI cat branding and bottom token bar) |
-| Current top task | Timeout/retry/status/full logging completed (`logging_setup`, `retry_policy`, `MAO_TURN_TIMEOUT_SECONDS`, Journal checkpoint); next can follow the engineering main line or O4 external collection |
+| Current development stage | `v0.1.0-beta.7` released; daily-UX P0 list W1–W5 landed |
+| Current top task | O4 external users and real Provider authorization; list-level success still needs an authorized rerun of daily_ux fixtures |
 
 ## 2. Completed highlights
 
@@ -80,6 +80,11 @@
 - P0 audit (v0.2.0 criterion #2): found 1 P0—`run_command` allowed `python -c`/`node -e` inline code execution (prefix allowlist + no inline check; could read `.env`/write out of bounds/bypass permissions), fixed in `74e1829` (`_has_inline_interpreter_code` preflight; reject `python -c` only without `-m`, so `python -m pytest -c config` is not false-rejected). Other four categories (secrets/out-of-bounds/false completion/plugin overreach) SOUND. Full regression `856 passed, 1 warning`, CI fully green.
 - `v0.1.0-beta.7` security patch: version `0.1.0b7`; contains only `run_command` P0 fix (no feature change); Release Notes, CHANGELOG, README, status docs updated. Tag `v0.1.0-beta.7` (`49267ba`) and GitHub pre-release confirmed and created by owner.
 - O3 Provider compatibility matrix (2026-07-25): added [`Provider-compatibility-matrix.md`](Provider-compatibility-matrix.md); `catalog.export_compatibility_matrix()` and `tests/test_provider_matrix.py` bind catalog/routing/error codes; `SECURITY.md`, README, QUICKSTART, plugin guide, local LLM, `providers.yaml.example` unify “permissions ≠ sandbox / unverified does not participate in upgrade” wording.
+- W1 daily UX (2026-08-19): P0-8 default single Agent (no LLM/keyword collaboration pre-screen, `/collab` + Web switch); P0-1/P0-2 bounded-fix protocol in the main loop; `edit_file` failures include line context; over-limit stays blocked.
+- W2 (2026-08-19): `git_diff`/`git_log`/`git_commit`; `run_command` rejects git push/reset/commit; discovered scripts can run as-is plus `command_allowlist.extra_prefixes`; CLI `/status` and Ctrl+C interrupt no longer leave Journal hanging `running`.
+- W3 (2026-08-19): error stacks/reads/grep enter the turn workset; compaction prefers dropping chitchat and keeps failure logs; `repo_map` is Top-K navigation and must be followed by read.
+- W4 (2026-08-19): session `/checkpoint` (never writes user Git); `benchmarks/daily_ux_v1` ten synthetic contracts gated by `tests/test_daily_ux.py`.
+- W5 (2026-08-19): write-ahead auto snapshot (once per run, `/checkpoint auto off` disables) plus capacity caps and `/checkpoint prune`; restore still requires preview + confirm.
 
 ## 3. Current unfinished priorities
 

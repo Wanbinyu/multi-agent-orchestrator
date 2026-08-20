@@ -60,6 +60,12 @@ python scripts/benchmark_engineering.py
 
 The public suite must cover Q&A, diagnosis, small change, build, review, and migration. `fixture-fixed-single`, `fixture-auto-route`, and `fixture-multi-model` each run three times for 54 results total; top-level `passed=true`, `provider_calls=0`, and all stability entries must be stable. Data type in JSON/Markdown is `synthetic_contract` and cannot be used for real model quality claims.
 
+Daily UX fixtures and workspace checkpoints:
+
+```bash
+python -m pytest -q tests/test_daily_ux.py tests/test_checkpoint.py
+```
+
 B5.4 non-interactive and Harbor adapter contract:
 
 ```bash

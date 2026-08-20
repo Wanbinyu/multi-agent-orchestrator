@@ -133,5 +133,10 @@ Any follow-up change must leave this record:
 - [x] Update the context plan, Provider compatibility matrix, and security boundary wording (O3).
 - [x] Run full tests, distribution acceptance, and Markdown link checks (2026-07-28: `912 passed, 1 warning`; distribution acceptance and local link checks for 43 living Markdown files passed).
 - [x] O4 redacted feedback templates and channels (Issue templates, guide, sanitize script, 2026-07-28).
+- [x] W1 daily UX: default single Agent, bounded-fix protocol, `/collab` (P0-1/P0-2/P0-8, 2026-08-19).
+- [x] W2: Git tools, command discovery/allowlist, `/status` and interrupt handling (P0-3/P0-4/P0-10, 2026-08-19).
+- [x] W3: workset loading and `repo_map` (P0-5/P0-6, 2026-08-19).
+- [x] W4: workspace checkpoints and daily_ux fixtures (P0-7/P0-9, 2026-08-19).
+- [x] W5: write-ahead auto snapshot and checkpoint capacity/prune (U5 wrap-up, 2026-08-19).
 - [ ] Wait for external user feedback and new real Provider authorization; do not auto-resume paid evaluation (O4 collection phase).
 - [ ] After O1–O4 complete, create separate decision documents for subsequent product directions.
