@@ -22,6 +22,7 @@ def test_edit_file_not_found(tmp_path):
     result = edit_file("a.txt", "missing", "x", base_dir=str(tmp_path))
     assert result.success is False
     assert "未在文件中找到" in result.error
+    assert "1: hello" in result.error
 
 
 def test_edit_file_not_unique(tmp_path):
@@ -30,6 +31,8 @@ def test_edit_file_not_unique(tmp_path):
     result = edit_file("a.txt", "dup", "x", base_dir=str(tmp_path))
     assert result.success is False
     assert "不唯一" in result.error
+    assert "1: dup" in result.error
+    assert "2: dup" in result.error
 
 
 def test_edit_file_empty_old_string(tmp_path):

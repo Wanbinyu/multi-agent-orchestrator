@@ -241,6 +241,9 @@ Type `/` in chat to show command candidates and descriptions; keep typing letter
 | `/plan revise <feedback>` | Record revision feedback and generate a new plan version |
 | `/plan approve` | Approve the plan and hand off to the normal multi-model execution chain |
 | `/plan cancel` | Cancel Plan mode |
+| `/collab <auto\|single\|multi>` | Default single Agent; `multi` forces collaboration; `auto` only collaborates on deep change/build |
+| `/status` | Local session snapshot: permission, model, depth, collaboration, tokens, last verification, recovery |
+| `/checkpoint` | Create/list/preview/restore/prune a workspace snapshot that never writes `.git`; `/checkpoint auto off` disables write-ahead snapshots |
 | `/tools` | Show currently available tools |
 | `/exit` | Exit |
 
@@ -251,6 +254,10 @@ Assistant replies stream **chunk by chunk in a bounded temporary region**, then 
 The agent system prompt injects the current model alias, upstream request model ID, local context budget, and auto-compaction thresholds. Config name `anthropic` means a compatible protocol, not that the actual model is Claude. Use `/context` for live estimates; do not let the model guess runtime configuration.
 
 Each request is classified as Q&A, explanation, diagnosis, change, build, review, plan, or monitoring; type, risk, and write status go into the engineering log. `auto` opens write and command tools for unclassified or writable tasks; `approve` auto-reads but requires confirmation for each write or command; `readonly` auto-reads and rejects writes and commands. Explicit boundaries such as “read-only, do not modify, plan only” always take priority in every mode—the classifier does not override a user’s no-modify requirement because of `auto`. If real tool behavior diverges from the initial classification, RunJournal keeps the original permission boundary while computing a stricter effective type and verification gate from actual project writes; auto-archived `response.md` does not count as a project change.
+
+`/checkpoint` stores a file snapshot beside the session, not in your Git history. The first write in a run creates one automatic snapshot unless you run `/checkpoint auto off`. Preview the diff, then `/checkpoint restore <id> confirm`. Uncommitted files are not overwritten unless you also pass `overwrite-dirty`. Old snapshots are pruned by count and size (`/checkpoint prune`).
+
+Small questions, diagnoses, and ordinary edits stay on the single-Agent path. Multi-model collaboration starts only for `deep` change/build work, after `/collab multi`, or when `config/workers.yaml` sets `collaboration.force: true`. `/collab single` keeps Orchestrator off. Writes must be followed by real tests; a failed verification can be patched at most three times (`MAO_MAX_FIX_ROUNDS`) and then stays `blocked`.
 
 Execution depth defaults to `auto`; you can persist `/depth fast`, `/depth standard`, `/depth deep`, or `/depth auto` in the CLI. `fast` fits simple Q&A and clear small tasks and disables Workers; `standard` covers routine diagnosis, changes, and review; `deep` covers builds, high risk, and multi-model collaboration. User choice outranks automatic suggestion; choosing `fast` for a small change still keeps the `standard` verification gate, and high-risk work cannot drop to shallow execution. Actual depth, reason, and budget are written to RunJournal.
 

@@ -147,13 +147,27 @@ class ToolEvidenceRecorder:
         if tool_name in {"project_tree", "list_dir"}:
             action = "已获取" if result.success else "获取失败"
             return "structure", f"{action}项目结构：{path or '.'}"
-        if tool_name == "git_status":
+        if tool_name in {"git_status", "git_diff", "git_log"}:
+            labels = {
+                "git_status": "Git 工作区状态",
+                "git_diff": "Git diff",
+                "git_log": "Git 提交历史",
+            }
             action = "已检查" if result.success else "检查失败"
-            return "git", f"{action} Git 工作区状态：{path or '.'}"
+            return "git", f"{action}{labels[tool_name]}：{path or '.'}"
+        if tool_name == "git_commit":
+            files = result.metadata.get("files") or []
+            message = str(result.metadata.get("message") or "").strip()
+            if result.success:
+                claim = f"已提交 {len(files)} 个文件"
+                if message:
+                    claim += f"：{message}"
+                return "change", claim
+            return "git", f"提交失败：{result.error or message or path}"
         if tool_name == "read_file":
             action = "已读取" if result.success else "读取失败"
             return "file", f"{action}文件：{path}"
-        if tool_name in {"glob_files", "grep_content"}:
+        if tool_name in {"glob_files", "grep_content", "search_project_files", "repo_map"}:
             action = "已完成" if result.success else "执行失败"
             return "search", f"{action}代码检索：{path or '.'}"
         if (
@@ -191,7 +205,13 @@ class ToolEvidenceRecorder:
         recon = journal.reconnaissance
         if cached:
             return False
-        if not recon.root and tool_name in {"project_tree", "list_dir", "git_status"}:
+        if not recon.root and tool_name in {
+            "project_tree",
+            "list_dir",
+            "git_status",
+            "git_diff",
+            "git_log",
+        }:
             recon.root = path or "."
         if skipped:
             recon.mark_skipped(path or tool_name)
@@ -202,7 +222,7 @@ class ToolEvidenceRecorder:
         if tool_name in {"project_tree", "list_dir"}:
             recon.observe("structure")
             return True
-        if tool_name == "git_status":
+        if tool_name in {"git_status", "git_diff", "git_log", "git_commit"}:
             recon.observe("git")
             return True
         if tool_name == "run_command" and is_test_command(command):

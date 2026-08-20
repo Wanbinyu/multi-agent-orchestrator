@@ -8,6 +8,7 @@ Next target: `v0.2.0` entry conditions (external users, reproducible real benchm
 
 ### Added
 
+- Daily coding-agent UX (P0 W1–W5): default single-Agent path with `/collab`, bounded verify-then-fix, `git_diff`/`git_log`/`git_commit`, command allowlist extras, `/status` and interrupt handling, workset + `repo_map`, workspace `/checkpoint` (never writes user Git; auto snapshot before first write; prune/capacity caps), and `benchmarks/daily_ux_v1` synthetic contracts D01–D10.
 - Full application logging (`src/core/logging_setup.py`): `MAO_LOG_LEVEL` / `MAO_LOG_FILE` / `MAO_LOG_FORMAT=text|json`, stderr + optional file, automatic secret redaction.
 - Agent wall-clock turn timeout via `MAO_TURN_TIMEOUT_SECONDS` (default 900; `0` disables) with RunJournal decisions on timeout.
 - Shared retry policy (`src/core/retry_policy.py`): task retries prefer stable `error_code` / `ProviderError.retryable` over free-text matching; `TaskResult.error_code` persisted.

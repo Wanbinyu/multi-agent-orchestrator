@@ -14,10 +14,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from src.core.compactor import ContextCompactor
+from src.core.workset import TurnWorkset, build_turn_workset
 from src.core.context_budget import ContextBudget, ContextBudgetManager
 from src.core.logging_setup import get_logger
 from src.core.turn_timeout import TurnDeadline, TurnTimeoutError
 from src.core.engineering import (
+    BoundedFixState,
+    CollaborationDecision,
     CompletionAuditor,
     Evidence,
     ExecutionDepthDecision,
@@ -30,7 +33,11 @@ from src.core.engineering import (
     TaskIntentClassifier,
     ToolEvidenceRecorder,
     VerificationTracker,
+    decide_collaboration,
+    default_max_fix_rounds,
     file_mutation_metadata,
+    load_collaboration_force,
+    observe_bounded_fix,
 )
 from src.core.memory import MemoryContextBuilder, MemoryStore
 from src.core.native_content import (
@@ -80,10 +87,12 @@ COLLABORATION_HEARTBEAT_SECONDS = 2.0
 TOOL_RULES = """规则：
 - 只能使用上面这种 Markdown 代码块调用工具，不要输出原生 JSON tool_use 或 function_call。
 - 如果用户请求需要读取、写入或执行命令，请直接输出对应的工具代码块。
-- 当用户要求分析、检查或审阅项目时，先调用 project_tree 获取精简结构，再调用 git_status 检查版本状态；search_project_files 必须沿用同一个项目根 path。随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
+- 当用户要求分析、检查或审阅项目时，先调用 project_tree 获取精简结构，再调用 git_status / git_diff 检查版本状态；定位文件用 repo_map 或 search_project_files（仅导航证据，必须再 read_file）。search_project_files 必须沿用同一个项目根 path。随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git 命令。
+- 提交变更使用 git_commit，必须提供 files 或 staged_only=true；禁止 git push / reset / amend，也不要用 run_command 提交。
 - 项目判断必须以工具返回的文件、检索、Git 或测试结果为证据；工具没有确认的细节标记为“待确认”，禁止把推测写成事实。
 - 修改任务必须运行与风险匹配的真实验证：普通修改至少覆盖针对性测试和相邻模块回归；高风险构建还要有 integration/e2e、全量测试和 smoke 验证。缺少任何一层时必须说明“验证未闭环”，不能宣称已完成。
-- 执行项目命令前先用 discover_project_commands 读取真实脚本；run_command 必须把工作目录放在 cwd 参数，禁止使用 cd &&、管道、重定向或 head。参数/权限失败后最多修正一次，仍失败就停止并报告。
+- 写入或编辑后必须立刻用真实测试命令验证；验证失败后只做最小补丁再验证，最多 3 轮。达到上限必须停止并报告剩余风险，禁止继续乱改或宣称完成。
+- 执行项目命令前先用 discover_project_commands 读取真实脚本，优先用返回的 suggested_run 或 commands[].run；run_command 必须把工作目录放在 cwd 参数，禁止使用 cd &&、管道、重定向、bash -c 或 head。参数/权限失败后最多修正一次，仍失败就停止并报告。
 - 当你说要“查看”、“读取”或“探查”某个文件时，必须在同一轮回复中立即调用 read_file 工具，不能只口头描述而不调用工具。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块（正文代码块不会被保存为文件）。每个文件一次 write_file，path 用有意义的文件名。
 - 如果用户指定了绝对路径（如 G:\\MAO_test\\index.html），直接使用该路径；如果只给了文件夹（如 G:\\MAO_test），请在该文件夹下创建合理的文件名，例如 index.html、login.js、style.css。
@@ -100,10 +109,12 @@ TOOL_RULES = """规则：
 # 原生 tool_use 模式下的规则（工具定义由 tools= 参数提供，无需 Markdown 说明）
 TOOL_RULES_NATIVE = """规则：
 - 你可以通过原生工具调用（tool_use）使用提供的工具完成用户任务。
-- 分析、检查或审阅项目时，先调用 project_tree，再调用 git_status；search_project_files 必须沿用同一个项目根 path。随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git status。
+- 分析、检查或审阅项目时，先调用 project_tree，再调用 git_status / git_diff；定位文件用 repo_map 或 search_project_files（仅导航证据，必须再 read_file）。search_project_files 必须沿用同一个项目根 path。随后只读取文档、依赖、入口、核心模块和测试文件，默认最多读取 12 个不同文件，禁止无差别读取全部文件，也不要用 run_command 跑 dir/ls 或 git 命令。
+- 提交变更使用 git_commit，必须提供 files 或 staged_only=true；禁止 git push / reset / amend。
 - 项目判断必须以工具返回的文件、检索、Git 或测试结果为证据；未由工具确认的细节标记为“待确认”，禁止把推测写成事实。
 - 修改任务必须运行与风险匹配的真实验证：普通修改至少覆盖针对性测试和相邻模块回归；高风险构建还要有 integration/e2e、全量测试和 smoke 验证。缺少任何一层时必须说明“验证未闭环”，不能宣称已完成。
-- 执行项目命令前先调用 discover_project_commands；run_command 使用独立 cwd，禁止 cd &&、管道、重定向或 head。参数/权限失败后最多修正一次。
+- 写入或编辑后必须立刻用真实测试命令验证；验证失败后只做最小补丁再验证，最多 3 轮。达到上限必须停止并报告剩余风险，禁止继续乱改或宣称完成。
+- 执行项目命令前先调用 discover_project_commands，优先用 suggested_run；run_command 使用独立 cwd，禁止 cd &&、管道、重定向、bash -c 或 head。参数/权限失败后最多修正一次。
 - 当你说要“查看”或“读取”某个文件时，必须立即调用 read_file，不能只口头描述。
 - 当用户要求生成、创建或编写文件/页面/代码时，**必须调用 write_file 工具输出每个文件**，禁止只在回复正文里写代码块。
 - 如果用户指定了绝对路径，直接使用该路径；如果只给了文件夹，请在该文件夹下创建合理的文件名。
@@ -116,29 +127,6 @@ TOOL_RULES_NATIVE = """规则：
 - 如果不需要工具，直接回复用户即可。
 """
 
-
-COLLABORATION_DECISION_PROMPT = """你是任务复杂度判断器。请判断用户请求是否需要拆分成多个子任务，并由多个不同专长的 AI 模型协作完成。
-
-只需要回答一个 JSON 对象，不要解释：
-{"collaborate": true}
-或
-{"collaborate": false}
-
-判断标准：
-- 如果请求涉及“开发一个功能/系统/页面/API/前后端/多步骤实现”，回答 true。
-- 如果只是闲聊、简单问答、解释概念、读取或修改单个文件，回答 false。
-"""
-
-
-# 明确的项目/多步骤任务关键字：命中则直接走协作，不依赖 LLM 判断（避免漏判）
-_COLLABORATION_KEYWORDS = (
-    "做一个项目", "做一个系统", "做一个应用", "做一个网站",
-    "做一个前后端", "做一个全栈", "做一个完整",
-    "开发一个项目", "开发一个系统", "开发一个应用", "开发一个网站",
-    "实现一个项目", "实现一个系统", "实现一个应用",
-    "前后端交互", "前后端项目", "全栈项目", "综合起来做", "综合做一个",
-    "立项", "多步骤实现", "多页面",
-)
 
 _ANALYSIS_READ_FILE_LIMIT = 12
 _ANALYSIS_FINAL_CHAR_LIMIT = 6000
@@ -206,6 +194,7 @@ class Agent:
         intent_classifier: TaskIntentClassifier | None = None,
         project_rule_resolver: ProjectRuleResolver | None = None,
         permission_rule_engine: PermissionRuleEngine | None = None,
+        max_fix_rounds: int | None = None,
     ):
         from src.core.context_budget import DEFAULT_SAFE_CONTEXT_TOKENS
 
@@ -228,6 +217,7 @@ class Agent:
         self._permission_results: dict[str, bool] = {}
         self._permission_loops: dict[str, asyncio.AbstractEventLoop] = {}
         self._permission_lock = threading.Lock()
+        self._checkpoint_lock = threading.Lock()
         self._cancel_event = threading.Event()
         self._native_tools_cache: list[dict[str, Any]] | None = None
         self._native_tools_computed = False
@@ -245,6 +235,10 @@ class Agent:
         self.verification_tracker = VerificationTracker()
         self.completion_auditor = CompletionAuditor()
         self.mutation_escalator = MutationRiskEscalator(self.session.output_dir)
+        self.max_fix_rounds = (
+            max_fix_rounds if max_fix_rounds is not None else default_max_fix_rounds()
+        )
+        self._cached_collaboration_force: bool | None = None
         self._active_run_journal: RunJournal | None = None
         self.recovery_manager = SessionRecoveryManager(session, self.journal_store)
         self._active_recovery_checkpoint = None
@@ -266,6 +260,19 @@ class Agent:
                 loop.call_soon_threadsafe(event.set)
             except RuntimeError:
                 continue
+
+    def interrupt_turn(self, reason: str = "用户中断本轮") -> dict[str, Any] | None:
+        """Mark the live run interrupted so the journal does not stay running."""
+        self.cancel()
+        journal = self._active_run_journal
+        if journal is None or journal.status != "running":
+            return None
+        journal.metrics["interrupted"] = True
+        return self._finish_engineering_run(
+            journal,
+            "blocked",
+            residual_risks=[reason],
+        )
 
     def _claim_recovery_checkpoint(self, journal: RunJournal) -> None:
         checkpoint = self.recovery_manager.claim_checkpoint(journal.run_id)
@@ -333,6 +340,11 @@ class Agent:
         journal.metrics["confirmed_facts"] = list(dict.fromkeys(confirmed_facts))
         journal.metrics["approval_mode"] = self.approval_mode
         journal.metrics["collaboration_mode"] = self.session.collaboration_mode
+        fix_state = BoundedFixState(max_rounds=self.max_fix_rounds)
+        journal.metrics["bounded_fix"] = fix_state.model_dump()
+        journal.metrics["fix_round"] = 0
+        self._record_collaboration_decision(journal)
+        self._refresh_workset(journal, user_input)
         if self._active_project_rules.sources:
             journal.decisions.append(
                 f"加载 {len(self._active_project_rules.sources)} 个项目规则文件，"
@@ -360,6 +372,13 @@ class Agent:
         audit = self.completion_auditor.audit(journal, status)
         resolved_status = status
         resolved_risks = list(residual_risks or [])
+        fix = journal.metrics.get("bounded_fix") or {}
+        if status == "completed" and fix.get("status") == "blocked":
+            resolved_status = "blocked"
+            resolved_risks.append(str(fix.get("reason") or "验证失败修复已达上限"))
+        if status == "completed" and fix.get("status") == "cancelled":
+            resolved_status = "blocked"
+            resolved_risks.append("用户取消了有界修复")
         if status == "completed" and not audit.can_complete:
             resolved_status = "blocked"
             audit_detail = [*audit.missing_checks, *audit.failed_checks]
@@ -401,6 +420,15 @@ class Agent:
             notice = "实验对抗测试发现反例，本轮结果未标记为完成"
             if findings:
                 notice += f"：{'、'.join(findings)}"
+            if notice in content:
+                return content
+            return f"{content.rstrip()}\n\n{notice}。".strip()
+        fix = (engineering.get("metrics") or {}).get("bounded_fix", {}) or {}
+        if engineering.get("status") == "blocked" and fix.get("status") == "blocked":
+            notice = (
+                f"有界修复已达 {fix.get('max_rounds', 3)} 轮上限，"
+                "本轮结果未标记为完成"
+            )
             if notice in content:
                 return content
             return f"{content.rstrip()}\n\n{notice}。".strip()
@@ -506,9 +534,19 @@ class Agent:
         )
         mutation_changed = self.mutation_escalator.observe(journal)
         depth_changed = self._refresh_execution_depth(journal)
-        changed = (
-            evidence_changed or verification_changed or mutation_changed or depth_changed
+        fix_changed = self._observe_bounded_fix(
+            journal, tool_name, params, result, skipped=skipped
         )
+        changed = (
+            evidence_changed
+            or verification_changed
+            or mutation_changed
+            or depth_changed
+            or fix_changed
+        )
+        if journal.objective:
+            workset_changed = self._refresh_workset(journal, journal.objective)
+            changed = changed or workset_changed
         if changed:
             self.journal_store.save(journal)
         return changed
@@ -812,6 +850,101 @@ class Agent:
         })
         return status
 
+    def get_session_status(self) -> dict[str, Any]:
+        """Local snapshot for `/status`: no model call, no tools."""
+        context = self.get_context_status()
+        latest = None
+        try:
+            latest = self.journal_store.latest()
+        except Exception:
+            latest = None
+        recovery = self.recovery_manager.inspect()
+        last_verification = ""
+        last_run_status = ""
+        collab_reason = ""
+        if latest is not None:
+            last_run_status = latest.status
+            collab_reason = str(
+                (latest.metrics or {}).get("collaboration_trigger_reason") or ""
+            )
+            failed = [item for item in latest.verification if item.passed is False]
+            passed = [item for item in latest.verification if item.passed is True]
+            if failed:
+                last_verification = f"失败 {failed[-1].command_or_check}"
+            elif passed:
+                last_verification = f"通过 {passed[-1].command_or_check}"
+            elif latest.verification:
+                last_verification = "进行中"
+        return {
+            "approval_mode": self.approval_mode,
+            "execution_depth": self.session.execution_depth,
+            "collaboration_mode": self.session.collaboration_mode,
+            "model_routing_mode": self.session.model_routing_mode,
+            "plan_mode": self.session.plan_mode,
+            "model_alias": context.get("model_alias", ""),
+            "provider": context.get("provider", ""),
+            "current_tokens": context.get("current_tokens", 0),
+            "input_budget_tokens": context.get(
+                "input_budget_tokens", context.get("max_context_tokens", 0)
+            ),
+            "last_run_status": last_run_status,
+            "last_verification": last_verification,
+            "collaboration_trigger_reason": collab_reason,
+            "auto_checkpoint": bool(self.session.auto_checkpoint),
+            "last_workspace_checkpoint": str(
+                ((latest.metrics or {}).get("workspace_checkpoint") or {}).get("id") or ""
+            )
+            if latest is not None
+            else "",
+            "recovery_required": bool(recovery.required),
+            "recovery_run_id": recovery.run_id,
+            "recovery_reason": recovery.reason,
+        }
+
+    def _checkpoint_workspace(self) -> Path:
+        root = getattr(self._active_project_rules, "project_root", None)
+        if root:
+            return Path(root).expanduser().resolve()
+        return Path.cwd().resolve()
+
+    def _maybe_auto_checkpoint(self, run_journal: RunJournal, tool_name: str) -> None:
+        """Snapshot the user workspace once before the first write of this run."""
+        from src.core.checkpoint import (
+            WorkspaceCheckpointStore,
+            maybe_snapshot_before_write,
+            session_checkpoint_dir,
+        )
+
+        with self._checkpoint_lock:
+            metrics = run_journal.metrics.setdefault("workspace_checkpoint", {})
+            if not isinstance(metrics, dict):
+                metrics = {}
+                run_journal.metrics["workspace_checkpoint"] = metrics
+            action = maybe_snapshot_before_write(
+                WorkspaceCheckpointStore(
+                    session_checkpoint_dir(self.session.output_dir),
+                    self._checkpoint_workspace(),
+                ),
+                enabled=bool(self.session.auto_checkpoint),
+                already_id=str(metrics.get("id") or ""),
+                tool_name=tool_name,
+                run_id=run_journal.run_id,
+            )
+            if action.created:
+                metrics["id"] = action.checkpoint_id
+                metrics["source"] = "auto"
+                metrics["file_count"] = action.file_count
+                if action.pruned:
+                    metrics["pruned"] = action.pruned
+                run_journal.decisions.append(
+                    f"[checkpoint] 写入前自动快照 {action.checkpoint_id}"
+                )
+                self.journal_store.save(run_journal)
+            elif action.reason.startswith("create_failed:"):
+                metrics["error"] = action.reason
+                run_journal.decisions.append(f"[checkpoint] 自动快照失败：{action.reason}")
+                self.journal_store.save(run_journal)
+
     def _runtime_facts_prompt(self) -> str:
         """把稳定的运行参数告诉模型，避免把协议类型误认为模型身份。"""
         status = self.get_context_status()
@@ -841,12 +974,19 @@ class Agent:
                 int(max_ctx * journal.execution_depth.budget.context_budget_ratio),
             )
         context_status = self.get_context_status()
+        protect_paths: list[str] = []
+        if journal is not None:
+            protect_paths = list(
+                ((journal.metrics.get("workset") or {}).get("paths"))
+                or [item["path"] for item in (journal.metrics.get("workset") or {}).get("items") or [] if item.get("path")]
+            )
         compactor = ContextCompactor(
             self.gateway,
             max_context_tokens=max_ctx,
             threshold=context_status["compaction_threshold"],
             artifact_dir=Path(self.session.output_dir) / "context",
             task_checkpoint=self._build_task_checkpoint(),
+            protect_paths=protect_paths,
         )
         current_tokens = context_status.get(
             "current_tokens", count_messages_tokens(self.session.messages)
@@ -878,11 +1018,55 @@ class Agent:
                     "quality_passed": metadata.quality_passed,
                     "checkpoint_count": metadata.checkpoint_count,
                     "artifact_path": metadata.artifact_path,
+                    "protected_kept": metadata.protected_kept,
+                    "dropped_chitchat": metadata.dropped_chitchat,
                 }
             )
             self.session.messages = new_messages
             return True
         return False
+
+    def _refresh_workset(self, journal: RunJournal, user_input: str) -> bool:
+        nav_paths: list[str] = []
+        for item in journal.evidence:
+            if item.tool_name not in {"repo_map", "search_project_files"}:
+                continue
+            extra = item.metadata.get("paths") if isinstance(item.metadata, dict) else []
+            if isinstance(extra, list):
+                nav_paths.extend(str(path) for path in extra if path)
+        workset = build_turn_workset(
+            user_input,
+            evidence=journal.evidence,
+            verification=journal.verification,
+            nav_paths=nav_paths,
+        )
+        payload = {
+            "query": workset.query,
+            "items": [item.model_dump() for item in workset.items],
+            "paths": workset.paths,
+        }
+        if journal.metrics.get("workset") == payload:
+            return False
+        journal.metrics["workset"] = payload
+        if self._active_run_journal is journal:
+            self._ensure_system_prompt(user_input, journal.intent)
+        return True
+
+    def _workset_prompt(self) -> str:
+        journal = self._active_run_journal
+        if journal is None:
+            return ""
+        raw = journal.metrics.get("workset") or {}
+        items = raw.get("items") or []
+        if not items:
+            return ""
+        try:
+            return TurnWorkset(
+                query=str(raw.get("query") or ""),
+                items=items,
+            ).prompt()
+        except Exception:
+            return ""
 
     def _build_task_checkpoint(self) -> str:
         """Build a bounded deterministic checkpoint that summaries cannot absorb."""
@@ -950,12 +1134,22 @@ class Agent:
                 f"Worker 上限 {budget.max_workers}；Reviewer {budget.reviewer_policy}；"
                 f"上下文预算比例 {budget.context_budget_ratio:.0%}。"
             )
+        collaboration_line = (
+            "\n- 协作：默认单 Agent；仅 deep 的 change/build、会话 /collab multi、"
+            "或 workers.yaml collaboration.force 才进入多模型。"
+        )
+        fix_line = ""
+        if intent.kind in {"change", "build"}:
+            fix_line = (
+                f"\n- 有界修复：写入后必须真实验证；失败后定向最小补丁，"
+                f"最多 {self.max_fix_rounds} 轮，超限 blocked。"
+            )
         return (
             "【本轮任务策略】\n"
             f"- 类型：{intent.kind}；风险：{intent.risk_level}；{access}。\n"
             f"- 写入授权：{authorization}；验证深度：{intent.policy.verification_depth}；"
             f"需要计划：{'是' if intent.policy.requires_plan else '否'}。"
-            f"{execution_line}\n"
+            f"{execution_line}{collaboration_line}{fix_line}\n"
             "必须遵守该策略；只读任务即使用户会话处于 auto 模式，也不得调用写入或命令工具。"
         )
 
@@ -1000,6 +1194,98 @@ class Agent:
             self.max_tool_iterations,
             journal.execution_depth.budget.max_tool_iterations,
         )
+
+    def _collaboration_config_force(self) -> bool:
+        if self._cached_collaboration_force is None:
+            self._cached_collaboration_force = load_collaboration_force(
+                self.session.config_dir
+            )
+        return self._cached_collaboration_force
+
+    def _decide_collaboration(
+        self,
+        intent: TaskIntent | None = None,
+        execution_depth: ExecutionDepthDecision | None = None,
+        user_input: str = "",
+    ) -> CollaborationDecision:
+        resolved_intent = intent
+        if resolved_intent is None:
+            journal = self._active_run_journal
+            resolved_intent = journal.intent if journal is not None else TaskIntent()
+        if not user_input and self._active_run_journal is not None:
+            user_input = self._active_run_journal.objective
+        return decide_collaboration(
+            session_mode=self.session.collaboration_mode,
+            intent=resolved_intent,
+            execution_depth=execution_depth
+            if execution_depth is not None
+            else (
+                self._active_run_journal.execution_depth
+                if self._active_run_journal is not None
+                else None
+            ),
+            approval_mode=self.approval_mode,
+            plan_read_only=self._plan_mode_is_read_only(),
+            config_force=self._collaboration_config_force(),
+            user_input=user_input,
+        )
+
+    def _record_collaboration_decision(self, journal: RunJournal) -> CollaborationDecision:
+        decision = self._decide_collaboration(
+            journal.intent, journal.execution_depth, journal.objective
+        )
+        journal.metrics["collaboration_triggered"] = decision.triggered
+        journal.metrics["collaboration_trigger_reason"] = decision.reason
+        journal.metrics["collaboration_decision"] = decision.model_dump()
+        line = decision.journal_line()
+        if line not in journal.decisions:
+            journal.decisions.append(line)
+        return decision
+
+    def _bounded_fix_state(self, journal: RunJournal) -> BoundedFixState:
+        raw = journal.metrics.get("bounded_fix") or {}
+        try:
+            return BoundedFixState.model_validate(raw)
+        except Exception:
+            return BoundedFixState(max_rounds=self.max_fix_rounds)
+
+    def _observe_bounded_fix(
+        self,
+        journal: RunJournal,
+        tool_name: str,
+        params: dict[str, Any],
+        result: ToolResult,
+        *,
+        skipped: bool = False,
+    ) -> bool:
+        before = self._bounded_fix_state(journal)
+        after = observe_bounded_fix(
+            before,
+            tool_name,
+            params,
+            result,
+            cancelled=self._cancel_event.is_set(),
+            skipped=skipped,
+        )
+        if after.model_dump() == before.model_dump():
+            return False
+        journal.metrics["bounded_fix"] = after.model_dump()
+        journal.metrics["fix_round"] = after.fix_round
+        line = f"[bounded-fix] {after.status} round={after.fix_round}/{after.max_rounds}"
+        if after.reason:
+            line += f" {after.reason}"
+        if line not in journal.decisions:
+            journal.decisions.append(line)
+        return True
+
+    def _tool_continue_prompt(self, journal: RunJournal) -> str:
+        constraint = self._bounded_fix_state(journal).prompt_constraint()
+        if constraint:
+            return constraint
+        return "请继续完成用户请求。"
+
+    def _bounded_fix_should_stop(self, journal: RunJournal) -> bool:
+        return self._bounded_fix_state(journal).status in {"blocked", "cancelled"}
 
     def _plan_mode_prompt(self) -> str:
         if self.session.plan_mode == "inactive":
@@ -1079,6 +1365,9 @@ class Agent:
         recovery_prompt = self._recovery_checkpoint_prompt()
         if recovery_prompt:
             parts.append(recovery_prompt)
+        workset_prompt = self._workset_prompt()
+        if workset_prompt:
+            parts.append(workset_prompt)
         if native:
             # 原生模式：工具定义由 tools= 参数提供，系统提示不再列 Markdown 工具块
             parts.append(TOOL_RULES_NATIVE)
@@ -1336,6 +1625,8 @@ class Agent:
             if cached:
                 result = read_cache[cache_key]  # type: ignore[index]
             else:
+                if run_journal is not None:
+                    self._maybe_auto_checkpoint(run_journal, tool_name)
                 result = execute_tool_call(
                     tool_name,
                     params,
@@ -1644,10 +1935,12 @@ class Agent:
             )
             self.session.add_message(
                 "user",
-                tool_results_text + "\n\n请继续完成用户请求。",
+                tool_results_text + "\n\n" + self._tool_continue_prompt(run_journal),
                 tool_result_blocks(calls),
             )
             iterations += 1
+            if self._bounded_fix_should_stop(run_journal):
+                break
 
         if analysis_only and len(final_content) > _ANALYSIS_FINAL_CHAR_LIMIT:
             self.session.add_message(
@@ -1843,17 +2136,7 @@ class Agent:
         deadline = deadline or TurnDeadline.start()
         deadline.check()
 
-        # 自动判断是否需要多模型协作（只读模式下不走协作，避免自动写文件）
-        if (
-            self.approval_mode != "readonly"
-            and not self._plan_mode_is_read_only()
-            and run_journal.intent.policy.collaboration_allowed
-            and await self._should_collaborate(
-                user_input,
-                run_journal.intent,
-                run_journal.execution_depth,
-            )
-        ):
+        if run_journal.metrics.get("collaboration_triggered"):
             collaboration_error_seen = False
             async for event in self._run_collaboration_stream(
                 user_input, billing_before, run_journal
@@ -2211,6 +2494,9 @@ class Agent:
                 if cached:
                     result = read_cache[cache_key]  # type: ignore[index]
                 else:
+                    await asyncio.to_thread(
+                        self._maybe_auto_checkpoint, run_journal, tool_name
+                    )
                     result = await asyncio.to_thread(
                         execute_tool_call, tool_name, params, self.session.output_dir
                     )
@@ -2267,10 +2553,14 @@ class Agent:
             await asyncio.to_thread(self.journal_store.save, run_journal)
             self.session.add_message(
                 "user",
-                "".join(tool_results_parts) + "\n\n请继续完成用户请求。",
+                "".join(tool_results_parts)
+                + "\n\n"
+                + self._tool_continue_prompt(run_journal),
                 tool_result_blocks(calls),
             )
             iterations += 1
+            if self._bounded_fix_should_stop(run_journal):
+                break
 
         if analysis_only and len(final_content) > _ANALYSIS_FINAL_CHAR_LIMIT:
             self.session.add_message(
@@ -2374,60 +2664,20 @@ class Agent:
         intent: TaskIntent | None = None,
         execution_depth: ExecutionDepthDecision | None = None,
     ) -> bool:
-        """是否需要多模型协作：先做关键字预筛，再交 LLM 判断"""
+        """Deterministic collaboration gate; no extra model call."""
         resolved_intent = intent or self.intent_classifier.classify(
             user_input,
             self.approval_mode,
         )
-        if self.session.collaboration_mode == "single":
-            return False
-        # 只读和未分类任务保持单 Agent，避免协作扩大权限或重复侦察。
-        if not resolved_intent.policy.collaboration_allowed:
-            return False
-        resolved_depth = execution_depth or self.execution_depth_resolver.resolve(
-            resolved_intent,
-            self.session.execution_depth,
-        )
-        if resolved_depth.budget.worker_policy == "disabled":
-            return False
-        if self.session.collaboration_mode == "multi":
-            return True
-        # 关键字预筛：明确的项目/多步骤任务直接走协作
-        if any(kw in user_input for kw in _COLLABORATION_KEYWORDS):
-            return True
-
-        messages = [
-            ChatMessage(role="system", content=COLLABORATION_DECISION_PROMPT),
-            ChatMessage(role="user", content=user_input),
-        ]
-        try:
-            if self._active_run_journal is not None:
-                response = await asyncio.to_thread(
-                    self._chat_for_run,
-                    self._active_run_journal,
-                    messages=messages,
-                    task_id=f"chat-{self.session.id}-decide",
-                    max_tokens=64,
-                    temperature=0.1,
-                )
-            else:
-                response = await asyncio.to_thread(
-                    self.gateway.chat_with_main_model,
-                    messages=messages,
-                    task_id=f"chat-{self.session.id}-decide",
-                    max_tokens=64,
-                    temperature=0.1,
-                )
-            content = response.content.strip()
-            # 尝试直接解析 JSON
-            if content.startswith("{"):
-                data = json.loads(content)
-                return bool(data.get("collaborate"))
-            # 兜底：关键字匹配
-            return "yes" in content.lower() or "true" in content.lower()
-        except Exception:
-            # 判断失败时保守走单模型路径
-            return False
+        resolved_depth = execution_depth
+        if resolved_depth is None:
+            resolved_depth = self.execution_depth_resolver.resolve(
+                resolved_intent,
+                self.session.execution_depth,
+            )
+        return self._decide_collaboration(
+            resolved_intent, resolved_depth, user_input
+        ).triggered
 
     async def _run_collaboration_stream(
         self,
@@ -2608,6 +2858,9 @@ class Agent:
                     approval_mode="auto",
                     memory_store=self.memory_store,
                     cancel_event=self._cancel_event,
+                    pre_mutation_hook=lambda tool_name: self._maybe_auto_checkpoint(
+                        run_journal, tool_name
+                    ),
                     # 测试替身或第三方 Gateway 可能只实现同步 chat；真实
                     # GatewayClient 才启用 Worker 的流式回合。
                     stream_output=isinstance(self.gateway, GatewayClient),

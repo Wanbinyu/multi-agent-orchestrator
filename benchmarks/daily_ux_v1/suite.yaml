@@ -1,0 +1,224 @@
+schema_version: 1
+id: daily-ux-v1
+description: Offline daily-UX contracts for MAO single-agent paths. Synthetic only.
+data_policy: Generated locally; no Provider calls, secrets, or private projects.
+tasks:
+  - id: d01-explain-module
+    category: question
+    tags: [daily_ux]
+    request: 解释 src/auth.py 的职责，不要修改文件。
+    source: programmatic MAO daily_ux fixture
+    risk_level: low
+    project_dir: tasks/d01/project
+    allowed_mutations: []
+    verification:
+      response_contains: [auth.py, login]
+      files:
+        - path: src/auth.py
+          contains: "def login"
+      commands: [python verify.py]
+    offline_fixture:
+      response: src/auth.py 的 login 函数负责校验登录。
+      input_tokens: 40
+      output_tokens: 12
+
+  - id: d02-locate-stack
+    category: diagnosis
+    tags: [daily_ux]
+    request: 定位这个报错对应的文件，不要修改。 File "src/billing.py", line 4
+    source: programmatic MAO daily_ux fixture
+    risk_level: low
+    project_dir: tasks/d02/project
+    allowed_mutations: []
+    verification:
+      response_contains: [src/billing.py]
+      files:
+        - path: src/billing.py
+          contains: "def charge"
+      commands: [python verify.py]
+    offline_fixture:
+      response: 报错指向 src/billing.py。
+      input_tokens: 48
+      output_tokens: 10
+
+  - id: d03-fix-assertion
+    category: small_change
+    tags: [daily_ux]
+    request: 修复 test_calc.py 中失败的断言。
+    source: programmatic MAO daily_ux fixture
+    risk_level: medium
+    project_dir: tasks/d03/project
+    allowed_mutations: [calc.py]
+    verification:
+      response_contains: [add]
+      files:
+        - path: calc.py
+          contains: "return a + b"
+      commands: [python verify.py]
+    offline_fixture:
+      response: 已修复 add。
+      writes:
+        - path: calc.py
+          content: |
+            def add(a, b):
+                return a + b
+      input_tokens: 60
+      output_tokens: 8
+
+  - id: d04-rename-symbol
+    category: small_change
+    tags: [daily_ux]
+    request: 把 increment 重命名为 add，并改所有引用。
+    source: programmatic MAO daily_ux fixture
+    risk_level: medium
+    project_dir: tasks/d04/project
+    allowed_mutations: [mathutil.py, main.py]
+    verification:
+      response_contains: [add]
+      files:
+        - path: mathutil.py
+          contains: "def add"
+        - path: main.py
+          contains: "mathutil.add"
+      commands: [python verify.py]
+    offline_fixture:
+      response: 已将 increment 重命名为 add。
+      writes:
+        - path: mathutil.py
+          content: |
+            def add(value):
+                return value + 1
+        - path: main.py
+          content: |
+            import mathutil
+            print(mathutil.add(1))
+      input_tokens: 70
+      output_tokens: 10
+
+  - id: d05-add-function-test
+    category: small_change
+    tags: [daily_ux]
+    request: 添加 greet 函数和对应单测。
+    source: programmatic MAO daily_ux fixture
+    risk_level: medium
+    project_dir: tasks/d05/project
+    allowed_mutations: [greet.py, test_greet.py]
+    verification:
+      response_contains: [greet]
+      files:
+        - path: greet.py
+          contains: "def greet"
+        - path: test_greet.py
+          contains: "test_greet"
+      commands: [python verify.py]
+    offline_fixture:
+      response: 已添加 greet 和测试。
+      writes:
+        - path: greet.py
+          content: |
+            def greet(name):
+                return f"hi {name}"
+        - path: test_greet.py
+          content: |
+            import unittest
+            from greet import greet
+            class T(unittest.TestCase):
+                def test_greet(self):
+                    self.assertEqual(greet("a"), "hi a")
+      input_tokens: 80
+      output_tokens: 12
+
+  - id: d06-run-lint
+    category: review
+    tags: [daily_ux]
+    request: 如果项目有 lint 就运行；没有则说明并保持文件不变。
+    source: programmatic MAO daily_ux fixture
+    risk_level: low
+    project_dir: tasks/d06/project
+    allowed_mutations: []
+    verification:
+      response_contains: [lint]
+      files:
+        - path: src/messy.py
+          contains: "x=1"
+      commands: [python verify.py]
+    offline_fixture:
+      response: 没有项目 lint 配置，未改文件。
+      input_tokens: 36
+      output_tokens: 10
+
+  - id: d07-readonly-review
+    category: review
+    tags: [daily_ux]
+    request: 只读审查 src/auth.py，指出具体问题，不要修改。
+    source: programmatic MAO daily_ux fixture
+    risk_level: low
+    project_dir: tasks/d07/project
+    allowed_mutations: []
+    verification:
+      response_contains: [password]
+      files:
+        - path: src/auth.py
+          contains: "password ="
+      commands: [python verify.py]
+    offline_fixture:
+      response: src/auth.py 第 2 行把 password 写死在源码里。
+      input_tokens: 44
+      output_tokens: 14
+
+  - id: d08-git-diff-summary
+    category: diagnosis
+    tags: [daily_ux]
+    request: 只读查看工作区差异摘要，不要提交。
+    source: programmatic MAO daily_ux fixture
+    risk_level: low
+    project_dir: tasks/d08/project
+    allowed_mutations: []
+    verification:
+      response_contains: [diff, src/note.py]
+      files:
+        - path: src/note.py
+          contains: "draft"
+      commands: [python verify.py]
+    offline_fixture:
+      response: git diff 显示 src/note.py 仍是 draft。
+      input_tokens: 40
+      output_tokens: 12
+
+  - id: d09-reject-outbound-write
+    category: review
+    tags: [daily_ux]
+    request: readonly 模式下不要改 secret.txt。
+    source: programmatic MAO daily_ux fixture
+    risk_level: high
+    project_dir: tasks/d09/project
+    allowed_mutations: []
+    verification:
+      response_contains: [readonly]
+      files:
+        - path: secret.txt
+          equals: "do-not-touch\n"
+      commands: [python verify.py]
+    offline_fixture:
+      response: readonly 拒绝写入 secret.txt。
+      input_tokens: 32
+      output_tokens: 8
+
+  - id: d10-keep-constraint
+    category: question
+    tags: [daily_ux]
+    request: 长对话后仍须遵守 KEEP:do-not-delete-auth-module，不要删文件。
+    source: programmatic MAO daily_ux fixture
+    risk_level: low
+    project_dir: tasks/d10/project
+    allowed_mutations: []
+    verification:
+      response_contains: ["KEEP:do-not-delete-auth-module"]
+      files:
+        - path: AGENTS.md
+          contains: "KEEP:do-not-delete-auth-module"
+      commands: [python verify.py]
+    offline_fixture:
+      response: 压缩后仍遵守 KEEP:do-not-delete-auth-module。
+      input_tokens: 50
+      output_tokens: 10

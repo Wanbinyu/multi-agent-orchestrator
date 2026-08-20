@@ -25,6 +25,7 @@ from src.gateway.errors import ProviderError
 from src.models.schemas import (
     ApprovalMode,
     ChatStreamEvent,
+    CollaborationMode,
     ExecutionDepthPreference,
     ModelRoutingMode,
 )
@@ -106,6 +107,10 @@ class UpdateModelRoutingForm(BaseModel):
 
 class UpdateAdversarialTestingForm(BaseModel):
     enabled: bool
+
+
+class UpdateCollaborationModeForm(BaseModel):
+    mode: CollaborationMode
 
 
 class PermissionResponseForm(BaseModel):
@@ -277,6 +282,7 @@ def get_session(session_id: str) -> dict[str, Any]:
         "approval_mode": session.approval_mode,
         "execution_depth": session.execution_depth,
         "model_routing_mode": session.model_routing_mode,
+        "collaboration_mode": session.collaboration_mode,
         "adversarial_testing": session.adversarial_testing,
         "plan_mode": session.plan_mode,
         "plan_artifact": session.plan_artifact.model_dump() if session.plan_artifact else None,
@@ -479,6 +485,26 @@ def update_execution_depth(
     if agent is not None:
         agent.session.execution_depth = form.depth
     return {"success": True, "depth": form.depth}
+
+
+@router.post("/api/chat/sessions/{session_id}/collaboration")
+def update_collaboration_mode(
+    session_id: str, form: UpdateCollaborationModeForm
+) -> dict[str, Any]:
+    """Persist single-Agent vs explicit multi-model collaboration."""
+    try:
+        session = store.load(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if _active_agent(session_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="会话仍有活跃请求，协作模式将在本轮结束后才能修改",
+        )
+
+    session.collaboration_mode = form.mode
+    store.save(session)
+    return {"success": True, "mode": form.mode}
 
 
 @router.post("/api/chat/sessions/{session_id}/routing")

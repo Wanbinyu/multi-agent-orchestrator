@@ -31,6 +31,7 @@
     modeIndicator: document.getElementById("mode-indicator"),
     btnPlanMode: document.getElementById("btn-plan-mode"),
     toggleAdversarial: document.getElementById("toggle-adversarial"),
+    selectCollaboration: document.getElementById("select-collaboration"),
     planModePanel: document.getElementById("plan-mode-panel"),
     planModeState: document.getElementById("plan-mode-state"),
     planModeContent: document.getElementById("plan-mode-content"),
@@ -128,6 +129,32 @@
       updateModeIndicator();
       console.error("切换模式失败", err);
       showStatus(err.message, true);
+    }
+  }
+
+  async function setCollaborationMode(mode) {
+    if (!state.currentSessionId || !els.selectCollaboration) return;
+    const sessionId = state.currentSessionId;
+    const previous = els.selectCollaboration.dataset.previous || "auto";
+    els.selectCollaboration.disabled = true;
+    try {
+      await api(
+        `/api/chat/sessions/${encodeURIComponent(sessionId)}/collaboration`,
+        {
+          method: "POST",
+          body: JSON.stringify({ mode }),
+        }
+      );
+      els.selectCollaboration.dataset.previous = mode;
+    } catch (err) {
+      if (state.currentSessionId === sessionId) {
+        els.selectCollaboration.value = previous;
+        showStatus(err.message, true);
+      }
+    } finally {
+      if (state.currentSessionId === sessionId) {
+        els.selectCollaboration.disabled = false;
+      }
     }
   }
 
@@ -490,6 +517,11 @@
     }
     renderPlanState(data.plan_mode, data.plan_artifact);
     renderRecoveryState(data.recovery);
+    if (els.selectCollaboration) {
+      const mode = data.collaboration_mode || "auto";
+      els.selectCollaboration.value = mode;
+      els.selectCollaboration.dataset.previous = mode;
+    }
     if (els.toggleAdversarial) {
       els.toggleAdversarial.checked = Boolean(data.adversarial_testing);
     }
@@ -1146,6 +1178,11 @@
       const verificationDetail = `验证门 ${Number(run.verification_count || 0)} 个 · 完成审计 ${
         auditLabels[audit.status] || audit.status || "进行中"
       }${auditGaps.length ? ` · 缺口 ${auditGaps.join("、")}` : ""}`;
+      const metrics = run.metrics || {};
+      const collabReason = metrics.collaboration_trigger_reason || "";
+      const collabDetail = collabReason
+        ? `协作 ${metrics.collaboration_triggered ? "已触发" : "未触发"} · ${collabReason}`
+        : "";
       const routing = run.model_routing || {};
       const modelDetail = routing.selected_model
         ? `模型 ${routing.selected_model} · 路由 ${routing.source || "unknown"} · ${
@@ -1168,6 +1205,7 @@
           <div class="turn-log-title">${icon} 工程记录 · ${escapeHtml(labels[run.status] || run.status)}</div>
           <div class="turn-log-detail">${escapeHtml(run.run_id)}</div>
           <div class="turn-log-detail">${escapeHtml(intentDetail)}</div>
+          ${collabDetail ? `<div class="turn-log-detail">${escapeHtml(collabDetail)}</div>` : ""}
           ${modelDetail ? `<div class="turn-log-detail">${escapeHtml(modelDetail)}</div>` : ""}
           <div class="turn-log-detail">${escapeHtml(evidenceDetail)}</div>
           <div class="turn-log-detail">${escapeHtml(verificationDetail)}</div>
@@ -1260,6 +1298,23 @@
         `类型 ${intent.kind || "unclassified"} · 风险 ${intent.risk_level || "unassessed"} · ${
           writeState
         }`,
+      ]);
+    }
+    const metrics = run.metrics || {};
+    if (metrics.collaboration_trigger_reason) {
+      addSection("协作", [
+        `${metrics.collaboration_triggered ? "已触发多模型" : "保持单 Agent"} · ${
+          metrics.collaboration_trigger_reason
+        }`,
+      ]);
+    }
+    const boundedFix = metrics.bounded_fix || {};
+    if (boundedFix.status && boundedFix.status !== "idle") {
+      addSection("有界修复", [
+        `状态 ${boundedFix.status} · 轮次 ${Number(boundedFix.fix_round || 0)}/${Number(
+          boundedFix.max_rounds || 3
+        )}`,
+        boundedFix.reason || "",
       ]);
     }
     if (run.execution_depth) {
@@ -1858,6 +1913,9 @@
   els.btnPlanMode?.addEventListener("click", togglePlanMode);
   els.toggleAdversarial?.addEventListener("change", (event) => {
     setAdversarialTesting(Boolean(event.target.checked));
+  });
+  els.selectCollaboration?.addEventListener("change", (event) => {
+    setCollaborationMode(event.target.value);
   });
   els.btnPlanCancel?.addEventListener("click", () => updatePlanState("cancel"));
   els.btnPlanApprove?.addEventListener("click", approvePlanAndImplement);

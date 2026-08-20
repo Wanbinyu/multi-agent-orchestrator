@@ -62,6 +62,7 @@ class Worker:
         stream_output: bool = False,
         stream_idle_timeout_seconds: float = 45.0,
         cancel_event: Event | None = None,
+        pre_mutation_hook: Callable[[str], None] | None = None,
     ):
         self.gateway = gateway
         self.workers_config = workers_config
@@ -73,6 +74,7 @@ class Worker:
         self.stream_output = stream_output
         self.stream_idle_timeout_seconds = max(5.0, float(stream_idle_timeout_seconds))
         self.cancel_event = cancel_event
+        self.pre_mutation_hook = pre_mutation_hook
 
     @staticmethod
     def _progress_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -398,6 +400,7 @@ class Worker:
                     approval_mode=self.approval_mode,
                     command_state=command_state,
                     memory_store=self.memory_store,
+                    pre_mutation_hook=self.pre_mutation_hook,
                     progress_callback=(
                         lambda event_type, payload: self._notify(
                             progress_callback,
@@ -649,6 +652,10 @@ def _expand_legacy_read_tools(tools: list[str]) -> list[str]:
             "grep_content",
             "read_file",
             "discover_project_commands",
+            "git_status",
+            "git_diff",
+            "git_log",
+            "repo_map",
         ):
             if name not in expanded:
                 expanded.append(name)
@@ -725,6 +732,7 @@ def process_tool_calls(
     command_state: MutableMapping[str, Any] | None = None,
     memory_store: Any = None,
     progress_callback: ProgressCallback | None = None,
+    pre_mutation_hook: Callable[[str], None] | None = None,
 ) -> tuple[str, list[dict]]:
     """解析并执行工具调用，返回处理后的内容和工具结果列表"""
     pattern = r"```tool:(\w+)\n(.*?)(?:```|<\|tool_calls_section_end\|>|$)"
@@ -832,6 +840,8 @@ def process_tool_calls(
         if cached:
             result = read_cache[cache_key]  # type: ignore[index]
         else:
+            if pre_mutation_hook is not None:
+                pre_mutation_hook(tool_name)
             result = execute_tool_call(
                 tool_name,
                 params,

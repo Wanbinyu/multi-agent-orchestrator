@@ -184,6 +184,20 @@ def test_process_tool_calls_reuses_reads_and_invalidates_after_write(tmp_path):
     assert results[-1]["output"] == "new"
 
 
+def test_process_tool_calls_invokes_pre_mutation_hook(tmp_path):
+    seen: list[str] = []
+    content = '```tool:write_file\n{"path":"hooked.txt","content":"ok"}\n```'
+    _processed, results = process_tool_calls(
+        content,
+        str(tmp_path),
+        allowed_tools=["write_file"],
+        pre_mutation_hook=seen.append,
+    )
+    assert seen == ["write_file"]
+    assert results[0]["success"] is True
+    assert (tmp_path / "hooked.txt").read_text(encoding="utf-8") == "ok"
+
+
 def test_process_tool_calls_supports_special_closing_token(tmp_path):
     (tmp_path / "data.txt").write_text("ok", encoding="utf-8")
     content = (

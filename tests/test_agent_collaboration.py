@@ -191,6 +191,8 @@ def test_collaboration_stream_yields_plan_tasks_review_done(tmp_path):
         if item["role"] == "reviewer"
     )
     assert reviewer_role["input_mode"] == "restricted"
+    assert engineering["metrics"]["collaboration_triggered"] is True
+    assert engineering["metrics"]["collaboration_trigger_reason"] == "deep_change_or_build"
 
     # 最终答案应被追加到会话历史
     assert session.messages[-1].role == "assistant"

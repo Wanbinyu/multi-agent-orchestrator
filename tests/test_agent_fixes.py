@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock
 
-from src.core.agent import Agent, _COLLABORATION_KEYWORDS
+from src.core.agent import Agent
 from src.core.session import Session
 from src.models.schemas import ChatResponse
 import src.tools.worker_tools  # noqa: F401  注册内置工具
@@ -32,16 +32,15 @@ def _mock_gateway_no_native(response_text: str) -> MagicMock:
     return gw
 
 
-# ---------- Fix 5: 协作关键字预筛 ----------
+# ---------- P0-8: 协作判定不再调用模型 ----------
 
 
 def test_collaboration_keyword_triggers_without_llm(tmp_path):
-    """含项目关键字的输入直接返回 True，不调用 LLM"""
+    """项目级构建请求按 deep+build 进入协作，不调用模型判断。"""
     gw = _mock_gateway_no_native("done")
     agent = Agent(gw, _session(tmp_path))
     result = asyncio.run(agent._should_collaborate("把这几个页面综合起来做一个前后端交互的小项目"))
     assert result is True
-    # 未调用 gateway 做 LLM 判断
     gw.chat_with_main_model.assert_not_called()
 
 
@@ -59,10 +58,20 @@ def test_readonly_intent_skips_collaboration_model_call(tmp_path):
     gw.chat_with_main_model.assert_not_called()
 
 
-def test_collaboration_keywords_cover_user_case():
-    """用户那次输入应命中关键字"""
+def test_project_build_request_still_classifies_as_collaborative():
+    from src.core.engineering import TaskIntentClassifier, ExecutionDepthResolver, decide_collaboration
+
     user_input = "在G:\\MAO_test中有几个前端，把这几个页面尝试综合起来做一个前后端交互的小项目，先立项，设计项目，再执行"
-    assert any(kw in user_input for kw in _COLLABORATION_KEYWORDS)
+    intent = TaskIntentClassifier().classify(user_input, "auto")
+    decision = decide_collaboration(
+        session_mode="auto",
+        intent=intent,
+        execution_depth=ExecutionDepthResolver().resolve(intent),
+        user_input=user_input,
+    )
+    assert intent.kind == "build"
+    assert decision.triggered is True
+    assert decision.reason == "deep_change_or_build"
 
 
 # ---------- Fix 3: 不再生成 generated_N ----------

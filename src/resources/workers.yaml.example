@@ -1,3 +1,14 @@
+# 默认不强制协作。force: true 时，策略允许的 change/build 会走多模型。
+# 只读、Plan 未批准、collaboration_allowed=false 的任务仍不协作。
+collaboration:
+  force: false
+
+# 在默认白名单之外追加命令前缀。不要加 git push / bash / python -c。
+command_allowlist:
+  extra_prefixes:
+    - "ruff "
+    - "uv run "
+
 orchestrator:
   model: glm-ark
   system_prompt: |

@@ -20,6 +20,16 @@ from src.core.engineering.models import (
     WorkPlan,
     WorkPlanStep,
 )
+from src.core.engineering.bounded_fix import (
+    BoundedFixState,
+    default_max_fix_rounds,
+    observe_bounded_fix,
+)
+from src.core.engineering.collaboration_policy import (
+    CollaborationDecision,
+    decide_collaboration,
+    load_collaboration_force,
+)
 from src.core.engineering.verifier import VerificationTracker
 from src.core.engineering.journal import RunJournalStore
 from src.core.engineering.report import (
@@ -84,6 +94,12 @@ __all__ = [
     "TaskIntentClassifier",
     "ToolEvidenceRecorder",
     "file_mutation_metadata",
+    "BoundedFixState",
+    "CollaborationDecision",
+    "decide_collaboration",
+    "default_max_fix_rounds",
+    "load_collaboration_force",
+    "observe_bounded_fix",
     "VerificationTracker",
     "VerificationGate",
     "WorkPlan",

@@ -306,6 +306,27 @@ def test_model_routing_api_persists_fixed_constraint_without_provider_call(clien
     chat_router.gateway.chat_with_main_model.assert_not_called()
 
 
+def test_collaboration_mode_api_persists_without_provider_call(client):
+    session_id = client.post(
+        "/api/chat/sessions", json={"title": "collab"}
+    ).json()["session_id"]
+
+    initial = client.get(f"/api/chat/sessions/{session_id}").json()
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/collaboration",
+        json={"mode": "single"},
+    )
+
+    assert initial["collaboration_mode"] == "auto"
+    assert response.status_code == 200
+    assert response.json()["mode"] == "single"
+    assert chat_router.store.load(session_id).collaboration_mode == "single"
+    assert client.get(f"/api/chat/sessions/{session_id}").json()[
+        "collaboration_mode"
+    ] == "single"
+    chat_router.gateway.chat_with_main_model.assert_not_called()
+
+
 def test_adversarial_testing_api_is_explicit_and_local(client):
     session_id = client.post(
         "/api/chat/sessions", json={"title": "adversarial"}

@@ -40,6 +40,8 @@ SLASH_COMMANDS: list[tuple[str, str, str]] = [
     ("/runs", "/runs [run_id]", "本地查看本会话工程运行记录"),
     ("/report", "/report [session|today]", "本地汇总真实交付与 token 指标"),
     ("/context", "/context", "显示上下文预算与自动压缩状态"),
+    ("/status", "/status", "显示权限、模型、深度、协作、token 与最近验证"),
+    ("/checkpoint", "/checkpoint [create|list|preview|restore|auto|prune]", "工作区检查点（与用户 Git 分离）"),
     ("/tree", "/tree [路径] [深度]", "零 token 显示项目结构"),
     ("/plan", "/plan <需求>", "执行一次性多模型任务计划"),
     ("/plan enter", "/plan enter [目标]", "进入持久化只读 Plan 模式"),
@@ -55,6 +57,7 @@ SLASH_COMMANDS: list[tuple[str, str, str]] = [
     ("/memory summarize", "/memory summarize", "总结当前会话并保存到记忆"),
     ("/mode", "/mode <auto|approve|readonly>", "切换权限模式"),
     ("/depth", "/depth <auto|fast|standard|deep>", "设置执行深度"),
+    ("/collab", "/collab <auto|single|multi>", "设置多模型协作：默认单 Agent"),
     ("/routing", "/routing <auto|fixed>", "设置模型路由"),
     ("/adversarial", "/adversarial <on|off>", "切换实验对抗测试"),
     ("/auto", "/auto", "自动执行工具"),
@@ -79,6 +82,10 @@ def _build_commands_help() -> str:
         "  - 输入 / 可打开命令列表，继续输入会实时过滤",
         "  - Shift+Tab 切换权限模式（当前模式看屏幕底部工具栏，不在行首）",
         "  - 权限询问时输入 auto/always 可切换到自动模式并批准当前请求",
+        "  - 默认单 Agent。/collab multi 才强制多模型；auto 仅 deep 的修改/构建会协作",
+        "  - /status 查看当前会话；中断后用 /resume continue|abandon，确认前不执行工具",
+        "  - Ctrl+C 中断本轮；Journal 不会停在 running",
+        "  - 首次写入前默认自动快照；/checkpoint auto off 可关闭；恢复仍需 preview + confirm",
     ])
     return "\n".join(lines)
 
@@ -107,6 +114,7 @@ class SlashCommandCompleter(Completer):
 
 MODES = ["auto", "approve", "readonly"]
 DEPTHS = ["auto", "fast", "standard", "deep"]
+COLLAB_MODES = ["auto", "single", "multi"]
 ROUTING_MODES = ["auto", "fixed"]
 
 
@@ -124,11 +132,17 @@ def _summarize_params(params: dict) -> str:
 _TOOL_PHASES: dict[str, tuple[str, str]] = {
     "project_tree": ("explore", "探索项目"),
     "git_status": ("explore", "探索项目"),
+    "git_diff": ("explore", "探索项目"),
+    "git_log": ("explore", "探索项目"),
+    "git_commit": ("change", "生成交付物"),
+    "edit_file": ("change", "生成交付物"),
+    "discover_project_commands": ("execute", "执行验证"),
     "list_dir": ("explore", "探索项目"),
     "glob_files": ("explore", "探索项目"),
     "read_file": ("explore", "探索项目"),
     "grep_content": ("search", "检索代码"),
     "search_project_files": ("search", "检索代码"),
+    "repo_map": ("search", "检索代码"),
     "search_memory": ("search", "检索上下文"),
     "web_search": ("research", "查询资料"),
     "fetch_url": ("research", "查询资料"),
@@ -148,10 +162,16 @@ def _format_tool_action(tool_name: str, params: dict[str, Any]) -> str:
         "list_dir": "浏览目录",
         "project_tree": "生成项目树",
         "git_status": "检查 Git 状态",
+        "git_diff": "查看 Git diff",
+        "git_log": "查看 Git 提交",
+        "git_commit": "提交 Git 变更",
+        "edit_file": "编辑文件",
+        "discover_project_commands": "发现项目命令",
         "glob_files": "匹配文件",
         "read_file": "读取文件",
         "grep_content": "搜索内容",
         "search_project_files": "搜索项目",
+        "repo_map": "仓库导航",
         "search_memory": "搜索记忆",
         "web_search": "搜索网页",
         "fetch_url": "读取网页",
@@ -548,7 +568,7 @@ async def _stream_turn(
                         Markdown(
                             f"{spinner_message} {frames[i % len(frames)]} "
                             f"已用时 {elapsed:.1f}s "
-                            f"| 热键 a=auto p=approve r=readonly"
+                            f"| 热键 a=auto p=approve r=readonly | Ctrl+C 中断"
                         )
                     )
                 except Exception:
@@ -1448,6 +1468,23 @@ def _set_depth(session, depth: str) -> bool:
     return True
 
 
+def _set_collaboration_mode(session, mode: str) -> bool:
+    """Persist single-Agent vs explicit multi-model collaboration."""
+    if mode not in COLLAB_MODES:
+        console.print(
+            f"[bold red]未知协作模式：{mode}，可选：{' / '.join(COLLAB_MODES)}[/bold red]"
+        )
+        return False
+    session.collaboration_mode = mode
+    labels = {
+        "auto": "自动：仅 deep 的修改/构建进入多模型",
+        "single": "强制单 Agent",
+        "multi": "强制多模型（仍受只读/Plan/任务策略约束）",
+    }
+    console.print(f"[cyan]已设置协作模式：{mode}（{labels[mode]}）[/cyan]")
+    return True
+
+
 def _set_routing_mode(session, mode: str) -> bool:
     """设置自动路由或固定使用用户主模型。"""
     if mode not in ROUTING_MODES:
@@ -1476,6 +1513,158 @@ def _set_adversarial_testing(session, state: str) -> bool:
             "[dim]仅 deep 的 change/build 多模型协作会额外调用只读对抗角色。[/dim]"
         )
     return True
+
+
+def _checkpoint_store(session) -> "WorkspaceCheckpointStore":
+    from src.core.checkpoint import WorkspaceCheckpointStore
+
+    store_dir = Path(session.output_dir).resolve().parent / "checkpoints"
+    return WorkspaceCheckpointStore(store_dir, Path.cwd())
+
+
+def _cmd_checkpoint(session, argument: str) -> bool:
+    """Mutate session only for `/checkpoint auto`. Returns True when it should be saved."""
+    parts = argument.split()
+    action = (parts[0] if parts else "create").strip().lower()
+    rest = parts[1:]
+    try:
+        store = _checkpoint_store(session)
+        if action in {"", "create"}:
+            manifest = store.create()
+            console.print(
+                f"[cyan]已创建检查点 {manifest.id}（{manifest.file_count} 个文件；"
+                f"跳过敏感 {manifest.skipped_sensitive} / 过大 {manifest.skipped_large}）。[/cyan]"
+            )
+            if manifest.pruned:
+                console.print(f"[dim]已清理旧检查点 {len(manifest.pruned)} 个。[/dim]")
+            console.print("[dim]快照不写入用户 .git。恢复前请 /checkpoint preview。[/dim]")
+            return False
+        if action == "list":
+            items = store.list()
+            if not items:
+                console.print("[dim]当前会话没有检查点。[/dim]")
+                return False
+            usage = store.usage()
+            console.print(
+                f"[dim]共 {usage['count']} 个检查点，约 {usage['bytes']:,} 字节。[/dim]"
+            )
+            for item in items:
+                console.print(
+                    f"  {item.id}  {item.created_at}  {item.file_count} files  {item.source}"
+                )
+            return False
+        if action in {"preview", "show"}:
+            checkpoint_id = rest[0] if rest else ""
+            if not checkpoint_id:
+                items = store.list()
+                if not items:
+                    console.print("[bold red]没有可预览的检查点。[/bold red]")
+                    return False
+                checkpoint_id = items[0].id
+            preview = store.preview(checkpoint_id)
+            changing = preview.would_change
+            if not changing:
+                console.print(f"[dim]检查点 {checkpoint_id} 与当前工作区一致。[/dim]")
+                return False
+            for item in changing[:40]:
+                console.print(f"  {item.kind:8} {item.path}")
+            if preview.dirty_conflicts:
+                console.print(
+                    "[yellow]与用户未提交改动冲突：[/yellow] "
+                    + "、".join(preview.dirty_conflicts[:12])
+                )
+            return False
+        if action == "restore":
+            if not rest:
+                console.print(
+                    "[bold red]用法：/checkpoint restore <id> confirm [overwrite-dirty][/bold red]"
+                )
+                return False
+            checkpoint_id = rest[0]
+            confirm = "confirm" in rest[1:]
+            overwrite = "overwrite-dirty" in rest[1:]
+            result = store.restore(
+                checkpoint_id, confirm=confirm, overwrite_dirty=overwrite
+            )
+            if result.restored:
+                console.print(
+                    f"[green]已从 {result.checkpoint_id} 恢复 {len(result.restored_files)} 个文件。[/green]"
+                )
+            else:
+                console.print(f"[yellow]{result.reason}[/yellow]")
+                if result.dirty_conflicts:
+                    console.print("冲突文件：" + "、".join(result.dirty_conflicts))
+            return False
+        if action == "auto":
+            if not rest:
+                state = "on" if session.auto_checkpoint else "off"
+                console.print(f"写前自动检查点：{state}；可选：on / off")
+                return False
+            value = rest[0].strip().lower()
+            if value not in {"on", "off", "true", "false", "1", "0"}:
+                console.print("[bold red]用法：/checkpoint auto on|off[/bold red]")
+                return False
+            session.auto_checkpoint = value in {"on", "true", "1"}
+            state = "on" if session.auto_checkpoint else "off"
+            console.print(f"[cyan]已设置写前自动检查点：{state}[/cyan]")
+            return True
+        if action == "prune":
+            deleted = store.prune()
+            usage = store.usage()
+            if deleted:
+                console.print(
+                    f"[cyan]已清理 {len(deleted)} 个旧检查点；剩余 {usage['count']} 个"
+                    f"（约 {usage['bytes']:,} 字节）。[/cyan]"
+                )
+            else:
+                console.print(
+                    f"[dim]无需清理；当前 {usage['count']} 个检查点"
+                    f"（约 {usage['bytes']:,} 字节）。[/dim]"
+                )
+            return False
+        console.print(
+            "[bold red]用法：/checkpoint [create|list|preview|restore|auto|prune][/bold red]"
+        )
+    except FileNotFoundError as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+    return False
+
+
+def _cmd_status(agent: Agent) -> dict[str, Any]:
+    """Show session, recovery, and last-run facts without calling a model."""
+    status = agent.get_session_status()
+    budget = int(status.get("input_budget_tokens") or 0)
+    current = int(status.get("current_tokens") or 0)
+    usage = (current / budget * 100) if budget > 0 else 0.0
+    recovery = (
+        f"需要 /resume（{status.get('recovery_reason') or status.get('recovery_run_id')}）"
+        if status.get("recovery_required")
+        else "无"
+    )
+    last_run = status.get("last_run_status") or "无"
+    last_verify = status.get("last_verification") or "无"
+    collab_extra = status.get("collaboration_trigger_reason") or "尚未记录"
+    lines = [
+        f"权限模式：{status.get('approval_mode')}",
+        f"执行深度：{status.get('execution_depth')}",
+        f"协作模式：{status.get('collaboration_mode')}（最近原因：{collab_extra}）",
+        f"写前自动检查点：{'开' if status.get('auto_checkpoint') else '关'}"
+        + (
+            f"（最近：{status.get('last_workspace_checkpoint')}）"
+            if status.get("last_workspace_checkpoint")
+            else ""
+        ),
+        f"模型路由：{status.get('model_routing_mode')}",
+        f"当前模型：{status.get('model_alias') or '-'} / {status.get('provider') or '-'}",
+        f"Plan 模式：{status.get('plan_mode')}",
+        f"上下文：{current:,} / {budget:,} tokens（{usage:.1f}%）",
+        f"最近 run：{last_run}",
+        f"最近验证：{last_verify}",
+        f"中断恢复：{recovery}",
+        "本命令不调用模型、不执行工具。",
+    ]
+    console.print(Panel("\n".join(lines), title="会话状态", border_style="cyan"))
+    return status
 
 
 def _cmd_context(agent: Agent) -> dict[str, Any]:
@@ -1683,6 +1872,11 @@ def run_chat_loop(
                     _cmd_report(session, arg)
                 elif cmd == "/context":
                     _cmd_context(agent)
+                elif cmd == "/status":
+                    _cmd_status(agent)
+                elif cmd == "/checkpoint":
+                    if _cmd_checkpoint(session, arg):
+                        store.save(session)
                 elif cmd == "/tree":
                     _cmd_tree(arg)
                 elif cmd == "/plan":
@@ -1800,6 +1994,14 @@ def run_chat_loop(
                         )
                     elif _set_depth(session, arg.strip().lower()):
                         store.save(session)
+                elif cmd == "/collab":
+                    if not arg:
+                        console.print(
+                            f"当前协作模式：{session.collaboration_mode}；"
+                            f"可选：{' / '.join(COLLAB_MODES)}"
+                        )
+                    elif _set_collaboration_mode(session, arg.strip().lower()):
+                        store.save(session)
                 elif cmd == "/routing":
                     if not arg:
                         console.print(
@@ -1846,6 +2048,13 @@ def run_chat_loop(
                     )
                 )
                 _refresh_usage(last)
+                store.save(session)
+            except KeyboardInterrupt:
+                agent.interrupt_turn()
+                console.print(
+                    "\n[yellow]已中断本轮。工程记录不会停在 running；"
+                    "需要继续时用 /resume continue，放弃用 /resume abandon。[/yellow]"
+                )
                 store.save(session)
             except Exception as e:
                 console.print(Text(f"错误：{e}", style="bold red"))

@@ -887,6 +887,13 @@ body::before {
   accent-color: var(--warning);
 }
 
+.experiment-toggle select {
+  max-width: 7.5rem;
+  min-height: 28px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.78rem;
+}
+
 .experiment-toggle:has(input:checked) span {
   color: var(--warning);
 }

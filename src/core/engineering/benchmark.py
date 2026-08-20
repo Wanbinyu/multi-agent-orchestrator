@@ -184,6 +184,7 @@ class BenchmarkTask(BaseModel):
     project_dir: str = Field(..., min_length=1)
     allowed_mutations: list[str] = Field(default_factory=list)
     verification: BenchmarkVerificationContract
+    tags: list[str] = Field(default_factory=list)
     offline_fixture: BenchmarkOfflineFixture
 
     @field_validator("id")
@@ -205,6 +206,12 @@ class BenchmarkTask(BaseModel):
         return list(
             dict.fromkeys(_relative_path(value, allow_glob=True) for value in values)
         )
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip().lower() for value in values if value.strip()]
+        return list(dict.fromkeys(normalized))
 
     @model_validator(mode="after")
     def validate_fixture_boundaries(self) -> "BenchmarkTask":

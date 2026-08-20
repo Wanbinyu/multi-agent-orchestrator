@@ -18,6 +18,7 @@ from src.cli.chat_command import (
     _print_welcome,
     _set_depth,
     _set_adversarial_testing,
+    _set_collaboration_mode,
     _set_mode,
     _set_routing_mode,
     _summarize_tool_activity,
@@ -67,6 +68,17 @@ def test_set_execution_depth_persists_user_preference():
     assert session.execution_depth == "deep"
     assert _set_depth(session, "invalid") is False
     assert session.execution_depth == "deep"
+
+
+def test_set_collaboration_mode_persists_user_preference():
+    session = _make_session()
+
+    assert _set_collaboration_mode(session, "single") is True
+    assert session.collaboration_mode == "single"
+    assert _set_collaboration_mode(session, "multi") is True
+    assert session.collaboration_mode == "multi"
+    assert _set_collaboration_mode(session, "invalid") is False
+    assert session.collaboration_mode == "multi"
 
 
 def test_set_model_routing_mode_persists_user_constraint():
@@ -169,6 +181,9 @@ def test_slash_command_completion_opens_on_slash():
     assert "/tree" in names
     assert "/exit" in names
     assert "/adversarial" in names
+    assert "/collab" in names
+    assert "/status" in names
+    assert "/checkpoint" in names
 
 
 def test_slash_command_completion_filters_as_user_types():
@@ -187,6 +202,10 @@ def test_slash_command_completion_ignores_normal_text_and_arguments():
 def test_help_remains_available_but_welcome_is_compact(capsys):
     assert "/memory add" in COMMANDS
     assert "/context" in COMMANDS
+    assert "/collab" in COMMANDS
+    assert "/status" in COMMANDS
+    assert "/checkpoint" in COMMANDS
+    assert "默认单 Agent" in COMMANDS
     assert "输入 / 可打开命令列表" in COMMANDS
 
     _print_welcome("session-1", "approve")

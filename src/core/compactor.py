@@ -72,6 +72,8 @@ class CompactionMetadata(BaseModel):
     quality_passed: bool = False
     checkpoint_count: int = 0
     artifact_path: str = ""
+    protected_kept: int = 0
+    dropped_chitchat: int = 0
 
 
 class ContextCompactor:
@@ -86,6 +88,7 @@ class ContextCompactor:
         min_messages_to_compact: int = 10,
         artifact_dir: str | Path | None = None,
         task_checkpoint: str = "",
+        protect_paths: list[str] | None = None,
     ):
         self.gateway = gateway
         self.max_context_tokens = max_context_tokens
@@ -94,6 +97,7 @@ class ContextCompactor:
         self.min_messages_to_compact = min_messages_to_compact
         self.artifact_dir = Path(artifact_dir) if artifact_dir else None
         self.task_checkpoint = task_checkpoint.strip()
+        self.protect_paths = [item.replace("\\", "/") for item in (protect_paths or []) if item]
         self.last_metadata = CompactionMetadata()
 
     @property
@@ -146,6 +150,9 @@ class ContextCompactor:
             cut -= 1
         recent = compactable[cut:]
         old = compactable[:cut]
+        old, recent, protected_kept, dropped_chitchat = self._prefer_drop_chitchat(
+            old, recent
+        )
         if not old:
             return messages
 
@@ -208,8 +215,58 @@ class ContextCompactor:
             quality_passed=retention >= 0.9,
             checkpoint_count=len(checkpoints),
             artifact_path=artifact_path,
+            protected_kept=protected_kept,
+            dropped_chitchat=dropped_chitchat,
         )
         return result if self.last_metadata.applied else messages
+
+    def _is_protected(self, message: ChatMessage) -> bool:
+        """Keep failure logs and workset files in L2; do not pin ordinary tool I/O."""
+        text = self._message_compaction_text(message)
+        markers = (
+            "Traceback",
+            "AssertionError",
+            "验证失败",
+            "有界修复",
+            "退出码：",
+        )
+        if any(marker in text for marker in markers):
+            return True
+        lowered = text.replace("\\", "/")
+        return any(path and path in lowered for path in self.protect_paths)
+
+    def _is_chitchat(self, message: ChatMessage) -> bool:
+        if message.role == "system":
+            return False
+        if self._is_protected(message) or self._is_layer_message(message):
+            return False
+        return True
+
+    def _prefer_drop_chitchat(
+        self,
+        old: list[ChatMessage],
+        recent: list[ChatMessage],
+    ) -> tuple[list[ChatMessage], list[ChatMessage], int, int]:
+        """Keep failure logs in L2; compact old chitchat first."""
+        protected_old = [message for message in old if self._is_protected(message)]
+        chitchat_recent = [message for message in recent if self._is_chitchat(message)]
+        if not protected_old or not chitchat_recent:
+            return old, recent, len(protected_old), 0
+        new_old = list(old)
+        new_recent = list(recent)
+        moved = 0
+        for protected in reversed(protected_old):
+            chatter = next((item for item in chitchat_recent if item in new_recent), None)
+            if chatter is None:
+                break
+            chitchat_recent.remove(chatter)
+            new_recent.remove(chatter)
+            if protected in new_old:
+                new_old.remove(protected)
+            new_old.insert(0, chatter)
+            new_recent.insert(0, protected)
+            moved += 1
+        return new_old, new_recent, moved, moved
 
     @staticmethod
     def _is_layer_message(message: ChatMessage) -> bool:

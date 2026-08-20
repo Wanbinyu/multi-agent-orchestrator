@@ -15,7 +15,10 @@ import time
 from pathlib import Path
 from typing import Any, MutableMapping
 
+import yaml
 from pydantic import ValidationError
+
+from src.core.config_paths import resolve_workers_config_path
 
 from src.models.schemas import FrontendSmokeContract
 from src.tools.paths import resolve_path as _resolve_path
@@ -29,6 +32,7 @@ from src.tools.tool_result import ToolResult
 
 
 # 引入 memory_tools / web_tools / search_tools 以完成其注册
+import src.tools.git_tools  # noqa: F401
 import src.tools.memory_tools  # noqa: F401
 import src.tools.search_tools  # noqa: F401
 import src.tools.web_tools  # noqa: F401
@@ -120,6 +124,20 @@ DEFAULT_ALLOWED_PREFIXES = [
     "git log",
 ]
 
+# Conservative extras. Still no shell, no git push/reset, no interpreter -c.
+BUILTIN_EXTRA_PREFIXES = [
+    "ruff ",
+    "uv run ",
+    "uvx ",
+    "cargo test",
+    "cargo check",
+    "go test",
+]
+_DENIED_GIT_MUTATIONS = re.compile(
+    r"^git\s+(push|reset|clean|checkout|rebase|filter-branch|update-ref|commit)\b",
+    re.IGNORECASE,
+)
+
 # 解释器内联/预加载代码执行会绕过路径归属与 permission_rules，必须在 preflight 拒绝。
 _COMMAND_PREFLIGHT_ERRORS = {
     "empty_command",
@@ -127,6 +145,7 @@ _COMMAND_PREFLIGHT_ERRORS = {
     "shell_syntax",
     "inline_interpreter_code",
     "command_not_allowed",
+    "git_mutation_denied",
     "cwd_not_found",
     "cwd_not_directory",
     "temporary_output_unsupported",
@@ -144,12 +163,64 @@ COMMAND_PERMISSION_GUIDANCE = (
 )
 
 
-def _is_command_allowed(command: str, allowed_prefixes: list[str] | None) -> bool:
-    """检查命令是否以白名单前缀开头"""
-    if allowed_prefixes is None:
-        allowed_prefixes = DEFAULT_ALLOWED_PREFIXES
+def load_command_allowlist(config_dir: str | Path = "config") -> list[str]:
+    """Merge default prefixes with optional workers.yaml command_allowlist."""
+    prefixes = list(dict.fromkeys([*DEFAULT_ALLOWED_PREFIXES, *BUILTIN_EXTRA_PREFIXES]))
+    path = resolve_workers_config_path(Path(config_dir) / "workers.yaml")
+    if not path.exists():
+        return prefixes
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return prefixes
+    section = data.get("command_allowlist")
+    if not isinstance(section, dict):
+        return prefixes
+    extra = section.get("extra_prefixes") or []
+    if not isinstance(extra, list):
+        return prefixes
+    for item in extra:
+        text = str(item).strip()
+        if text:
+            prefixes.append(text)
+    return list(dict.fromkeys(prefixes))
+
+
+def _matches_discovered_command(command: str, cwd: str, base_dir: str) -> bool:
+    result = discover_project_commands(cwd, base_dir)
+    if not result.success:
+        return False
+    try:
+        payload = json.loads(result.output)
+    except json.JSONDecodeError:
+        return False
+    wanted = " ".join(command.split())
+    for item in payload.get("commands") or []:
+        if not isinstance(item, dict) or not item.get("available", True):
+            continue
+        discovered = " ".join(str(item.get("command", "")).split())
+        if discovered and discovered == wanted:
+            return True
+    return False
+
+
+def _is_command_allowed(
+    command: str,
+    allowed_prefixes: list[str] | None,
+    *,
+    cwd: str = ".",
+    base_dir: str = ".",
+) -> bool:
+    """Prefix allowlist plus exact match against discovered project scripts."""
     stripped = command.strip()
-    return any(stripped.startswith(prefix) for prefix in allowed_prefixes)
+    prefixes = (
+        list(allowed_prefixes)
+        if allowed_prefixes is not None
+        else load_command_allowlist()
+    )
+    if any(stripped.startswith(prefix) for prefix in prefixes):
+        return True
+    return _matches_discovered_command(stripped, cwd, base_dir)
 
 
 def command_correction_exhausted(state: MutableMapping[str, Any] | None) -> bool:
@@ -385,13 +456,16 @@ def discover_project_commands(path: str = ".", base_dir: str = ".") -> ToolResul
                 available, availability_note = _script_availability(
                     root, package, script
                 )
+                argv = _script_argv(manager, name)
+                command_text = " ".join(argv)
                 commands.append(
                     {
                         "name": name,
                         "purpose": purpose,
-                        "command": " ".join(_script_argv(manager, name)),
-                        "argv": _script_argv(manager, name),
+                        "command": command_text,
+                        "argv": argv,
                         "cwd": str(root),
+                        "run": {"command": command_text, "cwd": str(root)},
                         "source": "package.json",
                         "available": available,
                         "diagnostic": availability_note,
@@ -416,13 +490,15 @@ def discover_project_commands(path: str = ".", base_dir: str = ".") -> ToolResul
             or "[tool.pytest" in pyproject_text.casefold()
         )
         if has_python_tests:
+            pytest_command = "python -m pytest -q"
             commands.append(
                 {
                     "name": "pytest",
                     "purpose": "test",
-                    "command": "python -m pytest -q",
+                    "command": pytest_command,
                     "argv": ["python", "-m", "pytest", "-q"],
                     "cwd": str(root),
+                    "run": {"command": pytest_command, "cwd": str(root)},
                     "source": "python-project",
                     "available": True,
                     "diagnostic": "",
@@ -435,11 +511,26 @@ def discover_project_commands(path: str = ".", base_dir: str = ".") -> ToolResul
         purposes = {
             item["purpose"] for item in commands if item.get("available", True)
         }
+        suggested = next(
+            (
+                item["run"]
+                for item in commands
+                if item.get("available", True)
+                and item.get("purpose") in {"test", "lint", "typecheck"}
+                and item.get("run")
+            ),
+            None,
+        )
         payload = {
             "project_root": str(root),
             "commands": commands,
             "recommended_order": [item for item in _PURPOSE_ORDER if item in purposes],
+            "suggested_run": suggested,
             "diagnostics": diagnostics,
+            "usage": (
+                "把 suggested_run 或任一 commands[].run 交给 run_command；"
+                "不要改用 bash -c、管道或 cd &&。"
+            ),
         }
         return ToolResult(
             success=True,
@@ -510,14 +601,31 @@ def run_command(
                     suggested_params={"command": corrected, "cwd": inline_cwd},
                 ),
             )
+        if _DENIED_GIT_MUTATIONS.match(command):
+            return ToolResult(
+                success=False,
+                error=(
+                    "run_command 禁止 git push/reset/checkout/commit。"
+                    "查看状态用 git_status/git_diff/git_log；提交用 git_commit。"
+                ),
+                metadata=_command_metadata(
+                    cwd=cwd,
+                    error_code="git_mutation_denied",
+                    suggested_tool="git_commit",
+                    suggested_action="使用 git_commit，且不要 push",
+                ),
+            )
         if _contains_shell_syntax(command):
             return ToolResult(
                 success=False,
-                error="run_command 只接受单条命令，不支持管道、重定向、命令连接或后台执行。",
+                error=(
+                    "run_command 只接受单条命令，不支持管道、重定向、命令连接或后台执行。"
+                    "请改 command 或 cwd 参数，不要改用 bash -c。"
+                ),
                 metadata=_command_metadata(
                     cwd=cwd,
                     error_code="shell_syntax",
-                    suggested_action="使用结构化 cwd，并分别执行项目发现工具返回的单条命令",
+                    suggested_action="使用结构化 cwd，并分别执行 discover_project_commands 返回的单条命令；不要发明 bash -c",
                 ),
             )
         # Inline/preload interpreter checks run before the allowlist so that
@@ -535,18 +643,27 @@ def run_command(
                     suggested_action="先用 write_file 写入脚本文件，再 run_command 执行该脚本",
                 ),
             )
-        if not _is_command_allowed(command, allowed_prefixes):
+        if not _is_command_allowed(
+            command, allowed_prefixes, cwd=cwd, base_dir=base_dir
+        ):
+            preview = ", ".join(
+                (allowed_prefixes or load_command_allowlist())[:8]
+            )
             return ToolResult(
                 success=False,
                 error=(
                     f"命令不在白名单内：{command}。先调用 discover_project_commands，"
-                    "再选择其返回的命令；不要重复原调用。"
+                    "使用返回的 command 与 cwd；或在 config/workers.yaml 的 "
+                    "command_allowlist.extra_prefixes 追加前缀。"
+                    f"当前前缀示例：{preview}。不要改用 bash -c。"
                 ),
                 metadata=_command_metadata(
                     cwd=cwd,
                     error_code="command_not_allowed",
                     suggested_tool="discover_project_commands",
                     suggested_params={"path": cwd},
+                    suggested_action="改 command/cwd 以匹配已发现脚本，不要发明 bash -c 或管道",
+                    allowed_prefix_preview=preview,
                 ),
             )
 
@@ -746,6 +863,44 @@ def write_file(path: str, content: str, base_dir: str = ".") -> ToolResult:
         return ToolResult(success=False, error=str(e))
 
 
+def _edit_file_match_hint(
+    path: str, content: str, old_string: str, occurrences: int
+) -> str:
+    """Give line-level context so the model can retry edit_file without blind rewrite."""
+    lines = content.splitlines()
+    if occurrences == 0:
+        preview = "\n".join(
+            f"{index + 1}: {line}" for index, line in enumerate(lines[:8])
+        ) or "(空文件)"
+        return (
+            f"未在文件中找到指定文本：{path}。请提供文件中真实存在的片段，"
+            f"不要整文件盲写。文件开头预览：\n{preview}"
+        )
+    hits: list[str] = []
+    cursor = 0
+    while len(hits) < 5:
+        index = content.find(old_string, cursor)
+        if index < 0:
+            break
+        line_no = content.count("\n", 0, index) + 1
+        before = lines[line_no - 2] if line_no >= 2 else ""
+        current = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
+        after = lines[line_no] if line_no < len(lines) else ""
+        snippet = []
+        if before:
+            snippet.append(f"{line_no - 1}: {before}")
+        snippet.append(f"{line_no}: {current}")
+        if after:
+            snippet.append(f"{line_no + 1}: {after}")
+        hits.append("\n".join(snippet))
+        cursor = index + max(len(old_string), 1)
+    shown = "\n---\n".join(hits)
+    return (
+        f"指定文本在文件中出现 {occurrences} 次，不唯一；请提供更长上下文以精确定位，"
+        f"不要整文件盲写。匹配位置（最多 5 处）：\n{shown}"
+    )
+
+
 @tool_registry.register(
     name="edit_file",
     description="精确替换文件中的某段文本，old_string 必须在文件中唯一存在，避免误改",
@@ -778,11 +933,14 @@ def edit_file(path: str, old_string: str, new_string: str, base_dir: str = ".") 
 
         occurrences = content.count(old_string)
         if occurrences == 0:
-            return ToolResult(success=False, error=f"未在文件中找到指定文本：{path}")
+            return ToolResult(
+                success=False,
+                error=_edit_file_match_hint(path, content, old_string, occurrences),
+            )
         if occurrences > 1:
             return ToolResult(
                 success=False,
-                error=f"指定文本在文件中出现 {occurrences} 次，不唯一；请提供更长上下文以精确定位。",
+                error=_edit_file_match_hint(path, content, old_string, occurrences),
             )
 
         new_content = content.replace(old_string, new_string)
